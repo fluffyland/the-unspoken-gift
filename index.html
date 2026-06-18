@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Unspoken Gift — Curated Gift Boxes Singapore</title>
+  <meta name="description" content="Handcrafted, beautifully curated gift boxes for every celebration in Singapore — Hari Raya, Christmas, CNY, Mid-Autumn, birthdays & more."/>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+  </style>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --white:      #FFFFFF;
+      --blush:      #FDF6F0;
+      --blush-2:    #FBEEE4;
+      --rose:       #F2D9D0;
+      --peach:      #F7C5A8;
+      --gold:       #C8975A;
+      --gold-deep:  #A9762F;
+      --gold-light: #F0DFC4;
+      --deep:       #3B2A1A;
+      --mid:        #7A6050;
+      --light-text: #A89880;
+      --wa:         #25D366;
+      --border:     #EDE3DA;
+      --shadow-sm:  0 4px 18px rgba(60,42,26,0.08);
+      --shadow-md:  0 10px 34px rgba(60,42,26,0.12);
+      --shadow-lg:  0 22px 60px rgba(60,42,26,0.18);
+      --radius:     22px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--white);
+      color: var(--deep);
+      overflow-x: hidden;
+    }
+
+    em { font-style: italic; }
+
+    ::selection { background: var(--gold-light); color: var(--deep); }
+
+    /* ═══════════════════════════════ NAV ═══════════════════════════════ */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 200;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      height: 68px;
+      transition: box-shadow 0.3s, height 0.3s;
+    }
+    nav.scrolled { box-shadow: 0 6px 24px rgba(60,42,26,0.07); }
+
+    .nav-logo {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.9rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: var(--deep);
+      text-decoration: none;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .nav-logo em { font-style: italic; color: var(--gold); }
+
+    .nav-right { display: flex; align-items: center; gap: 24px; }
+
+    .nav-links { display: flex; gap: 26px; align-items: center; }
+    .nav-links a {
+      position: relative;
+      font-size: 0.84rem;
+      font-weight: 500;
+      color: var(--mid);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .nav-links a::after {
+      content: ''; position: absolute; left: 0; bottom: -5px;
+      width: 0; height: 1.5px; background: var(--gold); transition: width 0.25s;
+    }
+    .nav-links a:hover { color: var(--gold); }
+    .nav-links a:hover::after { width: 100%; }
+
+    /* cart button */
+    .cart-btn {
+      position: relative;
+      width: 42px; height: 42px;
+      border: 1px solid var(--border);
+      background: var(--white);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s, border-color 0.2s, transform 0.2s;
+      flex-shrink: 0;
+    }
+    .cart-btn:hover { background: var(--blush); border-color: var(--gold); transform: translateY(-2px); }
+    .cart-btn svg { width: 20px; height: 20px; stroke: var(--deep); fill: none; stroke-width: 1.7; }
+    .cart-count {
+      position: absolute; top: -6px; right: -6px;
+      min-width: 20px; height: 20px; padding: 0 5px;
+      background: var(--gold); color: #fff;
+      font-size: 0.66rem; font-weight: 700;
+      border-radius: 100px;
+      display: flex; align-items: center; justify-content: center;
+      transform: scale(0); transition: transform 0.25s cubic-bezier(.34,1.56,.64,1);
+      border: 2px solid #fff;
+    }
+    .cart-count.show { transform: scale(1); }
+    .cart-btn.bump { animation: bump 0.4s; }
+    @keyframes bump { 0%,100%{transform:translateY(0) scale(1);} 40%{transform:translateY(-2px) scale(1.12);} }
+
+    /* hamburger */
+    .hamburger {
+      display: flex; flex-direction: column; justify-content: center; gap: 5px;
+      width: 40px; height: 40px; cursor: pointer;
+      background: none; border: none; padding: 6px; border-radius: 8px;
+      transition: background 0.2s; flex-shrink: 0;
+    }
+    .hamburger:hover { background: var(--blush); }
+    .hamburger span {
+      display: block; height: 1.5px; background: var(--deep);
+      border-radius: 2px; transition: all 0.3s ease; transform-origin: center;
+    }
+    .hamburger span:nth-child(1) { width: 22px; }
+    .hamburger span:nth-child(2) { width: 16px; }
+    .hamburger span:nth-child(3) { width: 22px; }
+    .hamburger.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); width: 22px; }
+    .hamburger.open span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+    .hamburger.open span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); width: 22px; }
+
+    /* ═══════════════════════════════ OVERLAY ═══════════════════════════════ */
+    .menu-overlay {
+      position: fixed; inset: 0;
+      background: rgba(30,18,8,0.38);
+      backdrop-filter: blur(3px);
+      z-index: 299; opacity: 0; pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    .menu-overlay.show { opacity: 1; pointer-events: auto; }
+
+    /* ═══════════════════════════════ SIDE DRAWER ═══════════════════════════════ */
+    .side-menu {
+      position: fixed; top: 0; left: 0; bottom: 0;
+      width: 340px; max-width: 86vw;
+      background: var(--white); z-index: 300;
+      transform: translateX(-104%);
+      transition: transform 0.42s cubic-bezier(.5,.1,.2,1);
+      display: flex; flex-direction: column;
+      box-shadow: 0 0 50px rgba(60,42,26,0.18);
+    }
+    .side-menu.open { transform: translateX(0); }
+    .side-menu-top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 24px; border-bottom: 1px solid var(--border);
+    }
+    .side-menu-brand { font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; font-weight: 500; }
+    .side-menu-brand em { color: var(--gold); }
+    .side-menu-close {
+      width: 34px; height: 34px; border: none; background: var(--blush);
+      border-radius: 50%; cursor: pointer; font-size: 0.9rem; color: var(--mid);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .side-menu-close:hover { background: var(--rose); transform: rotate(90deg); }
+    .side-menu-links { flex: 1; overflow-y: auto; padding: 20px 16px; }
+    .side-menu-section {
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--light-text); padding: 8px 12px 10px;
+    }
+    .side-menu-item {
+      display: flex; align-items: center; gap: 14px; width: 100%;
+      padding: 12px; border: none; background: none; cursor: pointer;
+      border-radius: 14px; text-align: left; transition: background 0.2s;
+    }
+    .side-menu-item:hover { background: var(--blush); }
+    .side-menu-item-icon {
+      width: 44px; height: 44px; flex-shrink: 0; border-radius: 12px;
+      background: var(--blush-2); display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+    }
+    .side-menu-item-text strong { display: block; font-size: 0.92rem; font-weight: 600; color: var(--deep); }
+    .side-menu-item-text span { font-size: 0.76rem; color: var(--light-text); }
+    .side-menu-divider { height: 1px; background: var(--border); margin: 14px 12px; }
+    .side-menu-footer { padding: 18px 20px; border-top: 1px solid var(--border); }
+    .side-menu-wa, .btn-wa {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      background: var(--wa); color: #fff; text-decoration: none;
+      padding: 14px; border-radius: 100px; font-weight: 600; font-size: 0.9rem;
+      transition: transform 0.2s, box-shadow 0.2s; border: none; cursor: pointer;
+    }
+    .side-menu-wa:hover, .btn-wa:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(37,211,102,0.35); }
+    .side-menu-wa svg, .btn-wa svg { width: 18px; height: 18px; fill: #fff; }
+
+    /* ═══════════════════════════════ CART DRAWER ═══════════════════════════════ */
+    .cart-drawer {
+      position: fixed; top: 0; right: 0; bottom: 0;
+      width: 420px; max-width: 92vw;
+      background: var(--white); z-index: 300;
+      transform: translateX(104%);
+      transition: transform 0.42s cubic-bezier(.5,.1,.2,1);
+      display: flex; flex-direction: column;
+      box-shadow: 0 0 50px rgba(60,42,26,0.18);
+    }
+    .cart-drawer.open { transform: translateX(0); }
+    .cart-top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 24px; border-bottom: 1px solid var(--border);
+    }
+    .cart-top h3 { font-family: 'Cormorant Garamond', serif; font-size: 1.6rem; font-weight: 500; }
+    .cart-top h3 em { color: var(--gold); }
+    .cart-body { flex: 1; overflow-y: auto; padding: 18px 22px; }
+
+    .cart-empty { text-align: center; padding: 60px 20px; color: var(--light-text); }
+    .cart-empty-emoji { font-size: 3rem; display: block; margin-bottom: 14px; opacity: 0.8; }
+    .cart-empty p { font-size: 0.9rem; }
+
+    .cart-item {
+      display: flex; gap: 14px; padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+      animation: fadeUp 0.35s ease both;
+    }
+    .cart-item-img {
+      width: 64px; height: 64px; flex-shrink: 0; border-radius: 14px;
+      background-size: cover; background-position: center; background-color: var(--blush-2);
+    }
+    .cart-item-mid { flex: 1; min-width: 0; }
+    .cart-item-name { font-size: 0.88rem; font-weight: 600; color: var(--deep); line-height: 1.3; }
+    .cart-item-price { font-size: 0.8rem; color: var(--gold); font-weight: 600; margin-top: 2px; }
+    .cart-qty { display: inline-flex; align-items: center; gap: 0; margin-top: 8px; border: 1px solid var(--border); border-radius: 100px; overflow: hidden; }
+    .cart-qty button {
+      width: 28px; height: 28px; border: none; background: var(--blush);
+      cursor: pointer; font-size: 1rem; color: var(--deep); line-height: 1;
+      transition: background 0.15s;
+    }
+    .cart-qty button:hover { background: var(--rose); }
+    .cart-qty span { min-width: 30px; text-align: center; font-size: 0.85rem; font-weight: 600; }
+    .cart-item-remove {
+      align-self: flex-start; background: none; border: none; cursor: pointer;
+      color: var(--light-text); font-size: 0.72rem; padding: 4px; transition: color 0.2s;
+    }
+    .cart-item-remove:hover { color: #C0392B; }
+
+    .cart-foot { border-top: 1px solid var(--border); padding: 18px 22px 22px; background: var(--blush); }
+    .cart-subtotal { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+    .cart-subtotal strong { font-size: 1.15rem; color: var(--deep); }
+    .cart-subtotal span:first-child { font-size: 0.92rem; color: var(--mid); }
+    .cart-note { font-size: 0.72rem; color: var(--light-text); margin-bottom: 16px; line-height: 1.5; }
+
+    .cart-form { display: grid; gap: 10px; margin-bottom: 16px; }
+    .cart-form label { font-size: 0.72rem; font-weight: 600; color: var(--mid); margin-bottom: 2px; display: block; }
+    .cart-form input, .cart-form textarea {
+      width: 100%; padding: 11px 14px; border: 1.5px solid var(--border);
+      border-radius: 12px; font-family: 'DM Sans', sans-serif; font-size: 0.86rem;
+      color: var(--deep); background: var(--white); outline: none; resize: vertical;
+      transition: border-color 0.2s;
+    }
+    .cart-form input:focus, .cart-form textarea:focus { border-color: var(--gold); }
+    .cart-form .field-row { display: flex; gap: 10px; }
+    .cart-form .field-row > div { flex: 1; }
+    .form-error { font-size: 0.72rem; color: #C0392B; min-height: 1em; margin-top: 2px; }
+
+    .btn-clear {
+      width: 100%; margin-top: 10px; background: none; border: none;
+      color: var(--light-text); font-size: 0.78rem; cursor: pointer; padding: 6px;
+      transition: color 0.2s;
+    }
+    .btn-clear:hover { color: var(--mid); }
+
+    /* ═══════════════════════════════ INFO PAGES ═══════════════════════════════ */
+    .info-page {
+      position: fixed; inset: 0; z-index: 310; background: var(--white);
+      overflow-y: auto; opacity: 0; pointer-events: none;
+      transform: translateY(20px); transition: opacity 0.3s, transform 0.3s;
+    }
+    .info-page.open { opacity: 1; pointer-events: auto; transform: translateY(0); }
+    .info-page-inner { max-width: 720px; margin: 0 auto; padding: 90px 28px 80px; }
+    .info-back {
+      background: var(--blush); border: 1px solid var(--border); color: var(--mid);
+      font-size: 0.84rem; font-weight: 500; padding: 8px 18px; border-radius: 100px;
+      cursor: pointer; margin-bottom: 28px; transition: background 0.2s, transform 0.2s;
+    }
+    .info-back:hover { background: var(--rose); transform: translateX(-3px); }
+    .info-eyebrow {
+      display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--gold); margin-bottom: 14px;
+    }
+    .info-title { font-family: 'Cormorant Garamond', serif; font-size: 2.8rem; font-weight: 400; line-height: 1.1; margin-bottom: 30px; }
+    .info-title em { color: var(--gold); }
+    .info-body p { font-size: 1rem; line-height: 1.85; color: var(--mid); font-weight: 300; margin-bottom: 18px; }
+    .info-body h3 { font-family: 'Cormorant Garamond', serif; font-size: 1.7rem; font-weight: 500; margin: 36px 0 16px; }
+    .info-body h3 em { color: var(--gold); }
+
+    .faq-item { border-bottom: 1px solid var(--border); }
+    .faq-q {
+      width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      background: none; border: none; cursor: pointer; padding: 20px 0; text-align: left;
+      font-family: 'DM Sans', sans-serif; font-size: 0.98rem; font-weight: 500; color: var(--deep);
+    }
+    .faq-chevron { color: var(--gold); transition: transform 0.3s; font-size: 0.7rem; }
+    .faq-item.open .faq-chevron { transform: rotate(180deg); }
+    .faq-a { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; font-size: 0.92rem; line-height: 1.75; color: var(--mid); font-weight: 300; }
+    .faq-item.open .faq-a { max-height: 320px; padding-bottom: 20px; }
+
+    .custom-step { display: flex; gap: 18px; margin-bottom: 22px; align-items: flex-start; }
+    .custom-step-num {
+      width: 38px; height: 38px; flex-shrink: 0; border-radius: 50%;
+      background: var(--gold-light); color: var(--gold-deep); font-weight: 700;
+      display: flex; align-items: center; justify-content: center; font-size: 0.95rem;
+    }
+    .custom-step-text strong { display: block; font-size: 1rem; color: var(--deep); margin-bottom: 4px; }
+    .custom-step-text span { font-size: 0.92rem; line-height: 1.7; color: var(--mid); font-weight: 300; }
+
+    /* ═══════════════════════════════ PAGES ═══════════════════════════════ */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ═══════════════════════════════ HERO ═══════════════════════════════ */
+    .hero {
+      position: relative;
+      padding: 132px 32px 70px;
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 40px;
+      align-items: center;
+      max-width: 1240px; margin: 0 auto;
+      overflow: hidden;
+    }
+    .hero-bg { position: absolute; inset: 0; z-index: -1; overflow: hidden; }
+    .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.55; }
+    .blob-1 { width: 460px; height: 460px; background: radial-gradient(circle, #F7C5A8, transparent 70%); top: -120px; left: -100px; animation: float1 16s ease-in-out infinite; }
+    .blob-2 { width: 420px; height: 420px; background: radial-gradient(circle, #F0DFC4, transparent 70%); bottom: -140px; right: -60px; animation: float2 19s ease-in-out infinite; }
+    .blob-3 { width: 300px; height: 300px; background: radial-gradient(circle, #F2D9D0, transparent 70%); top: 40%; left: 45%; animation: float1 22s ease-in-out infinite; }
+    @keyframes float1 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(40px,30px) scale(1.08);} }
+    @keyframes float2 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-36px,-26px) scale(1.1);} }
+
+    .hero-left { position: relative; z-index: 2; }
+    .hero-tag {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.7); border: 1px solid var(--gold-light);
+      color: var(--gold-deep); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.04em;
+      padding: 8px 16px; border-radius: 100px; margin-bottom: 24px;
+      animation: fadeUp 0.7s ease both;
+    }
+    .hero-tag::before { content: '✦'; color: var(--gold); }
+    .hero-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(2.6rem, 5.2vw, 4.1rem);
+      font-weight: 400; line-height: 1.06; letter-spacing: -0.01em;
+      margin-bottom: 22px;
+    }
+    .hero-title em { color: var(--gold); font-style: italic; }
+    .hero-title .line { display: block; animation: fadeUp 0.8s ease both; }
+    .hero-title .line:nth-child(2) { animation-delay: 0.12s; }
+    .hero-sub {
+      font-size: 1.05rem; line-height: 1.7; color: var(--mid); font-weight: 300;
+      max-width: 460px; margin-bottom: 30px; animation: fadeUp 0.8s ease 0.24s both;
+    }
+
+    /* SEARCH */
+    .search-wrap { position: relative; max-width: 480px; margin-bottom: 18px; animation: fadeUp 0.8s ease 0.34s both; }
+    .search-input {
+      width: 100%; padding: 17px 58px 17px 22px; border: 1.5px solid var(--border);
+      border-radius: 100px; font-family: 'DM Sans', sans-serif; font-size: 0.92rem;
+      color: var(--deep); background: var(--white); outline: none; box-shadow: var(--shadow-sm);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .search-input::placeholder { color: var(--light-text); }
+    .search-input:focus { border-color: var(--gold); box-shadow: 0 4px 30px rgba(200,151,90,0.18); }
+    .search-btn {
+      position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+      background: var(--gold); border: none; width: 42px; height: 42px; border-radius: 50%;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s, transform 0.2s;
+    }
+    .search-btn:hover { background: var(--deep); transform: translateY(-50%) scale(1.08); }
+    .search-btn svg { width: 18px; height: 18px; }
+    .search-results {
+      position: absolute; top: calc(100% + 8px); left: 0; right: 0;
+      background: var(--white); border: 1.5px solid var(--border); border-radius: 18px;
+      box-shadow: var(--shadow-md); overflow: hidden; z-index: 30; display: none;
+    }
+    .search-results.show { display: block; }
+    .search-result-item {
+      display: flex; align-items: center; gap: 14px; padding: 12px 18px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .search-result-item:hover { background: var(--blush); }
+    .search-result-item:not(:last-child) { border-bottom: 1px solid var(--border); }
+    .sri-img { width: 44px; height: 44px; border-radius: 10px; background-size: cover; background-position: center; flex-shrink: 0; background-color: var(--blush-2); }
+    .sri-info strong { display: block; font-size: 0.86rem; color: var(--deep); }
+    .sri-info span { font-size: 0.75rem; color: var(--light-text); }
+
+    .search-suggestions { display: flex; gap: 9px; flex-wrap: wrap; animation: fadeUp 0.8s ease 0.44s both; }
+    .search-chip {
+      background: var(--white); border: 1px solid var(--border); color: var(--mid);
+      font-size: 0.78rem; padding: 7px 15px; border-radius: 100px; cursor: pointer;
+      transition: all 0.2s; font-family: 'DM Sans', sans-serif;
+    }
+    .search-chip:hover { background: var(--gold-light); border-color: var(--gold); color: var(--gold-deep); transform: translateY(-2px); }
+
+    /* HERO COLLAGE */
+    .hero-collage { position: relative; z-index: 2; height: 480px; }
+    .hero-photo {
+      position: absolute; border-radius: 20px; overflow: hidden;
+      box-shadow: var(--shadow-lg); background-size: cover; background-position: center;
+      background-color: var(--blush-2);
+    }
+    .hp-1 { width: 58%; height: 64%; top: 0; right: 4%; z-index: 3; animation: floatPhoto 7s ease-in-out infinite; }
+    .hp-2 { width: 46%; height: 50%; bottom: 0; left: 0; z-index: 4; animation: floatPhoto 8s ease-in-out 0.6s infinite; }
+    .hp-3 { width: 38%; height: 38%; bottom: 8%; right: 0; z-index: 5; animation: floatPhoto 9s ease-in-out 1.2s infinite; }
+    @keyframes floatPhoto { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-14px);} }
+    .hero-photo::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(160deg, transparent 55%, rgba(59,42,26,0.12));
+    }
+    .hero-badge {
+      position: absolute; z-index: 6; bottom: 26%; left: -6%;
+      background: #fff; border-radius: 16px; padding: 12px 16px; box-shadow: var(--shadow-md);
+      display: flex; align-items: center; gap: 10px; animation: floatPhoto 6s ease-in-out 0.3s infinite;
+    }
+    .hero-badge .hb-emoji { font-size: 1.5rem; }
+    .hero-badge .hb-text strong { display: block; font-size: 0.82rem; color: var(--deep); }
+    .hero-badge .hb-text span { font-size: 0.7rem; color: var(--light-text); }
+
+    .sparkle { position: absolute; color: var(--gold); opacity: 0.5; animation: twinkle 3s ease-in-out infinite; pointer-events: none; z-index: 1; }
+    @keyframes twinkle { 0%,100%{opacity:0.2; transform:scale(0.8);} 50%{opacity:0.7; transform:scale(1.15);} }
+
+    /* ═══════════════════════════════ SAMPLES ═══════════════════════════════ */
+    .samples { padding: 56px 0 64px; background: var(--white); overflow: hidden; }
+    .samples-label {
+      text-align: center; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--light-text); margin-bottom: 26px;
+    }
+    .samples-track {
+      display: flex; gap: 20px; padding: 8px 32px 20px; overflow-x: auto;
+      scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .samples-track::-webkit-scrollbar { display: none; }
+    .samples-track::after { content: ''; flex-shrink: 0; width: 12px; }
+    .sample-card {
+      flex-shrink: 0; width: 264px; border-radius: 20px; overflow: hidden;
+      scroll-snap-align: start; position: relative; box-shadow: var(--shadow-sm);
+      cursor: pointer; transition: transform 0.3s, box-shadow 0.3s; background: var(--white);
+    }
+    .sample-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); }
+    .sample-img { width: 100%; height: 250px; overflow: hidden; background-color: var(--blush-2); background-size: cover; background-position: center; }
+    .sample-card:hover .sample-img { transform: scale(1.06); }
+    .sample-img { transition: transform 0.5s; }
+    .sample-info { padding: 14px 16px 16px; background: var(--white); border-top: 1px solid var(--border); }
+    .sample-info strong { display: block; font-size: 0.9rem; font-weight: 600; color: var(--deep); margin-bottom: 5px; }
+    .sample-info span { font-size: 0.82rem; color: var(--gold); font-weight: 700; }
+    .sample-tag {
+      position: absolute; top: 13px; left: 13px;
+      background: rgba(255,255,255,0.92); color: var(--gold-deep);
+      font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 5px 12px; border-radius: 100px; backdrop-filter: blur(4px);
+    }
+
+    /* ═══════════════════════════════ SECTION HEADS ═══════════════════════════════ */
+    .section-head { text-align: center; margin-bottom: 44px; }
+    .section-eyebrow {
+      display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--gold); margin-bottom: 12px;
+    }
+    .section-title { font-family: 'Cormorant Garamond', serif; font-size: clamp(2rem, 4vw, 2.9rem); font-weight: 400; line-height: 1.12; }
+    .section-title em { color: var(--gold); }
+
+    /* ═══════════════════════════════ OCCASIONS ═══════════════════════════════ */
+    .occasions { padding: 70px 32px 80px; background: var(--blush); }
+    .occasions-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px; max-width: 1080px; margin: 0 auto;
+    }
+    .occ-btn {
+      background: var(--white); border: 1px solid var(--border); border-radius: 18px;
+      padding: 28px 16px; cursor: pointer; display: flex; flex-direction: column;
+      align-items: center; gap: 8px; transition: transform 0.28s, box-shadow 0.28s, border-color 0.28s;
+      font-family: inherit;
+    }
+    .occ-btn:hover { transform: translateY(-6px); box-shadow: var(--shadow-md); border-color: var(--gold-light); }
+    .occ-icon {
+      width: 64px; height: 64px; border-radius: 50%; background: var(--blush-2);
+      display: flex; align-items: center; justify-content: center; font-size: 2rem;
+      transition: transform 0.28s;
+    }
+    .occ-btn:hover .occ-icon { transform: scale(1.1) rotate(-6deg); }
+    .occ-name { font-size: 0.92rem; font-weight: 600; color: var(--deep); }
+    .occ-count { font-size: 0.74rem; color: var(--light-text); }
+
+    /* ═══════════════════════════════ ALL PRODUCTS ═══════════════════════════════ */
+    .all-products { padding: 76px 32px 84px; background: var(--white); }
+    .filter-tabs {
+      display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+      margin-bottom: 36px; max-width: 940px; margin-left: auto; margin-right: auto;
+    }
+    .filter-tab {
+      background: var(--white); border: 1px solid var(--border); color: var(--mid);
+      font-size: 0.82rem; font-weight: 500; padding: 9px 18px; border-radius: 100px;
+      cursor: pointer; transition: all 0.2s; font-family: inherit;
+    }
+    .filter-tab:hover { border-color: var(--gold); color: var(--gold-deep); }
+    .filter-tab.active { background: var(--deep); color: #fff; border-color: var(--deep); }
+
+    .overview-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 22px; max-width: 1160px; margin: 0 auto;
+    }
+    .ov-card {
+      background: var(--white); border: 1px solid var(--border); border-radius: 18px;
+      overflow: hidden; cursor: pointer; transition: transform 0.28s, box-shadow 0.28s;
+      display: flex; flex-direction: column;
+    }
+    .ov-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-md); }
+    .ov-card-img { height: 180px; background-size: cover; background-position: center; background-color: var(--blush-2); position: relative; overflow: hidden; }
+    .ov-card-img .ov-img-inner { position: absolute; inset: 0; background-size: cover; background-position: center; transition: transform 0.5s; }
+    .ov-card:hover .ov-img-inner { transform: scale(1.07); }
+    .ov-occ-tag {
+      position: absolute; top: 12px; left: 12px; z-index: 2;
+      background: rgba(255,255,255,0.92); backdrop-filter: blur(4px);
+      font-size: 0.68rem; font-weight: 600; color: var(--gold-deep);
+      padding: 4px 11px; border-radius: 100px;
+    }
+    .ov-card-body { padding: 16px; display: flex; flex-direction: column; flex: 1; }
+    .ov-card-name { font-size: 0.95rem; font-weight: 600; color: var(--deep); margin-bottom: 6px; line-height: 1.35; }
+    .ov-card-price { font-size: 0.88rem; color: var(--gold); font-weight: 700; margin-bottom: 14px; }
+    .ov-add {
+      margin-top: auto; width: 100%; border: 1.5px solid var(--gold); background: var(--white);
+      color: var(--gold-deep); font-weight: 600; font-size: 0.82rem; padding: 10px;
+      border-radius: 100px; cursor: pointer; transition: all 0.2s; font-family: inherit;
+    }
+    .ov-add:hover { background: var(--gold); color: #fff; }
+
+    /* ═══════════════════════════════ TESTIMONIALS ═══════════════════════════════ */
+    .testimonials { padding: 76px 32px 84px; background: var(--blush); }
+    .testi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px; max-width: 1080px; margin: 0 auto; }
+    .testi-card { background: var(--white); border: 1px solid var(--border); border-radius: 18px; padding: 28px 26px; box-shadow: var(--shadow-sm); }
+    .testi-stars { color: var(--gold); font-size: 0.95rem; letter-spacing: 2px; margin-bottom: 14px; }
+    .testi-text { font-family: 'Cormorant Garamond', serif; font-size: 1.18rem; font-style: italic; line-height: 1.55; color: var(--deep); margin-bottom: 18px; }
+    .testi-author { display: flex; align-items: center; gap: 12px; }
+    .testi-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--gold-light); color: var(--gold-deep); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; }
+    .testi-author strong { display: block; font-size: 0.86rem; color: var(--deep); }
+    .testi-author span { font-size: 0.76rem; color: var(--light-text); }
+
+    /* ═══════════════════════════════ HOW IT WORKS ═══════════════════════════════ */
+    .how { padding: 76px 32px 84px; background: var(--white); }
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 30px; max-width: 980px; margin: 0 auto; }
+    .step { text-align: center; }
+    .step-circle {
+      width: 60px; height: 60px; border-radius: 50%; margin: 0 auto 18px;
+      background: var(--gold-light); color: var(--gold-deep); font-family: 'Cormorant Garamond', serif;
+      font-size: 1.6rem; font-weight: 600; display: flex; align-items: center; justify-content: center;
+    }
+    .step-title { font-size: 1.1rem; font-weight: 600; color: var(--deep); margin-bottom: 10px; }
+    .step-desc { font-size: 0.92rem; line-height: 1.7; color: var(--mid); font-weight: 300; max-width: 280px; margin: 0 auto; }
+
+    /* ═══════════════════════════════ FINAL CTA ═══════════════════════════════ */
+    .final-cta { padding: 84px 32px 96px; text-align: center; background: linear-gradient(180deg, var(--blush), var(--white)); }
+    .final-cta .btn-wa { display: inline-flex; margin-top: 28px; padding: 15px 30px; }
+
+    footer { padding: 36px 32px; text-align: center; font-size: 0.82rem; color: var(--light-text); background: var(--deep); }
+    footer em { color: var(--gold); font-style: italic; }
+
+    /* ═══════════════════════════════ OCCASION PAGE ═══════════════════════════════ */
+    .occ-page-hero { padding: 120px 32px 50px; text-align: center; background: var(--blush); }
+    .occ-back {
+      background: var(--white); border: 1px solid var(--border); color: var(--mid);
+      font-size: 0.84rem; font-weight: 500; padding: 8px 18px; border-radius: 100px;
+      cursor: pointer; margin-bottom: 26px; transition: background 0.2s, transform 0.2s;
+    }
+    .occ-back:hover { background: var(--rose); transform: translateX(-3px); }
+    .occ-page-emoji { font-size: 3.4rem; display: block; margin-bottom: 14px; }
+    .occ-page-title { font-family: 'Cormorant Garamond', serif; font-size: clamp(2.2rem, 5vw, 3.2rem); font-weight: 400; line-height: 1.1; margin-bottom: 16px; }
+    .occ-page-title em { color: var(--gold); }
+    .occ-page-sub { font-size: 1rem; line-height: 1.7; color: var(--mid); font-weight: 300; max-width: 540px; margin: 0 auto; }
+    .occ-page-body { max-width: 1160px; margin: 0 auto; padding: 50px 32px 60px; }
+    .occ-category-title { font-family: 'Cormorant Garamond', serif; font-size: 1.8rem; font-weight: 500; margin: 36px 0 22px; }
+    .occ-category-title:first-child { margin-top: 0; }
+    .boxes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; }
+    .box-card {
+      background: var(--white); border: 1px solid var(--border); border-radius: 18px;
+      overflow: hidden; transition: transform 0.28s, box-shadow 0.28s; display: flex; flex-direction: column;
+    }
+    .box-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-md); }
+    .box-card-img { height: 190px; background-size: cover; background-position: center; background-color: var(--blush-2); overflow: hidden; position: relative; }
+    .box-card-img .bc-inner { position: absolute; inset: 0; background-size: cover; background-position: center; transition: transform 0.5s; }
+    .box-card:hover .bc-inner { transform: scale(1.07); }
+    .box-card-body { padding: 20px; display: flex; flex-direction: column; flex: 1; }
+    .box-card-name { font-size: 1.05rem; font-weight: 600; color: var(--deep); margin-bottom: 8px; }
+    .box-card-desc { font-size: 0.86rem; line-height: 1.6; color: var(--mid); font-weight: 300; margin-bottom: 14px; flex: 1; }
+    .box-card-price { font-size: 0.95rem; color: var(--gold); font-weight: 700; margin-bottom: 14px; }
+    .box-add {
+      width: 100%; border: 1.5px solid var(--gold); background: var(--white); color: var(--gold-deep);
+      font-weight: 600; font-size: 0.85rem; padding: 11px; border-radius: 100px; cursor: pointer;
+      transition: all 0.2s; font-family: inherit;
+    }
+    .box-add:hover { background: var(--gold); color: #fff; }
+    .occ-page-cta { text-align: center; padding: 0 32px 80px; }
+    .occ-page-cta .btn-wa { display: inline-flex; padding: 15px 30px; }
+
+    /* ═══════════════════════════════ REVEAL ═══════════════════════════════ */
+    .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.7s ease, transform 0.7s cubic-bezier(.2,.7,.3,1); transition-delay: calc(var(--i, 0) * 70ms); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* toast */
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(40px);
+      background: var(--deep); color: #fff; padding: 13px 24px; border-radius: 100px;
+      font-size: 0.86rem; font-weight: 500; z-index: 400; opacity: 0; pointer-events: none;
+      transition: opacity 0.3s, transform 0.3s; box-shadow: var(--shadow-lg);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ═══════════════════════════════ RESPONSIVE ═══════════════════════════════ */
+    @media (max-width: 880px) {
+      nav { padding: 0 20px; }
+      .nav-links { display: none; }
+      .hero { grid-template-columns: 1fr; padding: 116px 22px 50px; gap: 30px; }
+      .hero-left { text-align: center; }
+      .hero-sub { margin-left: auto; margin-right: auto; }
+      .search-wrap { margin-left: auto; margin-right: auto; }
+      .search-suggestions { justify-content: center; }
+      .hero-collage { height: 360px; max-width: 440px; margin: 0 auto; }
+      .occasions, .all-products, .how, .testimonials, .final-cta { padding-left: 20px; padding-right: 20px; }
+    }
+    @media (max-width: 560px) {
+      .hero-collage { display: none; }
+      .info-title { font-size: 2.2rem; }
+      .cart-form .field-row { flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition-duration: 0.01ms !important; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════ NAV ══════════ -->
+<nav id="mainNav">
+  <button class="hamburger" id="hamburgerBtn" onclick="toggleMenu()" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
+  <a href="#" class="nav-logo" onclick="showPage('home'); return false;">The Unspoken <em>Gift</em></a>
+  <div class="nav-right">
+    <div class="nav-links">
+      <a href="#" onclick="showPage('home'); scrollToEl('occasions-section'); return false;">Collections</a>
+      <a href="#" onclick="showPage('home'); scrollToEl('how-section'); return false;">How It Works</a>
+      <a href="https://wa.me/6598857721?text=Hi!%20I%27d%20like%20to%20enquire%20about%20a%20gift%20box%20%F0%9F%8E%81" target="_blank">Contact</a>
+    </div>
+    <button class="cart-btn" id="cartBtn" onclick="openCart()" aria-label="Cart">
+      <svg viewBox="0 0 24 24"><path d="M6 6h15l-1.5 9h-12z" stroke-linejoin="round" stroke-linecap="round"/><path d="M6 6L5 3H3" stroke-linecap="round"/><circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/></svg>
+      <span class="cart-count" id="cartCount">0</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ══════════ OVERLAY ══════════ -->
+<div class="menu-overlay" id="menuOverlay" onclick="closePanels()"></div>
+
+<!-- ══════════ SIDE DRAWER ══════════ -->
+<div class="side-menu" id="sideMenu">
+  <div class="side-menu-top">
+    <span class="side-menu-brand">The Unspoken <em>Gift</em></span>
+    <button class="side-menu-close" onclick="toggleMenu()">✕</button>
+  </div>
+  <div class="side-menu-links">
+    <div class="side-menu-section">Explore</div>
+    <button class="side-menu-item" onclick="openInfoPage('story')">
+      <div class="side-menu-item-icon">🌿</div>
+      <div class="side-menu-item-text"><strong>Our Story</strong><span>Who we are & why we gift</span></div>
+    </button>
+    <button class="side-menu-item" onclick="openInfoPage('faq')">
+      <div class="side-menu-item-icon">💬</div>
+      <div class="side-menu-item-text"><strong>FAQ</strong><span>Common questions answered</span></div>
+    </button>
+    <button class="side-menu-item" onclick="openInfoPage('customising')">
+      <div class="side-menu-item-icon">✏️</div>
+      <div class="side-menu-item-text"><strong>Designing & Customising</strong><span>How to personalise your box</span></div>
+    </button>
+    <div class="side-menu-divider"></div>
+    <div class="side-menu-section">Shop</div>
+    <button class="side-menu-item" onclick="showPage('home'); scrollToEl('occasions-section'); closePanels();">
+      <div class="side-menu-item-icon">🎁</div>
+      <div class="side-menu-item-text"><strong>Collections</strong><span>Browse by occasion</span></div>
+    </button>
+    <button class="side-menu-item" onclick="showPage('home'); scrollToEl('all-products-section'); closePanels();">
+      <div class="side-menu-item-icon">📦</div>
+      <div class="side-menu-item-text"><strong>All Gift Boxes</strong><span>See everything we offer</span></div>
+    </button>
+  </div>
+  <div class="side-menu-footer">
+    <a href="https://wa.me/6598857721?text=Hi!%20I%27d%20like%20to%20enquire%20about%20a%20gift%20box%20%F0%9F%8E%81" class="side-menu-wa" target="_blank">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Chat with us
+    </a>
+  </div>
+</div>
+
+<!-- ══════════ CART DRAWER ══════════ -->
+<div class="cart-drawer" id="cartDrawer">
+  <div class="cart-top">
+    <h3>Your <em>Cart</em></h3>
+    <button class="side-menu-close" onclick="closePanels()">✕</button>
+  </div>
+  <div class="cart-body" id="cartBody"></div>
+  <div class="cart-foot" id="cartFoot" style="display:none;">
+    <div class="cart-subtotal"><span>Estimated subtotal</span><strong id="cartSubtotal">$0</strong></div>
+    <p class="cart-note">Prices start "from" the listed amount — your final quote is confirmed on WhatsApp once we know your customisations.</p>
+    <div class="cart-form">
+      <div>
+        <label>Your name *</label>
+        <input type="text" id="formName" placeholder="e.g. Aisha"/>
+      </div>
+      <div class="field-row">
+        <div>
+          <label>Contact *</label>
+          <input type="text" id="formContact" placeholder="Phone / @handle"/>
+        </div>
+        <div>
+          <label>Preferred date</label>
+          <input type="date" id="formDate"/>
+        </div>
+      </div>
+      <div>
+        <label>Notes (optional)</label>
+        <textarea id="formNotes" rows="2" placeholder="Recipient, message on card, ribbon colour…"></textarea>
+      </div>
+      <div class="form-error" id="formError"></div>
+    </div>
+    <button class="btn-wa" onclick="checkoutWhatsApp()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Send order on WhatsApp
+    </button>
+    <button class="btn-clear" onclick="clearCart()">Clear cart</button>
+  </div>
+</div>
+
+<!-- ══════════ OUR STORY ══════════ -->
+<div class="info-page" id="info-story">
+  <div class="info-page-inner">
+    <button class="info-back" onclick="closeInfoPage()">← Back</button>
+    <span class="info-eyebrow">About Us</span>
+    <h1 class="info-title">Every gift has an<br><em>unspoken feeling.</em></h1>
+    <div class="info-body">
+      <p>The Unspoken Gift was born from a simple belief — that the most meaningful things in life are often left unsaid. A gift isn't just an object. It's the warmth behind it, the thought that went into choosing it, and the love it carries from one person to another.</p>
+      <p>We started as a small home-based business in Singapore, handcrafting gift boxes for friends and family. What began as a labour of love quickly grew as more people wanted to give something truly personal — something that said more than words ever could.</p>
+      <p>Today, every box we curate is still made with the same care and intention as the very first one. We source thoughtfully, wrap beautifully, and personalise every detail — because we believe your loved ones deserve nothing less.</p>
+      <h3>Our <em>Values</em></h3>
+      <p><strong style="color:var(--deep)">Intentional gifting.</strong> We don't do generic. Every box is curated with the recipient in mind.</p>
+      <p><strong style="color:var(--deep)">Local with love.</strong> Singapore-based, family-run, and proud of it.</p>
+      <p><strong style="color:var(--deep)">Sustainable where possible.</strong> We choose quality over quantity, always.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ FAQ ══════════ -->
+<div class="info-page" id="info-faq">
+  <div class="info-page-inner">
+    <button class="info-back" onclick="closeInfoPage()">← Back</button>
+    <span class="info-eyebrow">FAQ</span>
+    <h1 class="info-title">Questions,<br><em>answered.</em></h1>
+    <div class="info-body">
+      <div class="faq-item"><button class="faq-q" onclick="toggleFaq(this)">How do I place an order? <span class="faq-chevron">▼</span></button><div class="faq-a">Add boxes to your cart and send the order on WhatsApp, click any "Enquire on WhatsApp" button, or message us directly at +65 9885 7721. Tell us the occasion, who it's for, and your budget — we'll take it from there!</div></div>
+      <div class="faq-item"><button class="faq-q" onclick="toggleFaq(this)">How far in advance should I order? <span class="faq-chevron">▼</span></button><div class="faq-a">We recommend ordering at least 3–5 days in advance to ensure we can source the best items for your box. For peak seasons like Hari Raya and Chinese New Year, 1–2 weeks in advance is ideal.</div></div>
+      <div class="faq-item"><button class="faq-q" onclick="toggleFaq(this)">What payment methods do you accept? <span class="faq-chevron">▼</span></button><div class="faq-a">We accept PayNow, bank transfer, and PayLah!. Payment details will be shared once your order is confirmed via WhatsApp.</div></div>
+      <div class="faq-item"><button class="faq-q" onclick="toggleFaq(this)">Do you offer delivery? <span class="faq-chevron">▼</span></button><div class="faq-a">Yes! We deliver island-wide across Singapore. Delivery fees vary by location and will be quoted during your order confirmation. Self-collection is also available.</div></div>
+      <div class="faq-item"><button class="faq-q" onclick="toggleFaq(this)">Can I include a personalised message card? <span class="faq-chevron">▼</span></button><div class="faq-a">Absolutely — every box comes with the option of a personalised handwritten or printed card. Just let us know your message when placing your order.</div></div>
+      <div class="faq-item"><button class="faq-q" onclick="toggleFaq(this)">What is your refund or exchange policy? <span class="faq-chevron">▼</span></button><div class="faq-a">As our boxes are made to order, we're unable to offer refunds once production has begun. However, if there's an issue with your order, please reach out to us within 24 hours of receiving it and we'll do our best to make it right.</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ CUSTOMISING ══════════ -->
+<div class="info-page" id="info-customising">
+  <div class="info-page-inner">
+    <button class="info-back" onclick="closeInfoPage()">← Back</button>
+    <span class="info-eyebrow">Designing & Customising</span>
+    <h1 class="info-title">Your box,<br><em>your way.</em></h1>
+    <div class="info-body">
+      <p>Every box we make can be fully customised to suit your occasion, your recipient, and your budget. Here's how the process works:</p>
+      <div class="custom-step"><div class="custom-step-num">1</div><div class="custom-step-text"><strong>Tell us about the recipient</strong><span>Share with us who the gift is for — their personality, preferences, dietary needs, and what the occasion means to you.</span></div></div>
+      <div class="custom-step"><div class="custom-step-num">2</div><div class="custom-step-text"><strong>Set your budget</strong><span>We work with all budgets starting from $45. Let us know your range and we'll curate the best possible box within it.</span></div></div>
+      <div class="custom-step"><div class="custom-step-num">3</div><div class="custom-step-text"><strong>We design your box</strong><span>Our team handpicks each item, arranges them thoughtfully, and sends you a photo preview before we finalise everything.</span></div></div>
+      <div class="custom-step"><div class="custom-step-num">4</div><div class="custom-step-text"><strong>Add personalised touches</strong><span>Choose your ribbon colour, add a personalised message card, or request specific items — we love making it extra special.</span></div></div>
+      <div class="custom-step"><div class="custom-step-num">5</div><div class="custom-step-text"><strong>Approve & we'll deliver</strong><span>Once you're happy with the preview, simply pay via PayNow and we'll pack and deliver your box with care.</span></div></div>
+      <h3>What can be <em>customised?</em></h3>
+      <p>🎀 Ribbon colour &amp; box size<br>💌 Personalised message card<br>🍫 Choice of chocolates, snacks or treats<br>🍵 Tea, coffee or drink selection<br>🌸 Seasonal or festive themed items<br>✨ Add-on surprises for special occasions</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ HOME ══════════════════════════════════════════ -->
+<div class="page active" id="page-home">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-bg">
+      <span class="blob blob-1"></span>
+      <span class="blob blob-2"></span>
+      <span class="blob blob-3"></span>
+    </div>
+    <span class="sparkle" style="top:18%;left:46%;font-size:1.2rem;">✦</span>
+    <span class="sparkle" style="top:64%;left:8%;font-size:0.9rem;animation-delay:1s;">✦</span>
+    <span class="sparkle" style="top:30%;right:6%;font-size:1rem;animation-delay:2s;">✦</span>
+
+    <div class="hero-left">
+      <span class="hero-tag">Handcrafted Gift Boxes · Singapore</span>
+      <h1 class="hero-title">
+        <span class="line">Every gift tells a story.</span>
+        <span class="line">Let's make yours <em>unforgettable.</em></span>
+      </h1>
+      <p class="hero-sub">Beautifully curated boxes for every celebration — from festivals to family milestones, wrapped with love and delivered island-wide.</p>
+
+      <div class="search-wrap">
+        <input class="search-input" id="searchInput" type="text"
+          placeholder="Search gift boxes… e.g. 'Hari Raya', 'Birthday'"
+          oninput="handleSearch(this.value)" onkeydown="if(event.key==='Enter') doSearch()" autocomplete="off"/>
+        <button class="search-btn" onclick="doSearch()" aria-label="Search">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" stroke="white" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>
+        </button>
+        <div class="search-results" id="searchResults"></div>
+      </div>
+
+      <div class="search-suggestions">
+        <button class="search-chip" onclick="quickSearch('Hari Raya')">🌙 Hari Raya</button>
+        <button class="search-chip" onclick="quickSearch('Mother')">🌸 Mother's Day</button>
+        <button class="search-chip" onclick="quickSearch('Valentine')">💝 Valentine's</button>
+        <button class="search-chip" onclick="quickSearch('Christmas')">🎄 Christmas</button>
+        <button class="search-chip" onclick="quickSearch('中秋')">🥮 中秋节</button>
+        <button class="search-chip" onclick="quickSearch('Birthday')">🎂 Birthday</button>
+      </div>
+    </div>
+
+    <div class="hero-collage" id="heroCollage">
+      <div class="hero-photo hp-1"></div>
+      <div class="hero-photo hp-2"></div>
+      <div class="hero-photo hp-3"></div>
+      <div class="hero-badge">
+        <span class="hb-emoji">🎁</span>
+        <div class="hb-text"><strong>200+ boxes gifted</strong><span>Loved across Singapore</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SAMPLES -->
+  <section class="samples">
+    <p class="samples-label">Our gift boxes</p>
+    <div class="samples-track" id="samplesTrack"></div>
+  </section>
+
+  <!-- OCCASIONS -->
+  <section class="occasions" id="occasions-section">
+    <div class="section-head reveal">
+      <span class="section-eyebrow">Shop by Occasion</span>
+      <h2 class="section-title">Which celebration are you<br><em>gifting for?</em></h2>
+    </div>
+    <div class="occasions-grid" id="occasionsGrid"></div>
+  </section>
+
+  <!-- ALL PRODUCTS -->
+  <section class="all-products" id="all-products-section">
+    <div class="section-head reveal">
+      <span class="section-eyebrow">All Gift Boxes</span>
+      <h2 class="section-title">Browse <em>everything</em></h2>
+    </div>
+    <div class="filter-tabs" id="filterTabs"></div>
+    <div class="overview-grid" id="overviewGrid"></div>
+  </section>
+
+  <!-- TESTIMONIALS -->
+  <section class="testimonials">
+    <div class="section-head reveal">
+      <span class="section-eyebrow">Loved by gifters</span>
+      <h2 class="section-title">Kind words from<br><em>happy hearts</em></h2>
+    </div>
+    <div class="testi-grid">
+      <div class="testi-card reveal" style="--i:0">
+        <div class="testi-stars">★★★★★</div>
+        <p class="testi-text">"The box was even more beautiful in person. My mum teared up when she opened it — exactly the feeling I was hoping for."</p>
+        <div class="testi-author"><div class="testi-avatar">SY</div><div><strong>Shu Yi</strong><span>Mother's Day Box</span></div></div>
+      </div>
+      <div class="testi-card reveal" style="--i:1">
+        <div class="testi-stars">★★★★★</div>
+        <p class="testi-text">"Ordered last-minute for Hari Raya and they still made it perfect. The personalised card was such a lovely touch."</p>
+        <div class="testi-author"><div class="testi-avatar">NA</div><div><strong>Nurul A.</strong><span>Raya Gold Hamper</span></div></div>
+      </div>
+      <div class="testi-card reveal" style="--i:2">
+        <div class="testi-stars">★★★★★</div>
+        <p class="testi-text">"Sent these to clients for CNY and got so many thank-you messages. Premium feel, smooth ordering over WhatsApp."</p>
+        <div class="testi-author"><div class="testi-avatar">JT</div><div><strong>Jonathan T.</strong><span>Prosperity Bundle</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how" id="how-section">
+    <div class="section-head reveal">
+      <span class="section-eyebrow">How It Works</span>
+      <h2 class="section-title">Simple as <em>three steps</em></h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal" style="--i:0"><div class="step-circle">1</div><div class="step-title">Pick your box</div><div class="step-desc">Browse by occasion and add the boxes you love to your cart — or tell us your vision.</div></div>
+      <div class="step reveal" style="--i:1"><div class="step-circle">2</div><div class="step-title">We curate & wrap</div><div class="step-desc">We handpick every item, wrap it beautifully, and send you a preview photo before delivery.</div></div>
+      <div class="step reveal" style="--i:2"><div class="step-circle">3</div><div class="step-title">Pay & receive</div><div class="step-desc">Pay via PayNow or bank transfer. Your gift arrives ready to give, no wrapping needed.</div></div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="final-cta" id="contact">
+    <div class="section-head reveal" style="margin-bottom:18px;">
+      <span class="section-eyebrow">Ready to Gift?</span>
+      <h2 class="section-title">Start with a simple <em>"Hi"</em></h2>
+    </div>
+    <p class="reveal" style="color:var(--mid);font-size:1rem;max-width:440px;margin:0 auto;line-height:1.75;font-weight:300;">
+      Every great gift starts with a conversation. We're here to help you find the perfect one.
+    </p>
+    <a href="https://wa.me/6598857721?text=Hi!%20I%27d%20like%20to%20enquire%20about%20a%20gift%20box%20from%20The%20Unspoken%20Gift%20%F0%9F%8E%81" class="btn-wa reveal" target="_blank">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Chat with us on WhatsApp
+    </a>
+  </section>
+
+  <footer>© 2025 <em>The Unspoken Gift</em> · Singapore · All rights reserved</footer>
+</div><!-- end #page-home -->
+
+<!-- ══════════════════════════════════════════ OCCASION PAGE ══════════════════════════════════════════ -->
+<div class="page" id="page-occasion">
+  <section class="occ-page-hero">
+    <button class="occ-back" onclick="showPage('home')">← All occasions</button>
+    <span class="occ-page-emoji" id="occ-emoji"></span>
+    <h1 class="occ-page-title" id="occ-title"></h1>
+    <p class="occ-page-sub" id="occ-sub"></p>
+  </section>
+  <div class="occ-page-body" id="occ-body"></div>
+  <div class="occ-page-cta">
+    <a id="occ-wa-btn" href="#" class="btn-wa" target="_blank">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Enquire about this collection
+    </a>
+  </div>
+</div><!-- end #page-occasion -->
+
+<div class="toast" id="toast"></div>
+
+<!-- ══════════════════════════════════════════ DATA + JS ══════════════════════════════════════════ -->
+<script>
+// ── IMAGE HELPER ───────────────────────────────
+function IMG(id, w) { return `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w||700}&q=80`; }
+
+// ── OCCASION DATA ──────────────────────────────
+const OCCASIONS = {
+  'hari-raya': {
+    emoji: '🌙', title: 'Hari Raya Collection',
+    sub: 'Celebrate Eid Mubarak with beautifully curated boxes, filled with warmth, treats, and heartfelt blessings.',
+    waText: "Hi! I'd like to order a Hari Raya gift box 🌙",
+    categories: [
+      { title: 'Classic Raya Boxes', boxes: [
+        { name: 'Raya Warmth Box', desc: 'BOH Earl Grey, Ferrero Rocher, artisan cookies & a personalised card', price: 'From $55', emoji: '🎁', img: '1513201099705-a9746e1e201f' },
+        { name: 'Eid Mubarak Bundle', desc: 'Premium dates, rose tea, decorated cookies & silk ribbon finish', price: 'From $65', emoji: '🌙', img: '1629738601425-494c3d6ba3e2' },
+        { name: 'Blessings Box', desc: 'Luxury chocolates, honey, dried fruits & a handwritten dua card', price: 'From $72', emoji: '✨', img: '1633677491262-0a51b9851f46' },
+      ]},
+      { title: 'Premium Raya Hampers', boxes: [
+        { name: 'Raya Gold Hamper', desc: 'Full premium curation: nutty cookies, premium tea, chocolates & linen tote', price: 'From $95', emoji: '🏅', img: '1608755728617-aefab37d2edd' },
+        { name: 'Family Celebration Box', desc: 'Bigger box for the whole family — assorted snacks, drinks & treats', price: 'From $110', emoji: '👨‍👩‍👧‍👦', img: '1571915096107-c6606c216058' },
+        { name: "Couple's Raya Box", desc: 'Two cups, matching teas, chocolates & a joint personalised card', price: 'From $88', emoji: '💑', img: '1648288725055-5ba4063355b9' },
+      ]}
+    ]
+  },
+  'valentines': {
+    emoji: '💝', title: "Valentine's Day Collection",
+    sub: 'Say it with more than words. Romantic boxes brimming with roses, chocolate, and little luxuries.',
+    waText: "Hi! I'd like to order a Valentine's Day gift box 💝",
+    categories: [
+      { title: 'For Your Love', boxes: [
+        { name: 'Sweetheart Box', desc: 'Heart-shaped chocolates, preserved rose, scented candle & love note', price: 'From $58', emoji: '💝', img: '1644890587854-2ba0a218616d' },
+        { name: 'Roses & Cocoa Box', desc: 'Single red rose, artisan hot cocoa, truffles & a handwritten card', price: 'From $52', emoji: '🌹', img: '1687471603664-c76ac6556b6f' },
+        { name: 'Forever Yours Hamper', desc: 'Premium roses, champagne truffles, candle & silk-wrapped keepsake', price: 'From $98', emoji: '💍', img: '1613239958125-807618e8559f' },
+      ]}
+    ]
+  },
+  'mothers-day': {
+    emoji: '🌸', title: "Mother's Day Collection",
+    sub: 'Show Mum just how cherished she is, with a box made to make her smile.',
+    waText: "Hi! I'd like to order a Mother's Day gift box 🌸",
+    categories: [
+      { title: 'For Mum', boxes: [
+        { name: 'Bloom & Bliss Box', desc: 'Rose tea, macarons, a reed diffuser & a heartfelt card for Mum', price: 'From $48', emoji: '🌸', img: '1680563094046-5d846e2c59d1' },
+        { name: 'Tea & Treats Box', desc: 'Assorted premium teas, shortbread cookies & floral packaging', price: 'From $55', emoji: '🍵', img: '1623406795110-99f1c4325084' },
+        { name: 'Sweet Moments Box', desc: 'Artisan chocolates, honey, flower soap & personalised ribbon', price: 'From $62', emoji: '🍫', img: '1582794543139-8ac9cb0f7b11' },
+        { name: 'Pamper & Love Hamper', desc: 'Skincare samples, bath salts, lavender tea & chocolates', price: 'From $88', emoji: '💆', img: '1610599929507-fac366fb4252' },
+        { name: 'Garden Afternoon Box', desc: 'Floral cookies, chamomile tea, lemon curd & a mini plant', price: 'From $72', emoji: '🌿', img: '1523693916903-027d144a2b7d' },
+      ]}
+    ]
+  },
+  'fathers-day': {
+    emoji: '⭐', title: "Father's Day Collection",
+    sub: 'The man who gave you everything deserves something truly special. Curated with him in mind.',
+    waText: "Hi! I'd like to order a Father's Day gift box ⭐",
+    categories: [
+      { title: 'For Dad', boxes: [
+        { name: 'The Gentleman Box', desc: 'Coffee, premium nuts, dark chocolate & a "World\'s Best Dad" card', price: 'From $45', emoji: '☕', img: '1640766018017-2edafcfcb3ca' },
+        { name: 'Relax & Unwind Box', desc: 'Herbal tea, artisan cookies, a candle & personalised note', price: 'From $58', emoji: '🕯️', img: '1480632563560-30f503c09195' },
+        { name: "Coffee Lover's Box", desc: '3 single-origin coffee sachets, biscotti & a mug', price: 'From $65', emoji: '☕', img: '1687768665882-b9affb531d8f' },
+        { name: "Dad's Treats Hamper", desc: 'Assorted snacks, chips, chocolates & a cold brew pack', price: 'From $78', emoji: '🎉', img: '1765534379403-5a052c172cff' },
+      ]}
+    ]
+  },
+  'birthday': {
+    emoji: '🎂', title: 'Birthday Collection',
+    sub: 'Make their day unforgettable with a box full of surprises, sweets, and celebration.',
+    waText: "Hi! I'd like to order a Birthday gift box 🎂",
+    categories: [
+      { title: 'Celebrate', boxes: [
+        { name: 'Birthday Surprise Box', desc: 'Balloons, confetti, chocolates, a candle & a personalised card', price: 'From $52', emoji: '🎈', img: '1583875762487-5f8f7c718d14' },
+        { name: 'Celebration Cake Box', desc: 'Mini celebration cake, candles, sweets & a birthday banner', price: 'From $68', emoji: '🎂', img: '1562804698-732e972e46e4' },
+        { name: 'Party Time Hamper', desc: 'Snacks, drinks, party treats & a colourful gift bundle', price: 'From $85', emoji: '🎉', img: '1647221598398-934ed5cb0e4f' },
+      ]}
+    ]
+  },
+  'mid-autumn': {
+    emoji: '🥮', title: '中秋节礼盒系列',
+    sub: '月圆人团圆。精选月饼与茗茶礼盒，把祝福与团圆的心意送给最重要的人。',
+    waText: "Hi! I'd like to order a Mid-Autumn (中秋节) gift box 🥮",
+    categories: [
+      { title: '中秋节系列', boxes: [
+        { name: 'Mooncake Treasure Box', desc: '精选传统月饼、铁观音茶与中秋主题礼盒包装', price: 'From $58', emoji: '🥮', img: '1726568948497-ee41ebfbb2ef' },
+        { name: 'Lantern Tea Set', desc: '高山乌龙、茶点、小灯笼与手写祝福卡', price: 'From $68', emoji: '🏮', img: '1705806458615-66283dc0914e' },
+        { name: 'Reunion Mooncake Hamper', desc: '尊享月饼礼篮：双黄莲蓉月饼、名茶、坚果与精美丝带', price: 'From $98', emoji: '🌕', img: '1630859311469-289b6a574bdc' },
+      ]}
+    ]
+  },
+  'duanwu': {
+    emoji: '🐉', title: '端午节礼盒系列',
+    sub: '龙舟节送礼，满满心意。精心策划的礼盒，让节日更温馨难忘。',
+    waText: "Hi! I'd like to order a 端午节 gift box 🐉",
+    categories: [
+      { title: '端午节系列', boxes: [
+        { name: 'Dragon Festival Box', desc: '传统粽子礼包、龙井茶、糕点与祝福卡', price: 'From $50', emoji: '🐉', img: '1551582739-2538851de8ce' },
+        { name: '节日心意礼盒', desc: '精选茶品、饼干、巧克力与端午主题包装', price: 'From $62', emoji: '🎁', img: '1548386581-23b700b33be0' },
+        { name: '尊享端午大礼包', desc: '高档礼盒：普洱茶、坚果、糕饼与精美丝带', price: 'From $85', emoji: '✨', img: '1516384780024-0d0b739c450b' },
+      ]}
+    ]
+  },
+  'halloween': {
+    emoji: '🎃', title: 'Halloween Collection',
+    sub: 'Spooky, sweet, and oh-so-fun. Trick-or-treat boxes packed with candy and playful surprises.',
+    waText: "Hi! I'd like to order a Halloween gift box 🎃",
+    categories: [
+      { title: 'Trick or Treat', boxes: [
+        { name: 'Spooky Surprise Box', desc: 'Assorted candy, chocolate eyeballs, a mini pumpkin & spooky card', price: 'From $42', emoji: '👻', img: '1665591041446-cc590c49c951' },
+        { name: 'Pumpkin Treats Box', desc: 'Pumpkin-spice cookies, candy corn, treats & festive décor', price: 'From $52', emoji: '🎃', img: '1635632919713-2a17877a7c8d' },
+        { name: 'Trick-or-Treat Bundle', desc: 'Family-sized candy haul, themed snacks & a surprise toy', price: 'From $68', emoji: '🍬', img: '1637209697457-f88bc41d4545' },
+      ]}
+    ]
+  },
+  'christmas': {
+    emoji: '🎄', title: 'Christmas Collection',
+    sub: "Spread the magic of Christmas with gifts that warm hearts and spark joy.",
+    waText: "Hi! I'd like to order a Christmas gift box 🎄",
+    categories: [
+      { title: 'Christmas Gift Boxes', boxes: [
+        { name: 'Winter Joy Box', desc: 'Cinnamon cookies, hot cocoa mix, candy canes & festive ribbon', price: 'From $60', emoji: '❄️', img: '1545608444-f045a6db6133' },
+        { name: 'Cosy Christmas Box', desc: 'Mulled wine sachets, shortbread, a candle & Christmas card', price: 'From $72', emoji: '🕯️', img: '1481708426686-bad08e28e1c2' },
+        { name: 'Secret Santa Box', desc: 'Fun mix of treats, chocolates & quirky add-ons — perfect for office gifting', price: 'From $45', emoji: '🎅', img: '1512909006721-3d6018887383' },
+      ]},
+      { title: 'Premium Christmas Hampers', boxes: [
+        { name: 'Festive Grand Hamper', desc: 'Full luxury spread: wines, cheeses, crackers, chocolates & decor', price: 'From $128', emoji: '🏅', img: '1546512347-b93b3f59e231' },
+        { name: 'Family Christmas Box', desc: 'Games, snacks, hot drinks & personalised ornament for the whole family', price: 'From $98', emoji: '👨‍👩‍👧‍👦', img: '1513885535751-8b9238bd345a' },
+      ]}
+    ]
+  },
+  'cny': {
+    emoji: '🧧', title: 'Chinese New Year Collection',
+    sub: 'Usher in the new year with prosperity, sweetness, and thoughtful gifts for those you treasure.',
+    waText: "Hi! I'd like to order a Chinese New Year gift box 🧧",
+    categories: [
+      { title: 'CNY Gift Boxes', boxes: [
+        { name: 'Prosperity Bundle', desc: 'Nian gao, CNY cookies, premium tea & red packet holders', price: 'From $68', emoji: '🧧', img: '1612201578303-25f1712d20cc' },
+        { name: 'Golden Harvest Box', desc: 'Pineapple tarts, love letters, bak kwa & premium tea', price: 'From $78', emoji: '🍍', img: '1580524765545-f159d96bb9a9' },
+        { name: 'Reunion Box', desc: 'Family-sized assortment of CNY snacks, mandarin oranges & sweets', price: 'From $88', emoji: '👨‍👩‍👧‍👦', img: '1770530082667-16f8000f26f1' },
+      ]},
+      { title: 'Premium CNY Hampers', boxes: [
+        { name: "Emperor's Hamper", desc: "Ultra-premium: bird's nest, abalone, gourmet snacks & gold packaging", price: 'From $168', emoji: '👑', img: '1578073273382-f847b29d2192' },
+        { name: '吉祥如意礼包', desc: '精选年货：茶叶、糕饼、坚果、朱古力与红包袋', price: 'From $95', emoji: '✨', img: '1676508805939-c4050ed86c3f' },
+      ]}
+    ]
+  },
+  'deepavali': {
+    emoji: '🪔', title: 'Deepavali Collection',
+    sub: 'Celebrate the festival of lights with radiant boxes of sweets, diyas, and golden touches.',
+    waText: "Hi! I'd like to order a Deepavali gift box 🪔",
+    categories: [
+      { title: 'Festival of Lights', boxes: [
+        { name: 'Festival of Lights Box', desc: 'Decorative diya, Indian sweets, dried fruits & a festive card', price: 'From $55', emoji: '🪔', img: '1605292356183-a77d0a9c9d1d' },
+        { name: 'Diya & Sweets Hamper', desc: 'Assorted mithai, nuts, tea-lights & gold-trimmed packaging', price: 'From $72', emoji: '✨', img: '1662720868850-e60cefb03201' },
+        { name: 'Golden Deepavali Box', desc: 'Premium sweets, candle set, chocolates & a silk-wrapped finish', price: 'From $95', emoji: '🌟', img: '1577083753695-e010191bacb5' },
+      ]}
+    ]
+  }
+};
+
+// occasion display order
+const OCC_ORDER = ['hari-raya','valentines','mothers-day','fathers-day','birthday','mid-autumn','duanwu','halloween','christmas','cny','deepavali'];
+
+const OCC_COLORS = {
+  'hari-raya':   'linear-gradient(135deg,#F5E6D3,#D4B896)',
+  'valentines':  'linear-gradient(135deg,#FBD9E2,#E8758F)',
+  'mothers-day': 'linear-gradient(135deg,#FDDDE6,#F5A7BE)',
+  'fathers-day': 'linear-gradient(135deg,#E8E0D5,#B5A088)',
+  'birthday':    'linear-gradient(135deg,#FCE3B5,#F2A0C2)',
+  'mid-autumn':  'linear-gradient(135deg,#F3E9D2,#C9A85C)',
+  'duanwu':      'linear-gradient(135deg,#D5E8F5,#7AAEC8)',
+  'halloween':   'linear-gradient(135deg,#F7C98B,#C2622A)',
+  'christmas':   'linear-gradient(135deg,#D5EDD5,#8FBF8F)',
+  'cny':         'linear-gradient(135deg,#FDDBC4,#E8935A)',
+  'deepavali':   'linear-gradient(135deg,#FBE2B0,#D98A2B)',
+};
+
+// ── BUILD INDEXES (give each box an id, parse price) ──
+function parsePrice(str) { const m = (str||'').replace(/[^0-9.]/g,''); return m ? Math.round(parseFloat(m)) : 0; }
+function shortTitle(occ) { return occ.title.replace(' Collection','').replace('礼盒系列','').replace(' 系列','').trim(); }
+
+const BOX_MAP = {};
+const SEARCH_INDEX = [];
+let _bid = 0;
+Object.entries(OCCASIONS).forEach(([key, occ]) => {
+  occ.categories.forEach(cat => {
+    cat.boxes.forEach(box => {
+      box.id = 'b' + (_bid++);
+      box.occKey = key;
+      box.priceNum = parsePrice(box.price);
+      BOX_MAP[box.id] = box;
+      SEARCH_INDEX.push({ occKey: key, occEmoji: occ.emoji, occName: shortTitle(occ), ...box });
+    });
+  });
+});
+
+// ── PANELS (menu / cart) ───────────────────────
+function showOverlay(on) {
+  const ov = document.getElementById('menuOverlay');
+  ov.classList.toggle('show', on);
+  document.body.style.overflow = on ? 'hidden' : '';
+}
+function toggleMenu() {
+  const open = document.getElementById('sideMenu').classList.toggle('open');
+  document.getElementById('hamburgerBtn').classList.toggle('open', open);
+  document.getElementById('cartDrawer').classList.remove('open');
+  showOverlay(open);
+}
+function openCart() {
+  document.getElementById('cartDrawer').classList.add('open');
+  document.getElementById('sideMenu').classList.remove('open');
+  document.getElementById('hamburgerBtn').classList.remove('open');
+  showOverlay(true);
+  renderCart();
+}
+function closePanels() {
+  document.getElementById('sideMenu').classList.remove('open');
+  document.getElementById('cartDrawer').classList.remove('open');
+  document.getElementById('hamburgerBtn').classList.remove('open');
+  showOverlay(false);
+}
+
+// ── INFO PAGES ─────────────────────────────────
+function openInfoPage(id) {
+  closePanels();
+  const page = document.getElementById('info-' + id);
+  if (page) { page.classList.add('open'); page.scrollTop = 0; document.body.style.overflow = 'hidden'; }
+}
+function closeInfoPage() {
+  document.querySelectorAll('.info-page').forEach(p => p.classList.remove('open'));
+  document.body.style.overflow = '';
+}
+function toggleFaq(btn) {
+  const item = btn.closest('.faq-item');
+  const isOpen = item.classList.contains('open');
+  document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+  if (!isOpen) item.classList.add('open');
+}
+
+// ── PAGE NAVIGATION ────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  closeInfoPage();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (name === 'home') initReveal();
+}
+function scrollToEl(id) {
+  setTimeout(() => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); }, 120);
+}
+
+// ── CART ───────────────────────────────────────
+let cart = [];
+try { cart = JSON.parse(localStorage.getItem('tug_cart') || '[]'); } catch(e) { cart = []; }
+
+function saveCart() { try { localStorage.setItem('tug_cart', JSON.stringify(cart)); } catch(e){} }
+function cartQtyTotal() { return cart.reduce((s,i)=>s+i.qty,0); }
+
+function updateBadge() {
+  const n = cartQtyTotal();
+  const badge = document.getElementById('cartCount');
+  badge.textContent = n;
+  badge.classList.toggle('show', n > 0);
+}
+
+function addToCart(id) {
+  const box = BOX_MAP[id]; if (!box) return;
+  const existing = cart.find(i => i.id === id);
+  if (existing) existing.qty++; else cart.push({ id, qty: 1 });
+  saveCart(); updateBadge(); renderCart();
+  const btn = document.getElementById('cartBtn');
+  btn.classList.remove('bump'); void btn.offsetWidth; btn.classList.add('bump');
+  showToast(`Added "${box.name}" to cart 🎁`);
+}
+function changeQty(id, delta) {
+  const item = cart.find(i => i.id === id); if (!item) return;
+  item.qty += delta;
+  if (item.qty <= 0) cart = cart.filter(i => i.id !== id);
+  saveCart(); updateBadge(); renderCart();
+}
+function removeItem(id) { cart = cart.filter(i => i.id !== id); saveCart(); updateBadge(); renderCart(); }
+function clearCart() { cart = []; saveCart(); updateBadge(); renderCart(); }
+
+function cartSubtotal() {
+  return cart.reduce((s,i) => { const b = BOX_MAP[i.id]; return s + (b ? b.priceNum * i.qty : 0); }, 0);
+}
+
+function renderCart() {
+  const body = document.getElementById('cartBody');
+  const foot = document.getElementById('cartFoot');
+  if (!cart.length) {
+    body.innerHTML = `<div class="cart-empty"><span class="cart-empty-emoji">🛍️</span><p>Your cart is empty.<br>Add a box you love to get started!</p></div>`;
+    foot.style.display = 'none';
+    return;
+  }
+  body.innerHTML = cart.map(item => {
+    const b = BOX_MAP[item.id]; if (!b) return '';
+    return `<div class="cart-item">
+      <div class="cart-item-img" style="background-image:url('${IMG(b.img,160)}')"></div>
+      <div class="cart-item-mid">
+        <div class="cart-item-name">${b.name}</div>
+        <div class="cart-item-price">${b.price}</div>
+        <div class="cart-qty">
+          <button onclick="changeQty('${b.id}',-1)" aria-label="Decrease">−</button>
+          <span>${item.qty}</span>
+          <button onclick="changeQty('${b.id}',1)" aria-label="Increase">+</button>
+        </div>
+      </div>
+      <button class="cart-item-remove" onclick="removeItem('${b.id}')">Remove</button>
+    </div>`;
+  }).join('');
+  document.getElementById('cartSubtotal').textContent = '~$' + cartSubtotal();
+  foot.style.display = 'block';
+}
+
+function checkoutWhatsApp() {
+  const err = document.getElementById('formError');
+  if (!cart.length) { err.textContent = 'Your cart is empty.'; return; }
+  const name = document.getElementById('formName').value.trim();
+  const contact = document.getElementById('formContact').value.trim();
+  const date = document.getElementById('formDate').value;
+  const notes = document.getElementById('formNotes').value.trim();
+  if (!name || !contact) { err.textContent = 'Please fill in your name and contact.'; return; }
+  err.textContent = '';
+
+  let msg = '*New Order — The Unspoken Gift* 🎁\n\n';
+  cart.forEach((item, idx) => {
+    const b = BOX_MAP[item.id]; if (!b) return;
+    msg += `${idx + 1}. ${b.name} ×${item.qty} — ~$${b.priceNum * item.qty}\n`;
+  });
+  msg += `\nEstimated subtotal: ~$${cartSubtotal()} (final quote confirmed on chat)\n\n`;
+  msg += `Name: ${name}\nContact: ${contact}\n`;
+  if (date) msg += `Preferred date: ${date}\n`;
+  if (notes) msg += `Notes: ${notes}\n`;
+  msg += `\nLooking forward to your reply! 💛`;
+
+  window.open('https://wa.me/6598857721?text=' + encodeURIComponent(msg), '_blank');
+}
+
+// ── OPEN OCCASION ──────────────────────────────
+function openOccasion(key) {
+  const occ = OCCASIONS[key]; if (!occ) return;
+  document.getElementById('occ-emoji').textContent = occ.emoji;
+  document.getElementById('occ-title').innerHTML = occ.title.replace(/(Collection|系列)/, '<em>$1</em>');
+  document.getElementById('occ-sub').textContent = occ.sub;
+  document.getElementById('occ-wa-btn').href = 'https://wa.me/6598857721?text=' + encodeURIComponent(occ.waText);
+
+  let html = '';
+  occ.categories.forEach(cat => {
+    html += `<h3 class="occ-category-title">${cat.title}</h3><div class="boxes-grid">`;
+    cat.boxes.forEach(box => {
+      html += `<div class="box-card">
+        <div class="box-card-img" style="background:${OCC_COLORS[key]}"><div class="bc-inner" style="background-image:url('${IMG(box.img,600)}')"></div></div>
+        <div class="box-card-body">
+          <div class="box-card-name">${box.name}</div>
+          <div class="box-card-desc">${box.desc}</div>
+          <span class="box-card-price">${box.price}</span>
+          <button class="box-add" onclick="addToCart('${box.id}')">Add to cart +</button>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  });
+  document.getElementById('occ-body').innerHTML = html;
+  showPage('occasion');
+}
+
+// ── SEARCH ─────────────────────────────────────
+function handleSearch(val) {
+  const box = document.getElementById('searchResults');
+  const q = val.trim().toLowerCase();
+  if (!q) { box.classList.remove('show'); return; }
+  const hits = SEARCH_INDEX.filter(item =>
+    item.name.toLowerCase().includes(q) || item.desc.toLowerCase().includes(q) ||
+    item.occName.toLowerCase().includes(q) || item.occKey.toLowerCase().includes(q)
+  ).slice(0, 6);
+  if (!hits.length) { box.classList.remove('show'); return; }
+  box.innerHTML = hits.map(h => `
+    <div class="search-result-item" onclick="openOccasion('${h.occKey}')">
+      <div class="sri-img" style="background-image:url('${IMG(h.img,120)}')"></div>
+      <div class="sri-info"><strong>${h.name}</strong><span>${h.occEmoji} ${h.occName} · ${h.price}</span></div>
+    </div>`).join('');
+  box.classList.add('show');
+}
+function doSearch() {
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  if (!q) return;
+  const hit = SEARCH_INDEX.find(item =>
+    item.name.toLowerCase().includes(q) || item.occName.toLowerCase().includes(q) || item.occKey.toLowerCase().includes(q)
+  );
+  if (hit) openOccasion(hit.occKey);
+  document.getElementById('searchResults').classList.remove('show');
+}
+function quickSearch(term) {
+  document.getElementById('searchInput').value = term;
+  handleSearch(term); doSearch();
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-wrap')) document.getElementById('searchResults').classList.remove('show');
+});
+
+// ── BUILD: OCCASIONS GRID + FILTER TABS + SAMPLES ──
+function buildOccasionsGrid() {
+  const grid = document.getElementById('occasionsGrid');
+  grid.innerHTML = OCC_ORDER.map((key, i) => {
+    const occ = OCCASIONS[key];
+    const count = occ.categories.reduce((s,c)=>s+c.boxes.length,0);
+    return `<button class="occ-btn reveal" style="--i:${i%6}" onclick="openOccasion('${key}')">
+      <div class="occ-icon">${occ.emoji}</div>
+      <span class="occ-name">${shortTitle(occ)}</span>
+      <span class="occ-count">${count} ${count===1?'box':'boxes'}</span>
+    </button>`;
+  }).join('');
+}
+
+function buildFilterTabs() {
+  const wrap = document.getElementById('filterTabs');
+  let html = `<button class="filter-tab active" onclick="filterProducts('all', this)">All</button>`;
+  html += OCC_ORDER.map(key => {
+    const occ = OCCASIONS[key];
+    return `<button class="filter-tab" onclick="filterProducts('${key}', this)">${occ.emoji} ${shortTitle(occ)}</button>`;
+  }).join('');
+  wrap.innerHTML = html;
+}
+
+function buildSamples() {
+  const track = document.getElementById('samplesTrack');
+  track.innerHTML = OCC_ORDER.map(key => {
+    const occ = OCCASIONS[key];
+    const box = occ.categories[0].boxes[0];
+    return `<div class="sample-card" onclick="openOccasion('${key}')">
+      <div class="sample-img" style="background:${OCC_COLORS[key]}"><div style="position:absolute;inset:0;background-image:url('${IMG(box.img,560)}');background-size:cover;background-position:center;"></div></div>
+      <span class="sample-tag">${occ.emoji} ${shortTitle(occ)}</span>
+      <div class="sample-info"><strong>${box.name}</strong><span>${box.price}</span></div>
+    </div>`;
+  }).join('');
+  // sample-img needs relative for the inner absolute fill
+  track.querySelectorAll('.sample-img').forEach(el => el.style.position = 'relative');
+}
+
+function buildOverviewGrid(filterKey) {
+  const grid = document.getElementById('overviewGrid');
+  let cards = ''; let i = 0;
+  OCC_ORDER.forEach(key => {
+    if (filterKey !== 'all' && key !== filterKey) return;
+    const occ = OCCASIONS[key];
+    occ.categories.forEach(cat => cat.boxes.forEach(box => {
+      cards += `<div class="ov-card reveal" style="--i:${i%8}" onclick="openOccasion('${key}')">
+        <div class="ov-card-img" style="background:${OCC_COLORS[key]}">
+          <span class="ov-occ-tag">${occ.emoji} ${shortTitle(occ)}</span>
+          <div class="ov-img-inner" style="background-image:url('${IMG(box.img,500)}')"></div>
+        </div>
+        <div class="ov-card-body">
+          <div class="ov-card-name">${box.name}</div>
+          <div class="ov-card-price">${box.price}</div>
+          <button class="ov-add" onclick="event.stopPropagation(); addToCart('${box.id}')">Add to cart +</button>
+        </div>
+      </div>`;
+      i++;
+    }));
+  });
+  grid.innerHTML = cards;
+  initReveal();
+}
+function filterProducts(key, btn) {
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  buildOverviewGrid(key);
+}
+
+// ── HERO COLLAGE IMAGES ────────────────────────
+function buildHero() {
+  const photos = [
+    ['hp-1', '1773450970959-cef81e9b1053', 900],
+    ['hp-2', '1680563094046-5d846e2c59d1', 700],
+    ['hp-3', '1608755728617-aefab37d2edd', 600],
+  ];
+  photos.forEach(([cls, id, w]) => {
+    const el = document.querySelector('.' + cls);
+    if (el) el.style.backgroundImage = `url('${IMG(id, w)}')`;
+  });
+}
+
+// ── SCROLL REVEAL ──────────────────────────────
+let _revealObs;
+function initReveal() {
+  if (!_revealObs) {
+    _revealObs = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); _revealObs.unobserve(e.target); } });
+    }, { threshold: 0.08 });
+  }
+  document.querySelectorAll('#page-home .reveal:not(.visible)').forEach(el => _revealObs.observe(el));
+}
+
+// ── SAMPLES AUTO-SCROLL ────────────────────────
+function initAutoScroll() {
+  const track = document.getElementById('samplesTrack');
+  if (!track) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let paused = false;
+  ['mouseenter','touchstart','pointerdown'].forEach(ev => track.addEventListener(ev, () => paused = true, {passive:true}));
+  track.addEventListener('mouseleave', () => paused = false);
+  function tick() {
+    if (!paused && track.scrollWidth > track.clientWidth) {
+      track.scrollLeft += 0.5;
+      if (track.scrollLeft >= track.scrollWidth - track.clientWidth - 1) track.scrollLeft = 0;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+// ── NAV SHADOW ON SCROLL ───────────────────────
+window.addEventListener('scroll', () => {
+  document.getElementById('mainNav').classList.toggle('scrolled', window.scrollY > 20);
+});
+
+// ── TOAST ──────────────────────────────────────
+let _toastTimer;
+function showToast(text) {
+  const t = document.getElementById('toast');
+  t.textContent = text; t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ── INIT ───────────────────────────────────────
+buildHero();
+buildSamples();
+buildOccasionsGrid();
+buildFilterTabs();
+buildOverviewGrid('all');
+updateBadge();
+renderCart();
+initReveal();
+initAutoScroll();
+</script>
+
+</body>
+</html>
