@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pricing & Profit Calculator — The Unspoken Gift</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600;700&display=swap"/>
+<style>
+  :root{
+    --gold:#6E4F31; --gold-deep:#4A341F; --gold-light:#E8DACA;
+    --bg:#FBF7F1; --card:#FFFFFF; --ink:#2A2017; --muted:#8A7B6A;
+    --line:#EADFCF; --good:#2F7D5B; --warn:#B23A2E;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;line-height:1.55;}
+  .wrap{max-width:1040px;margin:0 auto;padding:38px 20px 80px;}
+  header{text-align:center;margin-bottom:34px;}
+  .eyebrow{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--gold);font-weight:600;}
+  h1{font-family:'Cormorant Garamond',serif;font-weight:500;font-size:2.7rem;line-height:1.05;margin:8px 0 6px;}
+  h1 em{font-style:italic;color:var(--gold);}
+  .sub{color:var(--muted);font-size:.95rem;max-width:640px;margin:0 auto;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start;}
+  @media(max-width:820px){.grid{grid-template-columns:1fr;}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px 22px;box-shadow:0 10px 30px rgba(74,52,31,.05);}
+  .panel h2{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:1.5rem;margin:0 0 4px;}
+  .panel h2 em{color:var(--gold);font-style:italic;}
+  .panel .hint{color:var(--muted);font-size:.82rem;margin:0 0 18px;}
+  .field{margin-bottom:15px;}
+  .field label{display:block;font-size:.84rem;font-weight:600;margin-bottom:5px;}
+  .field label span{color:var(--muted);font-weight:400;}
+  .input{position:relative;}
+  .input .pre{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.9rem;pointer-events:none;}
+  .input .suf{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.9rem;pointer-events:none;}
+  input[type=number]{width:100%;padding:11px 12px 11px 26px;border:1px solid var(--line);border-radius:11px;
+    font-family:'DM Sans',sans-serif;font-size:.95rem;color:var(--ink);background:#fff;transition:border-color .2s;}
+  input.nopre{padding-left:12px;}
+  input.suf-pad{padding-right:30px;}
+  input[type=number]:focus{outline:none;border-color:var(--gold);}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .divider{border:0;border-top:1px solid var(--line);margin:20px 0 16px;}
+  .adv-title{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:12px;}
+
+  /* results */
+  .stat-lead{text-align:center;padding:18px;border-radius:14px;background:linear-gradient(160deg,#fff,#FBF4EA);border:1px solid var(--gold-light);margin-bottom:16px;}
+  .stat-lead .k{font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;}
+  .stat-lead .v{font-family:'Cormorant Garamond',serif;font-size:2.9rem;font-weight:600;color:var(--gold-deep);line-height:1.1;}
+  .stat-lead .note{font-size:.8rem;color:var(--muted);}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .stat{background:#FCF8F2;border:1px solid var(--line);border-radius:12px;padding:13px 14px;}
+  .stat .k{font-size:.74rem;color:var(--muted);font-weight:600;margin-bottom:3px;}
+  .stat .v{font-size:1.35rem;font-weight:700;color:var(--ink);}
+  .stat .v small{font-size:.78rem;font-weight:500;color:var(--muted);}
+  .badge{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 9px;border-radius:20px;margin-top:6px;}
+  .badge.good{background:#E4F1EA;color:var(--good);}
+  .badge.warn{background:#F7E5E2;color:var(--warn);}
+  .month-box{margin-top:16px;background:#FCF8F2;border:1px dashed var(--gold-light);border-radius:14px;padding:16px;}
+  .month-box .line{display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line);font-size:.9rem;}
+  .month-box .line:last-child{border-bottom:0;}
+  .month-box .line .lab{color:var(--muted);}
+  .month-box .line .num{font-weight:700;font-size:1.05rem;}
+  .num.pos{color:var(--good);} .num.neg{color:var(--warn);}
+  .foot{margin-top:34px;text-align:center;color:var(--muted);font-size:.8rem;line-height:1.7;}
+  .foot a{color:var(--gold);}
+  .formula{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.78rem;background:#F3EADD;color:var(--gold-deep);
+    padding:2px 7px;border-radius:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">The Unspoken Gift · Internal Tool</div>
+    <h1>Pricing &amp; Profit <em>Calculator</em></h1>
+    <p class="sub">填入每盒成本，自动算出建议售价、毛利与净利。Enter your costs per box to get suggested price, margin &amp; net profit. <br/>公式 / Formula: <span class="formula">Price = COGS ÷ (1 − margin)</span></p>
+  </header>
+
+  <div class="grid">
+    <!-- INPUTS -->
+    <div class="panel">
+      <h2>1 · 每盒成本 <em>Per-box costs</em></h2>
+      <p class="hint">把一盒里的所有成本都算进去，包括你自己的组装工时。</p>
+
+      <div class="field">
+        <label>内容物成本 Contents cost <span>— 盒内所有东西 / everything inside</span></label>
+        <div class="input"><span class="pre">$</span><input type="number" id="contents" min="0" step="0.5" value="18"/></div>
+      </div>
+
+      <div class="field">
+        <label>包装成本 Packaging <span>— 盒/丝带/填充/卡片/贴纸</span></label>
+        <div class="input"><span class="pre">$</span><input type="number" id="packaging" min="0" step="0.5" value="5"/></div>
+      </div>
+
+      <div class="field">
+        <label>组装人工 Assembly labour <span>— 工时 × 时薪 / hours × rate</span></label>
+        <div class="row2">
+          <div class="input"><input type="number" class="nopre suf-pad" id="hours" min="0" step="0.1" value="0.3"/><span class="suf">hrs</span></div>
+          <div class="input"><span class="pre">$</span><input type="number" class="suf-pad" id="rate" min="0" step="0.5" value="12"/><span class="suf">/hr</span></div>
+        </div>
+      </div>
+
+      <hr class="divider"/>
+
+      <div class="field">
+        <label>目标毛利率 Target gross margin <span>— 礼盒建议 50–60% / aim 50–60%</span></label>
+        <div class="input"><input type="number" class="nopre suf-pad" id="margin" min="0" max="95" step="1" value="55"/><span class="suf">%</span></div>
+      </div>
+
+      <div class="field">
+        <label>实际售价 Actual selling price <span>— 可选；留空则用建议价 / optional</span></label>
+        <div class="input"><span class="pre">$</span><input type="number" id="actualPrice" min="0" step="1" placeholder="用建议价 use suggested"/></div>
+      </div>
+
+      <hr class="divider"/>
+      <div class="adv-title">进阶（每单变动成本）· Advanced — per-order variable costs</div>
+
+      <div class="field">
+        <label>支付手续费 Payment fee <span>— 转账/PayNow 通常 0；信用卡约 3.4%</span></label>
+        <div class="input"><input type="number" class="nopre suf-pad" id="feePct" min="0" max="20" step="0.1" value="0"/><span class="suf">%</span></div>
+      </div>
+
+      <div class="field">
+        <label>你承担的运费 Delivery you absorb <span>— 能单独收就填 0</span></label>
+        <div class="input"><span class="pre">$</span><input type="number" id="delivery" min="0" step="0.5" value="0"/></div>
+      </div>
+
+      <div class="field">
+        <label>每单广告费 Ad cost per order (CAC) <span>— 拉一单花的广告钱</span></label>
+        <div class="input"><span class="pre">$</span><input type="number" id="cac" min="0" step="0.5" value="0"/></div>
+      </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div class="panel">
+      <h2>2 · 结果 <em>Results</em></h2>
+      <p class="hint">改左边任何数字，这里实时更新。</p>
+
+      <div class="stat-lead">
+        <div class="k">建议售价 Suggested price</div>
+        <div class="v" id="r-price">$0</div>
+        <div class="note" id="r-price-note">based on COGS ÷ (1 − margin)</div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="k">每盒成本 COGS</div><div class="v" id="r-cogs">$0</div></div>
+        <div class="stat"><div class="k">每盒毛利 Gross profit</div><div class="v" id="r-gp">$0</div></div>
+        <div class="stat"><div class="k">毛利率 Gross margin</div><div class="v" id="r-gm">0%</div><span class="badge" id="r-gm-badge"></span></div>
+        <div class="stat"><div class="k">加价率 Markup</div><div class="v" id="r-markup">0%</div></div>
+      </div>
+
+      <div class="stat" style="margin-top:12px;">
+        <div class="k">每盒净利 Net profit / box <small>（扣手续费+运费+广告）</small></div>
+        <div class="v" id="r-net">$0</div>
+        <span class="badge" id="r-net-badge"></span>
+      </div>
+
+      <hr class="divider"/>
+      <h2>3 · 月度估算 <em>Monthly</em></h2>
+      <div class="row2">
+        <div class="field" style="margin-bottom:8px;">
+          <label>固定月成本 Fixed costs/mo <span>仓储/软件/工资</span></label>
+          <div class="input"><span class="pre">$</span><input type="number" id="fixed" min="0" step="50" value="800"/></div>
+        </div>
+        <div class="field" style="margin-bottom:8px;">
+          <label>预估月销量 Boxes/mo</label>
+          <div class="input"><input type="number" class="nopre" id="units" min="0" step="5" value="60"/></div>
+        </div>
+      </div>
+
+      <div class="month-box">
+        <div class="line"><span class="lab">盈亏平衡盒数 Break-even / mo</span><span class="num" id="r-be">0</span></div>
+        <div class="line"><span class="lab">月毛利 Monthly gross</span><span class="num" id="r-mgross">$0</span></div>
+        <div class="line"><span class="lab">月净利 Monthly net profit</span><span class="num" id="r-mnet">$0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">
+    所有数字仅为示例模板，填入你的真实成本后即得专属结果。<br/>
+    Figures are example templates — replace with your real costs. 见 / see <strong>BUSINESS_PLAN.md</strong> §4 &amp; §6.<br/>
+    <a href="https://leejianwei8313.github.io/the-unspoken-gift/">← 回到店面 / Back to store</a>
+  </p>
+</div>
+
+<script>
+  function num(id){ var v=parseFloat(document.getElementById(id).value); return isNaN(v)?0:v; }
+  function money(n){ return '$'+ (Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2}); }
+
+  // Pure calc — also used for testing
+  function compute(i){
+    var labour = i.hours * i.rate;
+    var cogs = i.contents + i.packaging + labour;
+    var marginFrac = Math.min(Math.max(i.margin,0),95) / 100;
+    var suggested = marginFrac < 1 ? cogs / (1 - marginFrac) : 0;
+    var price = i.actualPrice > 0 ? i.actualPrice : suggested;
+    var grossProfit = price - cogs;
+    var grossMarginPct = price > 0 ? (grossProfit / price) * 100 : 0;
+    var markupPct = cogs > 0 ? (grossProfit / cogs) * 100 : 0;
+    var fee = price * (i.feePct/100);
+    var netPerBox = grossProfit - fee - i.delivery - i.cac; // contribution after variable selling costs
+    var breakEven = netPerBox > 0 ? Math.ceil(i.fixed / netPerBox) : Infinity;
+    var monthlyGross = grossProfit * i.units;
+    var monthlyNet = netPerBox * i.units - i.fixed;
+    return {labour:labour,cogs:cogs,suggested:suggested,price:price,grossProfit:grossProfit,
+      grossMarginPct:grossMarginPct,markupPct:markupPct,netPerBox:netPerBox,
+      breakEven:breakEven,monthlyGross:monthlyGross,monthlyNet:monthlyNet,usedActual:i.actualPrice>0};
+  }
+
+  function calc(){
+    var r = compute({
+      contents:num('contents'), packaging:num('packaging'), hours:num('hours'), rate:num('rate'),
+      margin:num('margin'), actualPrice:num('actualPrice'), feePct:num('feePct'),
+      delivery:num('delivery'), cac:num('cac'), fixed:num('fixed'), units:num('units')
+    });
+    document.getElementById('r-price').textContent = money(r.price);
+    document.getElementById('r-price-note').textContent = r.usedActual
+      ? '你的实际售价 / your actual price (建议 suggested '+money(r.suggested)+')'
+      : 'COGS ÷ (1 − margin)';
+    document.getElementById('r-cogs').textContent = money(r.cogs);
+    document.getElementById('r-gp').textContent = money(r.grossProfit);
+    document.getElementById('r-gm').textContent = (Math.round(r.grossMarginPct*10)/10)+'%';
+    document.getElementById('r-markup').textContent = (Math.round(r.markupPct))+'%';
+    document.getElementById('r-net').textContent = money(r.netPerBox);
+
+    var gmBadge = document.getElementById('r-gm-badge');
+    if(r.grossMarginPct >= 50){ gmBadge.className='badge good'; gmBadge.textContent='健康 healthy'; }
+    else if(r.grossMarginPct > 0){ gmBadge.className='badge warn'; gmBadge.textContent='偏薄 thin'; }
+    else { gmBadge.className='badge'; gmBadge.textContent=''; }
+
+    var netBadge = document.getElementById('r-net-badge');
+    if(r.netPerBox > 0){ netBadge.className='badge good'; netBadge.textContent='赚 profit'; }
+    else { netBadge.className='badge warn'; netBadge.textContent='亏 loss'; }
+
+    document.getElementById('r-be').textContent = isFinite(r.breakEven) ? r.breakEven+' 盒' : '∞';
+    document.getElementById('r-mgross').textContent = money(r.monthlyGross);
+    var mnet = document.getElementById('r-mnet');
+    mnet.textContent = money(r.monthlyNet);
+    mnet.className = 'num ' + (r.monthlyNet >= 0 ? 'pos' : 'neg');
+  }
+
+  if(typeof document!=='undefined' && document.addEventListener){
+    document.addEventListener('input', function(e){ if(e.target && e.target.tagName==='INPUT') calc(); });
+    document.addEventListener('DOMContentLoaded', calc);
+    calc();
+  }
+  if(typeof globalThis!=='undefined'){ globalThis.__compute = compute; }
+</script>
+</body>
+</html>
