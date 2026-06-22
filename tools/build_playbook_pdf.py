@@ -11,10 +11,17 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
                                 HRFlowable, KeepTogether)
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
 
-FONT = 'STSong-Light'
-pdfmetrics.registerFont(UnicodeCIDFont(FONT))
+# Embed a real CJK TrueType font (subset travels inside the PDF) so it renders
+# correctly on ANY reader incl. iPhone. Adobe CID fonts (e.g. STSong-Light) are
+# NOT embedded and get mis-substituted on devices without them -> garbled text.
+FONT = 'WQY'
+_TTC = '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'
+pdfmetrics.registerFont(TTFont(FONT, _TTC, subfontIndex=0))
+# WenQuanYi Zen Hei has only a Regular weight; map bold/italic to it so <b>/<i>
+# never fall back to a non-embedded font. Emphasis is conveyed via colour instead.
+pdfmetrics.registerFontFamily(FONT, normal=FONT, bold=FONT, italic=FONT, boldItalic=FONT)
 
 GOLD = colors.HexColor('#6E4F31')
 GOLD_DEEP = colors.HexColor('#4A341F')
@@ -35,11 +42,11 @@ USABLE = PAGE_W - LMAR - RMAR
 
 # ---- styles ----
 body = ParagraphStyle('body', fontName=FONT, fontSize=10, leading=15.5, textColor=INK, spaceAfter=5)
-h1 = ParagraphStyle('h1', fontName=FONT, fontSize=22, leading=26, textColor=GOLD_DEEP, spaceBefore=6, spaceAfter=4)
+h1 = ParagraphStyle('h1', fontName=FONT, fontSize=19, leading=24, textColor=GOLD_DEEP, spaceBefore=6, spaceAfter=4)
 h2 = ParagraphStyle('h2', fontName=FONT, fontSize=15, leading=19, textColor=GOLD, spaceBefore=16, spaceAfter=4)
 h3 = ParagraphStyle('h3', fontName=FONT, fontSize=12, leading=16, textColor=GOLD_DEEP, spaceBefore=9, spaceAfter=3)
 sub = ParagraphStyle('sub', fontName=FONT, fontSize=10, leading=15, textColor=MUTED, alignment=1, spaceAfter=2)
-li = ParagraphStyle('li', parent=body, leftIndent=14, spaceAfter=3)
+li = ParagraphStyle('li', parent=body, leftIndent=16, bulletIndent=2, spaceAfter=3)
 cellst = ParagraphStyle('cell', fontName=FONT, fontSize=9, leading=12.5, textColor=INK)
 cellhd = ParagraphStyle('cellhd', fontName=FONT, fontSize=9, leading=12.5, textColor=colors.white)
 codest = ParagraphStyle('code', fontName=FONT, fontSize=9, leading=14, textColor=GOLD_DEEP)
@@ -56,8 +63,9 @@ def vis_len(s):
 def inline(text):
     text = EMOJI.sub('', text)
     text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-    text = re.sub(r'`([^`]+)`', lambda m: '<font name="%s" color="#4A341F">%s</font>' % (FONT, m.group(1)), text)
-    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'`([^`]+)`', lambda m: '<font color="#4A341F">%s</font>' % m.group(1), text)
+    # WQY has no bold weight -> render **emphasis** as deep-brown coloured text
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<font color="#4A341F"><b>\1</b></font>', text)
     text = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', text)
     return text.strip()
 
@@ -213,12 +221,12 @@ def parse(md):
                 it = lines[i].strip()
                 m = re.match(r'^(-|\*)\s+\[ \]\s+(.*)', it)
                 if m:
-                    flow.append(Paragraph('[ ]&nbsp;&nbsp;' + inline(m.group(2)), li))
+                    flow.append(Paragraph(inline(m.group(2)), li, bulletText='□'))
                 elif re.match(r'^(-|\*)\s+', it):
-                    flow.append(Paragraph('•&nbsp;&nbsp;' + inline(re.sub(r'^(-|\*)\s+', '', it)), li))
+                    flow.append(Paragraph(inline(re.sub(r'^(-|\*)\s+', '', it)), li, bulletText='•'))
                 else:
                     num = re.match(r'^(\d+\.)\s+(.*)', it)
-                    flow.append(Paragraph('<b>' + num.group(1) + '</b>&nbsp;&nbsp;' + inline(num.group(2)), li))
+                    flow.append(Paragraph(inline(num.group(2)), li, bulletText=num.group(1)))
                 i += 1
             flow.append(Spacer(1, 3))
             continue
