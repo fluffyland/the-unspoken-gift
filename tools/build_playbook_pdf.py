@@ -40,17 +40,17 @@ PAGE_W, PAGE_H = A4
 LMAR = RMAR = 1.5 * cm
 USABLE = PAGE_W - LMAR - RMAR
 
-# ---- styles ----
-body = ParagraphStyle('body', fontName=FONT, fontSize=10, leading=15.5, textColor=INK, spaceAfter=5)
-h1 = ParagraphStyle('h1', fontName=FONT, fontSize=19, leading=24, textColor=GOLD_DEEP, spaceBefore=6, spaceAfter=4)
-h2 = ParagraphStyle('h2', fontName=FONT, fontSize=15, leading=19, textColor=GOLD, spaceBefore=16, spaceAfter=4)
-h3 = ParagraphStyle('h3', fontName=FONT, fontSize=12, leading=16, textColor=GOLD_DEEP, spaceBefore=9, spaceAfter=3)
-sub = ParagraphStyle('sub', fontName=FONT, fontSize=10, leading=15, textColor=MUTED, alignment=1, spaceAfter=2)
-li = ParagraphStyle('li', parent=body, leftIndent=16, bulletIndent=2, spaceAfter=3)
-cellst = ParagraphStyle('cell', fontName=FONT, fontSize=9, leading=12.5, textColor=INK)
-cellhd = ParagraphStyle('cellhd', fontName=FONT, fontSize=9, leading=12.5, textColor=colors.white)
-codest = ParagraphStyle('code', fontName=FONT, fontSize=9, leading=14, textColor=GOLD_DEEP)
-callst = ParagraphStyle('call', fontName=FONT, fontSize=10, leading=15, textColor=INK)
+# ---- styles (uniform type system: restrained 3-level hierarchy) ----
+body = ParagraphStyle('body', fontName=FONT, fontSize=10.5, leading=16, textColor=INK, spaceAfter=7)
+h1 = ParagraphStyle('h1', fontName=FONT, fontSize=16, leading=21, textColor=GOLD_DEEP, spaceBefore=4, spaceAfter=6)
+h2 = ParagraphStyle('h2', fontName=FONT, fontSize=13, leading=18, textColor=GOLD, spaceBefore=8, spaceAfter=6)
+h3 = ParagraphStyle('h3', fontName=FONT, fontSize=10.5, leading=16, textColor=GOLD_DEEP, spaceBefore=10, spaceAfter=4)
+sub = ParagraphStyle('sub', fontName=FONT, fontSize=10.5, leading=15, textColor=MUTED, alignment=1, spaceAfter=2)
+li = ParagraphStyle('li', parent=body, leftIndent=16, bulletIndent=2, spaceAfter=4)
+cellst = ParagraphStyle('cell', fontName=FONT, fontSize=9.5, leading=13, textColor=INK)
+cellhd = ParagraphStyle('cellhd', fontName=FONT, fontSize=9.5, leading=13, textColor=colors.white)
+codest = ParagraphStyle('code', fontName=FONT, fontSize=9.5, leading=14, textColor=GOLD_DEEP)
+callst = ParagraphStyle('call', fontName=FONT, fontSize=10.5, leading=16, textColor=INK)
 
 # strip emoji / pictographs that the CID font can't render (keep arrows, math, CJK)
 EMOJI = re.compile(
@@ -137,10 +137,10 @@ def make_code(lines):
     t.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), HEADBG),
         ('BOX', (0, 0), (-1, -1), 0.5, GOLD_LIGHT),
-        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
         ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 7),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
     ]))
     return t
 
@@ -164,7 +164,7 @@ def parse(md):
                 buf.append(lines[j])
                 j += 1
             flow.append(make_code(buf))
-            flow.append(Spacer(1, 5))
+            flow.append(Spacer(1, 6))
             i = j + 1
             continue
         # table
@@ -177,27 +177,19 @@ def parse(md):
                 flow.append(make_table(buf))
                 flow.append(Spacer(1, 6))
             continue
-        # hr
+        # hr (the single, uniform section divider used throughout)
         if s in ('---', '***', '___'):
-            flow.append(Spacer(1, 2))
-            flow.append(HRFlowable(width='100%', thickness=0.6, color=LINE,
-                                   spaceBefore=2, spaceAfter=6))
+            flow.append(HRFlowable(width='100%', thickness=0.5, color=LINE,
+                                   spaceBefore=4, spaceAfter=10))
             i += 1
             continue
-        # headings
+        # headings (no underlines; hierarchy via size + colour + spacing only)
         if s.startswith('# '):
-            txt = inline(s[2:])
-            flow.append(Paragraph(txt, h1))
-            if not first_h1_done:
-                flow.append(HRFlowable(width='100%', thickness=1.2, color=GOLD,
-                                       spaceBefore=3, spaceAfter=4))
-                first_h1_done = True
+            flow.append(Paragraph(inline(s[2:]), h1))
             i += 1
             continue
         if s.startswith('## '):
             flow.append(Paragraph(inline(s[3:]), h2))
-            flow.append(HRFlowable(width='100%', thickness=0.8, color=GOLD_LIGHT,
-                                   spaceBefore=1, spaceAfter=5))
             i += 1
             continue
         if s.startswith('### '):
