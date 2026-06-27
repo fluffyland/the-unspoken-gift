@@ -1,9 +1,9 @@
 /**
  * The Unspoken Gift — order logger (Google Apps Script Web App)
- * Columns: Order No / Status / Time / Items / Qty /
+ * Columns: Order No / Status / Time / Items / Qty / Subtotal /
  *          Name / Phone / Recipient Name / Recipient Phone / Email /
  *          Address / Postal / Delivery Date / Delivery Time /
- *          Subtotal / Card Message / Notes
+ *          Card Message / Notes
  */
 
 const TOKEN = 'ug-7f3a9c2e';   // must match ORDER_TOKEN on the website
@@ -25,6 +25,7 @@ const HEADERS = [
   '时间\nTime',
   '商品明细\nOrdered Items',
   '数量\nQty',
+  '小计\nSubtotal',
   '姓名\nName',
   '电话\nPhone',
   '收礼人姓名\nRecipient Name',
@@ -34,13 +35,12 @@ const HEADERS = [
   '邮编\nPostal',
   '送达日期\nDelivery Date',
   '送达时段\nDelivery Time',
-  '小计\nSubtotal',
   '贺卡留言\nCard Message',
   '备注\nNotes'
 ];
 
 // columns that must stay TEXT (phone/postal) so + and leading 0 survive, no green triangle
-const TEXT_COLS = { 7: 'phone', 9: 'recipientPhone', 12: 'postal' };
+const TEXT_COLS = { 8: 'phone', 10: 'recipientPhone', 13: 'postal' };
 const WRAP_COLS = [4, 16];   // Items + Card Message (they hold multi-line content)
 
 function doPost(e) {
@@ -60,6 +60,7 @@ function doPost(e) {
       esc(data.ts || ''),
       esc(data.items || ''),
       num(data.qty),
+      num(data.subtotal),
       esc(data.name || ''),
       esc(phone),
       esc(data.recipientName || ''),
@@ -69,7 +70,6 @@ function doPost(e) {
       esc(data.postal || ''),
       esc(data.date || ''),
       esc(data.time || ''),
-      num(data.subtotal),
       esc(data.giftcard || ''),
       esc(data.notes || '')
     ];
@@ -92,9 +92,9 @@ function formatRow(sheet, r, data, phone) {
   WRAP_COLS.forEach(function (c) { sheet.getRange(r, c).setWrap(true); });
 
   // phone-like cells → force text format then write the raw value (kills #ERROR + green triangle)
-  setText(sheet, r, 7, phone);
-  setText(sheet, r, 9, data.recipientPhone || '');
-  setText(sheet, r, 12, data.postal || '');
+  setText(sheet, r, 8, phone);
+  setText(sheet, r, 10, data.recipientPhone || '');
+  setText(sheet, r, 13, data.postal || '');
 
   // status dropdown
   const rule = SpreadsheetApp.newDataValidation()
