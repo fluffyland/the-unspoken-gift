@@ -108,6 +108,23 @@ function setText(sheet, r, col, val) {
   sheet.getRange(r, col).setNumberFormat('@').setValue(String(val == null ? '' : val));
 }
 
+/**
+ * Run this ONCE from the editor to (re)write the header row.
+ * Select "setupHeaders" in the function dropdown ▸ click Run.
+ * It CLEARS the sheet first so the old column layout can't misalign,
+ * then writes the new bilingual headers. (Only run on a test/empty sheet.)
+ */
+function setupHeaders() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  sheet.clear();
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS])
+       .setFontWeight('bold')
+       .setHorizontalAlignment('left')
+       .setVerticalAlignment('middle')
+       .setWrap(true);
+  sheet.setFrozenRows(1);
+}
+
 function ensureHeaders(sheet) {
   if (sheet.getRange(1, 1).getValue() !== '') return;   // already has a header row
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS])
