@@ -51,27 +51,30 @@ function doPost(e) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
     ensureHeaders(sheet);
 
-    const phone = data.phone || data.contact || '';
-    const orderNo = uniqueOrderNo(sheet, String(data.orderNo || ''));
+    const phone = cap(data.phone || data.contact || '', 40);
+    const orderNo = uniqueOrderNo(sheet, cap(String(data.orderNo || ''), 40));
+    // status must be one of the known lifecycle values — never a caller-supplied string
+    // (blocks formula injection via this un-esc'd column and keeps the dropdown consistent)
+    const status = STATUS_OPTIONS.indexOf(data.status) >= 0 ? data.status : STATUS_OPTIONS[0];
 
     const row = [
       esc(orderNo),
-      data.status || STATUS_OPTIONS[0],
-      esc(data.ts || ''),
-      esc(data.items || ''),
+      status,
+      esc(cap(data.ts, 40)),
+      esc(cap(data.items, 2000)),
       num(data.qty),
       num(data.subtotal),
-      esc(data.name || ''),
+      esc(cap(data.name, 120)),
       esc(phone),
-      esc(data.recipientName || ''),
-      esc(data.recipientPhone || ''),
-      esc(data.email || ''),
-      esc(data.address || ''),
-      esc(data.postal || ''),
-      esc(data.date || ''),
-      esc(data.time || ''),
-      esc(data.giftcard || ''),
-      esc(data.notes || '')
+      esc(cap(data.recipientName, 120)),
+      esc(cap(data.recipientPhone, 40)),
+      esc(cap(data.email, 160)),
+      esc(cap(data.address, 300)),
+      esc(cap(data.postal, 20)),
+      esc(cap(data.date, 40)),
+      esc(cap(data.time, 60)),
+      esc(cap(data.giftcard, 2000)),
+      esc(cap(data.notes, 1000))
     ];
 
     sheet.appendRow(row);
@@ -156,6 +159,13 @@ function esc(v) {
 
 function num(v) {
   return (v === 0 || (v && !isNaN(v))) ? Number(v) : '';
+}
+
+// clamp a field's length so a malicious/huge payload can't bloat a cell or the sheet
+function cap(v, n) {
+  if (v === null || v === undefined) return '';
+  const s = String(v);
+  return s.length > n ? s.slice(0, n) : s;
 }
 
 function out(obj) {
