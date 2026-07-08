@@ -260,9 +260,12 @@ language sql stable security definer set search_path = public as $$
   grp as (
     select x.id from employees x, app a
     join employees e on e.id = a.emp_id
+    -- "department" = same dept field, plus the person's own manager (the leader
+    -- counts as a member), plus their direct reports. We deliberately do NOT
+    -- group by shared approver1: everyone reporting to the Managing Director is
+    -- a head of a DIFFERENT department, not one team.
     where x.id <> e.id and x.active
       and (x.dept = e.dept
-           or (x.approver1 is not null and x.approver1 = e.approver1)
            or x.id = e.approver1
            or x.approver1 = e.id)
   )

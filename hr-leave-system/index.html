@@ -593,13 +593,18 @@ function inbox(u) {
    same-dept colleagues, teammates sharing the same approver, their approver,
    and their own direct reports (so a manager counts as part of the team). */
 function conflictGroup(empId) {
+  // A "department" for conflict purposes = people sharing the same dept field,
+  // plus the person's own manager (the leader counts as a department member),
+  // plus this person's own direct reports if they are a manager.
+  // We deliberately do NOT group by "same approver1": at the top of the org
+  // everyone reports directly to the Managing Director (Doris), and those
+  // direct reports are heads of DIFFERENT departments — they are not one team.
   const e = emp(empId), ids = new Set();
   for (const x of db.employees) {
     if (x.id === empId || x.active === false) continue;
-    if (x.dept === e.dept) ids.add(x.id);
-    if (x.approver1 && e.approver1 && x.approver1 === e.approver1) ids.add(x.id);
-    if (x.id === e.approver1) ids.add(x.id);
-    if (x.approver1 === empId) ids.add(x.id);
+    if (x.dept === e.dept) ids.add(x.id);   // same department
+    if (x.id === e.approver1) ids.add(x.id); // my manager (leader is in the dept)
+    if (x.approver1 === empId) ids.add(x.id); // my direct reports (if I lead)
   }
   return ids;
 }
