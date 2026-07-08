@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeaveDesk SG — 请假管理系统（演示版）</title>
+<style>
+:root{
+  --bg:#f2f4f7; --surface:#ffffff; --line:#dfe4ea; --ink:#1c2530; --muted:#5d6a79;
+  --accent:#0c6b60; --accent-ink:#ffffff; --accent-soft:#e2f0ed; --accent-line:#b8dcd5;
+  --good:#1a7a4a; --good-soft:#e2f2e8;
+  --warn:#96590e; --warn-soft:#fcefd9;
+  --bad:#b23a31; --bad-soft:#fbe6e4;
+  --info:#6a4da3; --info-soft:#eee8f8;
+  --gray-soft:#e9edf2;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 4px 14px rgba(20,30,40,.05);
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#10161d; --surface:#1a222c; --line:#2b3644; --ink:#e7edf3; --muted:#95a2b2;
+    --accent:#37a08f; --accent-ink:#08211d; --accent-soft:#15352f; --accent-line:#26584f;
+    --good:#4cbf82; --good-soft:#173226;
+    --warn:#e0a34e; --warn-soft:#38290f;
+    --bad:#e57a70; --bad-soft:#3a1c19;
+    --info:#ab90e0; --info-soft:#291f3d;
+    --gray-soft:#232d39;
+    --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f2f4f7; --surface:#ffffff; --line:#dfe4ea; --ink:#1c2530; --muted:#5d6a79;
+  --accent:#0c6b60; --accent-ink:#ffffff; --accent-soft:#e2f0ed; --accent-line:#b8dcd5;
+  --good:#1a7a4a; --good-soft:#e2f2e8; --warn:#96590e; --warn-soft:#fcefd9;
+  --bad:#b23a31; --bad-soft:#fbe6e4; --info:#6a4da3; --info-soft:#eee8f8;
+  --gray-soft:#e9edf2;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 4px 14px rgba(20,30,40,.05);
+}
+:root[data-theme="dark"]{
+  --bg:#10161d; --surface:#1a222c; --line:#2b3644; --ink:#e7edf3; --muted:#95a2b2;
+  --accent:#37a08f; --accent-ink:#08211d; --accent-soft:#15352f; --accent-line:#26584f;
+  --good:#4cbf82; --good-soft:#173226; --warn:#e0a34e; --warn-soft:#38290f;
+  --bad:#e57a70; --bad-soft:#3a1c19; --info:#ab90e0; --info-soft:#291f3d;
+  --gray-soft:#232d39;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+}
+button{font:inherit;cursor:pointer;border:none;border-radius:8px}
+input,select,textarea{
+  font:inherit;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-width:100%;
+}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+a{color:var(--accent)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+.wrap{max-width:1060px;margin:0 auto;padding:0 16px}
+.topbar{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.topbar .wrap{display:flex;align-items:center;gap:12px;height:56px}
+.logo{display:flex;align-items:baseline;gap:8px;font-weight:700;font-size:17px;letter-spacing:.2px}
+.logo .beta{font-size:11px;font-weight:600;color:var(--warn);background:var(--warn-soft);padding:1px 8px;border-radius:99px;letter-spacing:.08em}
+.spacer{flex:1}
+.userchip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+.iconbtn{background:transparent;color:var(--muted);padding:6px 10px;border-radius:8px;position:relative}
+.iconbtn:hover{background:var(--gray-soft);color:var(--ink)}
+.badge{position:absolute;top:0;right:2px;background:var(--bad);color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:0 5px;line-height:15px}
+.nav{background:var(--surface);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;gap:2px;overflow-x:auto}
+.nav button{background:transparent;color:var(--muted);padding:11px 14px;border-radius:0;border-bottom:2px solid transparent;white-space:nowrap;font-weight:500}
+.nav button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.nav button:hover{color:var(--ink)}
+.nav .cnt{display:inline-block;min-width:18px;text-align:center;background:var(--bad);color:#fff;border-radius:99px;font-size:11px;font-weight:700;padding:0 5px;margin-left:6px;line-height:17px}
+
+main{padding:22px 0 60px}
+h2{font-size:19px;margin:0 0 4px}
+h3{font-size:15px;margin:0 0 10px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+.stack{display:flex;flex-direction:column;gap:16px}
+
+.balgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:20px}
+.bal{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px}
+.bal .t{font-size:13px;font-weight:600}
+.bal .en{font-size:11px;color:var(--muted);letter-spacing:.04em}
+.bal .n{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;margin:2px 0 0;color:var(--accent)}
+.bal .n small{font-size:13px;color:var(--muted);font-weight:500}
+.bal .d{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+.pill{display:inline-block;font-size:12px;font-weight:600;border-radius:99px;padding:2px 10px;white-space:nowrap}
+.st-pending{background:var(--warn-soft);color:var(--warn)}
+.st-approved{background:var(--good-soft);color:var(--good)}
+.st-rejected{background:var(--bad-soft);color:var(--bad)}
+.st-returned{background:var(--warn-soft);color:var(--warn)}
+.st-withdrawn{background:var(--gray-soft);color:var(--muted)}
+.st-cancel_requested{background:var(--info-soft);color:var(--info)}
+.st-cancelled{background:var(--gray-soft);color:var(--muted)}
+
+.tablebox{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{color:var(--muted);font-weight:600;text-align:left;font-size:12px;letter-spacing:.03em}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.rowlink{cursor:pointer}
+tr.rowlink:hover td{background:var(--gray-soft)}
+td.num{font-variant-numeric:tabular-nums}
+
+.btn{background:var(--accent);color:var(--accent-ink);padding:9px 18px;font-weight:600}
+.btn:hover{filter:brightness(1.07)}
+.btn.sec{background:var(--gray-soft);color:var(--ink)}
+.btn.good{background:var(--good);color:#fff}
+.btn.warn{background:var(--warn);color:#fff}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent-line)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.field label{font-size:13px;font-weight:600}
+.field .hint{font-size:12px;color:var(--muted)}
+.frow{display:flex;gap:14px;flex-wrap:wrap}
+.frow .field{flex:1;min-width:160px}
+.check{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.check input{width:16px;height:16px}
+
+.callout{border-radius:var(--r);padding:12px 16px;font-size:13.5px;border:1px solid}
+.callout.acc{background:var(--accent-soft);border-color:var(--accent-line);color:var(--ink)}
+.callout.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--ink)}
+
+.applist{display:flex;flex-direction:column;gap:12px}
+.appcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px}
+.appcard .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.appcard .hd b{font-size:15px}
+.meta{color:var(--muted);font-size:13px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:8px 0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+.steps{display:flex;flex-direction:column;gap:6px;margin:10px 0;font-size:13.5px}
+.step{display:flex;align-items:center;gap:8px}
+.step .dot{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none}
+.step.ok .dot{background:var(--good-soft);color:var(--good)}
+.step.now .dot{background:var(--warn-soft);color:var(--warn)}
+.step.off .dot{background:var(--gray-soft);color:var(--muted)}
+.step.no .dot{background:var(--bad-soft);color:var(--bad)}
+
+.timeline{list-style:none;margin:10px 0 0;padding:0;font-size:13px}
+.timeline li{padding:6px 0 6px 18px;border-left:2px solid var(--line);position:relative}
+.timeline li::before{content:"";position:absolute;left:-5px;top:12px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.timeline .tm{color:var(--muted);font-size:12px}
+
+.modalback{position:fixed;inset:0;background:rgba(10,15,20,.45);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto}
+.modal{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);max-width:620px;width:100%;padding:22px}
+.modal .hd{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.modal .hd h3{flex:1;margin:0;font-size:17px}
+
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.tabs button{background:var(--gray-soft);color:var(--muted);padding:7px 14px;font-weight:600;font-size:13px;border-radius:99px}
+.tabs button.on{background:var(--accent);color:var(--accent-ink)}
+
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:30px 16px}
+.loginbox{max-width:520px;width:100%}
+.loginbox h1{font-size:26px;margin:0 0 4px;letter-spacing:.2px}
+.loginbox .tag{color:var(--muted);margin:0 0 24px;font-size:14px}
+.acclist{display:flex;flex-direction:column;gap:10px}
+.acc{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:13px 16px;text-align:left;width:100%}
+.acc:hover{border-color:var(--accent);}
+.acc .who{flex:1}
+.acc .who b{display:block;font-size:15px}
+.acc .who span{font-size:12.5px;color:var(--muted)}
+.rolechip{font-size:11.5px;font-weight:700;border-radius:6px;padding:2px 8px;letter-spacing:.05em}
+.rl-employee{background:var(--gray-soft);color:var(--muted)}
+.rl-approver{background:var(--accent-soft);color:var(--accent)}
+.rl-hr{background:var(--info-soft);color:var(--info)}
+.footnote{color:var(--muted);font-size:12.5px;margin-top:22px;line-height:1.7}
+
+.mailpanel{position:absolute;right:0;top:44px;width:min(360px,88vw);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);z-index:40;max-height:420px;overflow-y:auto}
+.mailpanel .mi{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.mailpanel .mi b{display:block;font-size:13px}
+.mailpanel .mi .tm{color:var(--muted);font-size:11.5px}
+.mailpanel .mi p{margin:4px 0 0;color:var(--muted);white-space:pre-wrap}
+
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 20px;border-radius:99px;font-size:14px;font-weight:600;box-shadow:var(--shadow);z-index:99;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast.show{opacity:1}
+.phchips{display:flex;flex-wrap:wrap;gap:6px}
+.phchips span{background:var(--gray-soft);border-radius:6px;padding:2px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:14px;padding:26px 0;text-align:center}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" role="status"></div>
+<script>
+"use strict";
+/* ============ 数据层（演示：localStorage；正式版换成 Supabase） ============ */
+const LS_KEY = "sghr_demo_v1";
+let db, me = null, view = "dashboard", vp = {}, hrTab = "records", mailOpen = false;
+
+const pad = n => String(n).padStart(2, "0");
+const iso = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+const todayStr = () => iso(new Date());
+const dstr = off => { const d = new Date(); d.setDate(d.getDate() + off); return iso(d); };
+const nowTs = () => Date.now();
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTs = ts => { const d = new Date(ts); return iso(d) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
+
+function seed() {
+  const y = new Date().getFullYear();
+  const employees = [
+    { id: "e1", name: "陈小明", email: "xiaoming@demo.sg", dept: "运营部", gender: "M", role: "employee", joinDate: (y-2)+"-03-01", approver1: "e3", approver2: null, twoLevel: false, mailSeen: 0 },
+    { id: "e2", name: "林小红", email: "xiaohong@demo.sg", dept: "销售部", gender: "F", role: "employee", joinDate: (y-4)+"-08-15", approver1: "e3", approver2: "e4", twoLevel: true, mailSeen: 0 },
+    { id: "e3", name: "李伟强", email: "manager@demo.sg", dept: "运营部", gender: "M", role: "approver", joinDate: (y-6)+"-05-02", approver1: "e4", approver2: null, twoLevel: false, mailSeen: 0 },
+    { id: "e4", name: "王美玲", email: "director@demo.sg", dept: "管理层", gender: "F", role: "approver", joinDate: (y-8)+"-01-10", approver1: "e5", approver2: null, twoLevel: false, mailSeen: 0 },
+    { id: "e5", name: "张惠敏", email: "hr@demo.sg", dept: "人事部", gender: "F", role: "hr", joinDate: (y-5)+"-11-20", approver1: "e4", approver2: null, twoLevel: false, mailSeen: 0 },
+  ];
+  const leaveTypes = [
+    { code: "annual", zh: "年假", en: "Annual Leave", mc: false, gender: null, noDeduct: false, days: 14, sort: 1 },
+    { code: "sick", zh: "病假（门诊）", en: "Sick Leave", mc: true, gender: null, noDeduct: false, days: 14, sort: 2 },
+    { code: "hosp", zh: "住院假", en: "Hospitalisation Leave", mc: true, gender: null, noDeduct: false, days: 60, sort: 3, note: "MOM 规定与门诊病假合计 60 天，演示版分开记账" },
+    { code: "childcare", zh: "育儿假", en: "Childcare Leave", mc: false, gender: null, noDeduct: false, days: 6, sort: 4 },
+    { code: "oil", zh: "补休", en: "Off-in-Lieu", mc: false, gender: null, noDeduct: false, days: 0, sort: 5, note: "由加班入账获得" },
+    { code: "maternity", zh: "产假", en: "Maternity Leave", mc: false, gender: "F", noDeduct: false, days: 112, sort: 6, note: "16 周（政府 GPML）" },
+    { code: "paternity", zh: "陪产假", en: "Paternity Leave", mc: false, gender: "M", noDeduct: false, days: 28, sort: 7, note: "4 周（GPPL）" },
+    { code: "infant", zh: "无薪婴儿照顾假", en: "Unpaid Infant Care", mc: false, gender: null, noDeduct: false, days: 6, sort: 8 },
+    { code: "compassionate", zh: "恩恤假", en: "Compassionate Leave", mc: false, gender: null, noDeduct: false, days: 3, sort: 9 },
+    { code: "marriage", zh: "婚假", en: "Marriage Leave", mc: false, gender: null, noDeduct: false, days: 3, sort: 10 },
+    { code: "ns", zh: "战备军人假", en: "NS / Reservist", mc: false, gender: "M", noDeduct: true, days: 0, sort: 11, note: "不扣配额，仅记录" },
+    { code: "unpaid", zh: "无薪假", en: "Unpaid Leave", mc: false, gender: null, noDeduct: true, days: 0, sort: 12 },
+  ];
+  // 新加坡公共假期（2026，HR 可在正式版中维护）
+  const publicHolidays = [
+    "2026-01-01","2026-02-17","2026-02-18","2026-03-21","2026-04-03","2026-05-01",
+    "2026-05-27","2026-05-31","2026-06-01","2026-08-09","2026-08-10","2026-11-08","2026-11-09","2026-12-25"
+  ];
+  const ledger = [];
+  const grant = (empId, type, delta, reason) =>
+    ledger.push({ id: "L" + (ledger.length + 1), empId, type, delta, reason, refApp: null, by: "e5", ts: new Date(y, 0, 1, 9).getTime() });
+  const annualByEmp = { e1: 14, e2: 16, e3: 18, e4: 21, e5: 14 };
+  for (const e of employees) {
+    grant(e.id, "annual", annualByEmp[e.id], y + " 年度配额");
+    grant(e.id, "sick", 14, y + " 年度配额");
+    grant(e.id, "hosp", 60, y + " 年度配额");
+    grant(e.id, "childcare", 6, y + " 年度配额");
+    grant(e.id, "compassionate", 3, y + " 年度配额");
+    grant(e.id, "marriage", 3, y + " 年度配额");
+  }
+  grant("e1", "oil", 2, "周末加班补休入账");
+  grant("e2", "oil", 1, "公共假期值班补休入账");
+
+  const applications = [], events = [], outbox = [];
+  const ev = (appId, actor, action, comment, ts) => events.push({ appId, actor, action, comment: comment || "", ts });
+  const mail = (to, subject, body, ts) => outbox.push({ id: "M" + (outbox.length + 1), to, subject, body, ts });
+
+  // 已完成：陈小明 20 天前病假 1 天（已批准、已扣账）
+  applications.push({
+    id: "A1", empId: "e1", type: "sick", start: dstr(-20), end: dstr(-20), sh: false, eh: false,
+    days: 1, reason: "发烧就诊，附 MC", att: "MC_clinic.pdf", status: "approved", cur: 0,
+    steps: [{ order: 1, approverId: "e3", status: "approved", comment: "注意休息", ts: nowTs() - 19.5 * 864e5 }],
+    createdAt: nowTs() - 20 * 864e5, backdated: false
+  });
+  ev("A1", "e1", "提交申请", "", nowTs() - 20 * 864e5);
+  ev("A1", "e3", "批准", "注意休息", nowTs() - 19.5 * 864e5);
+  ledger.push({ id: "L" + (ledger.length + 1), empId: "e1", type: "sick", delta: -1, reason: "请假扣减", refApp: "A1", by: "e3", ts: nowTs() - 19.5 * 864e5 });
+  mail("xiaoming@demo.sg", "【已批准】您的病假申请（1 天）", "李伟强已批准您 " + dstr(-20) + " 的病假。\n备注：注意休息", nowTs() - 19.5 * 864e5);
+
+  // 待审批：陈小明年假 2 天（一级链，等李伟强）
+  applications.push({
+    id: "A2", empId: "e1", type: "annual", start: dstr(7), end: dstr(8), sh: false, eh: false,
+    days: wdCount(dstr(7), dstr(8), false, false, publicHolidays), reason: "家庭旅行", att: "", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "e3", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 864e5, backdated: false
+  });
+  ev("A2", "e1", "提交申请", "", nowTs() - 864e5);
+  mail("manager@demo.sg", "【待审批】陈小明的年假申请", "陈小明申请 " + dstr(7) + " 至 " + dstr(8) + " 年假，请登录系统处理。", nowTs() - 864e5);
+
+  // 两级链演示：林小红年假，李伟强已批第 1 级，等王美玲第 2 级
+  applications.push({
+    id: "A3", empId: "e2", type: "annual", start: dstr(12), end: dstr(16), sh: false, eh: false,
+    days: wdCount(dstr(12), dstr(16), false, false, publicHolidays), reason: "回马来西亚探亲", att: "", status: "pending", cur: 1,
+    steps: [
+      { order: 1, approverId: "e3", status: "approved", comment: "同意", ts: nowTs() - 0.5 * 864e5 },
+      { order: 2, approverId: "e4", status: "pending", comment: "", ts: null }
+    ],
+    createdAt: nowTs() - 2 * 864e5, backdated: false
+  });
+  ev("A3", "e2", "提交申请", "", nowTs() - 2 * 864e5);
+  ev("A3", "e3", "第 1 级批准", "同意", nowTs() - 0.5 * 864e5);
+  mail("manager@demo.sg", "【待审批】林小红的年假申请", "林小红申请 " + dstr(12) + " 至 " + dstr(16) + " 年假，请登录系统处理。", nowTs() - 2 * 864e5);
+  mail("director@demo.sg", "【待审批·第 2 级】林小红的年假申请", "第 1 级（李伟强）已批准，请您做最终审批。", nowTs() - 0.5 * 864e5);
+  mail("xiaohong@demo.sg", "【进度】您的年假申请已通过第 1 级审批", "李伟强已批准，正等待王美玲最终审批。", nowTs() - 0.5 * 864e5);
+
+  // 经理本人也请假：李伟强 → 王美玲
+  applications.push({
+    id: "A4", empId: "e3", type: "annual", start: dstr(21), end: dstr(23), sh: false, eh: false,
+    days: wdCount(dstr(21), dstr(23), false, false, publicHolidays), reason: "个人事务", att: "", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "e4", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 3600e3, backdated: false
+  });
+  ev("A4", "e3", "提交申请", "", nowTs() - 3600e3);
+  mail("director@demo.sg", "【待审批】李伟强的年假申请", "李伟强申请 " + dstr(21) + " 至 " + dstr(23) + " 年假，请登录系统处理。", nowTs() - 3600e3);
+
+  return { v: 1, seq: 5, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
+}
+
+/* 工作日折算（排除周末 + 新加坡公共假期，支持首尾半天） */
+function wdCount(start, end, sh, eh, phList) {
+  const ph = phList || db.publicHolidays;
+  const s = new Date(start + "T00:00:00"), e = new Date(end + "T00:00:00");
+  if (!(s <= e)) return 0;
+  const list = [];
+  for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const wd = d.getDay();
+    if (wd !== 0 && wd !== 6 && !ph.includes(iso(d))) list.push(iso(d));
+  }
+  let n = list.length;
+  if (sh && list[0] === start) n -= 0.5;
+  if (eh && list[list.length - 1] === end) n -= 0.5;
+  if (n <= 0 && list.length) n = 0.5;
+  return n;
+}
+
+function load() { try { const raw = localStorage.getItem(LS_KEY); if (raw) { db = JSON.parse(raw); return; } } catch (e) {} db = seed(); save(); }
+function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(db)); } catch (e) {} }
+function resetDemo() { localStorage.removeItem(LS_KEY); me = null; db = seed(); save(); view = "dashboard"; render(); toast("演示数据已重置"); }
+
+const emp = id => db.employees.find(e => e.id === id);
+const lt = c => db.leaveTypes.find(t => t.code === c);
+const roleZh = r => ({ employee: "员工", approver: "上司", hr: "HR", admin: "管理员" }[r] || r);
+const stZh = s => ({ pending: "待审批", approved: "已批准", rejected: "已拒绝", returned: "已退回", withdrawn: "已撤回", cancel_requested: "销假待确认", cancelled: "已销假" }[s] || s);
+
+function bal(empId, code) {
+  let granted = 0, used = 0;
+  for (const l of db.ledger) if (l.empId === empId && l.type === code) { if (l.delta > 0) granted += l.delta; else used -= l.delta; }
+  let pending = 0;
+  for (const a of db.applications) if (a.empId === empId && a.type === code && a.status === "pending") pending += a.days;
+  return { granted, used, pending, avail: granted - used - pending };
+}
+function eligible(t, e) { return !t.gender || t.gender === e.gender; }
+
+/* ============ 模拟邮件（正式版 = Supabase Edge Function + Resend） ============ */
+function sendMail(toEmpId, subject, body) { const to = emp(toEmpId); if (!to) return; db.outbox.push({ id: "M" + (++db.seq), to: to.email, subject, body, ts: nowTs() }); }
+function logEv(appId, actor, action, comment) { db.events.push({ appId, actor, action, comment: comment || "", ts: nowTs() }); }
+
+/* ============ 状态机 ============ */
+function makeSteps(e) {
+  const s = [{ order: 1, approverId: e.approver1, status: "pending", comment: "", ts: null }];
+  if (e.twoLevel && e.approver2) s.push({ order: 2, approverId: e.approver2, status: "waiting", comment: "", ts: null });
+  return s;
+}
+function appLabel(a) { const t = lt(a.type); return t.zh + "（" + emp(a.empId).name + "，" + fmtD(a.days) + " 天）"; }
+
+function submitApp(data, editId) {
+  const applicant = emp(me.id);
+  const id = editId || "A" + (++db.seq);
+  const base = { id, empId: me.id, ...data, status: "pending", cur: 0, steps: makeSteps(applicant), createdAt: nowTs() };
+  if (editId) { const i = db.applications.findIndex(a => a.id === editId); db.applications[i] = { ...db.applications[i], ...base }; }
+  else db.applications.push(base);
+  logEv(id, me.id, editId ? "修改后重新提交" : "提交申请");
+  const a1 = base.steps[0].approverId;
+  sendMail(a1, "【待审批】" + applicant.name + "的" + lt(data.type).zh + "申请",
+    applicant.name + " 申请 " + data.start + " 至 " + data.end + " " + lt(data.type).zh + "（" + fmtD(data.days) + " 天）。\n事由：" + data.reason + "\n请登录系统处理。");
+  save();
+  return id;
+}
+
+function actOnStep(appId, action, comment) {
+  const a = db.applications.find(x => x.id === appId);
+  if (!a || a.status !== "pending") return;
+  const step = a.steps[a.cur];
+  if (step.approverId !== me.id) return;
+  step.comment = comment || ""; step.ts = nowTs();
+  const applicant = a.empId, t = lt(a.type);
+  if (action === "approve") {
+    step.status = "approved";
+    if (a.cur + 1 < a.steps.length) {
+      logEv(appId, me.id, "第 " + step.order + " 级批准", comment);
+      a.cur++; a.steps[a.cur].status = "pending";
+      sendMail(a.steps[a.cur].approverId, "【待审批·第 " + a.steps[a.cur].order + " 级】" + emp(applicant).name + "的" + t.zh + "申请",
+        "第 " + step.order + " 级（" + me.name + "）已批准，请您做最终审批。");
+      sendMail(applicant, "【进度】您的" + t.zh + "申请已通过第 " + step.order + " 级审批",
+        me.name + " 已批准，正等待 " + emp(a.steps[a.cur].approverId).name + " 最终审批。");
+    } else {
+      a.status = "approved";
+      logEv(appId, me.id, "批准", comment);
+      if (!t.noDeduct) db.ledger.push({ id: "L" + (++db.seq), empId: applicant, type: a.type, delta: -a.days, reason: "请假扣减", refApp: appId, by: me.id, ts: nowTs() });
+      sendMail(applicant, "【已批准】您的" + t.zh + "申请（" + fmtD(a.days) + " 天）",
+        me.name + " 已批准您 " + a.start + " 至 " + a.end + " 的" + t.zh + "。" + (comment ? "\n备注：" + comment : ""));
+      const hr = db.employees.find(e => e.role === "hr");
+      if (hr && hr.id !== applicant) sendMail(hr.id, "【备案】" + emp(applicant).name + "的" + t.zh + "已批准", a.start + " 至 " + a.end + "，" + fmtD(a.days) + " 天，已记入假期账本。");
+    }
+  } else if (action === "reject") {
+    step.status = "rejected"; a.status = "rejected";
+    logEv(appId, me.id, "拒绝", comment);
+    sendMail(applicant, "【已拒绝】您的" + t.zh + "申请", me.name + " 拒绝了您的申请。\n原因：" + comment);
+  } else if (action === "return") {
+    step.status = "returned"; a.status = "returned";
+    logEv(appId, me.id, "退回补充", comment);
+    sendMail(applicant, "【已退回】您的" + t.zh + "申请需补充材料", me.name + " 将申请退回给您。\n说明：" + comment + "\n请在系统中修改后重新提交。");
+  }
+  save();
+}
+
+function withdrawApp(appId) {
+  const a = db.applications.find(x => x.id === appId);
+  if (!a || a.status !== "pending" || a.empId !== me.id) return;
+  a.status = "withdrawn"; logEv(appId, me.id, "撤回申请");
+  sendMail(a.steps[a.cur].approverId, "【已撤回】" + me.name + "撤回了" + lt(a.type).zh + "申请", "无需再处理。");
+  save();
+}
+function requestCancel(appId) {
+  const a = db.applications.find(x => x.id === appId);
+  if (!a || a.status !== "approved" || a.empId !== me.id) return;
+  a.status = "cancel_requested"; logEv(appId, me.id, "申请销假");
+  sendMail(a.steps[0].approverId, "【销假待确认】" + me.name + "申请取消已批准的" + lt(a.type).zh, a.start + " 至 " + a.end + "，确认后将返还 " + fmtD(a.days) + " 天。");
+  save();
+}
+function confirmCancel(appId, ok, comment) {
+  const a = db.applications.find(x => x.id === appId);
+  if (!a || a.status !== "cancel_requested") return;
+  const t = lt(a.type);
+  if (ok) {
+    a.status = "cancelled"; logEv(appId, me.id, "确认销假", comment);
+    if (!t.noDeduct) db.ledger.push({ id: "L" + (++db.seq), empId: a.empId, type: a.type, delta: a.days, reason: "销假返还", refApp: appId, by: me.id, ts: nowTs() });
+    sendMail(a.empId, "【销假成功】" + t.zh + " " + fmtD(a.days) + " 天已返还", "您 " + a.start + " 至 " + a.end + " 的" + t.zh + "已取消，天数已返还账户。");
+  } else {
+    a.status = "approved"; logEv(appId, me.id, "驳回销假", comment);
+    sendMail(a.empId, "【销假被驳回】您的" + t.zh + "维持原批准", comment ? "说明：" + comment : "");
+  }
+  save();
+}
+
+/* ============ 查询 ============ */
+function inbox(u) {
+  const todo = db.applications.filter(a => a.status === "pending" && a.steps[a.cur].approverId === u.id);
+  const cancels = db.applications.filter(a => a.status === "cancel_requested" && a.steps[0].approverId === u.id);
+  return { todo, cancels, count: todo.length + cancels.length };
+}
+function isApprover(u) { return u.role !== "employee" || db.employees.some(e => e.approver1 === u.id || e.approver2 === u.id); }
+function myMails(u) { return db.outbox.filter(m => m.to === u.email).sort((a, b) => b.ts - a.ts); }
+
+/* ============ 视图 ============ */
+const $app = () => document.getElementById("app");
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
+
+function render() {
+  $app().innerHTML = me ? shell() : loginPage();
+  window.scrollTo(0, 0);
+}
+
+function loginPage() {
+  return `<div class="login"><div class="loginbox">
+    <h1>LeaveDesk <span style="color:var(--accent)">SG</span></h1>
+    <p class="tag">新加坡中小企业请假管理系统 · 演示版（数据仅存于本浏览器）</p>
+    <div class="acclist">${db.employees.map(e => `
+      <button class="acc" data-act="login" data-id="${e.id}">
+        <span class="avatar">${esc(e.name[0])}</span>
+        <span class="who"><b>${esc(e.name)}</b><span>${esc(e.dept)} · ${esc(e.email)}${e.twoLevel ? " · 两级审批" : ""}</span></span>
+        <span class="rolechip rl-${e.role === "hr" ? "hr" : e.role === "approver" ? "approver" : "employee"}">${roleZh(e.role)}</span>
+      </button>`).join("")}
+    </div>
+    <p class="footnote">演示场景：陈小明走一级审批（李伟强）；林小红由 HR 设定为两级审批（李伟强 → 王美玲）；
+    张惠敏（HR）可在后台修改任何员工的审批链、调整假期账本。邮件为模拟发送，可在右上角 📧 查看。
+    <button class="btn ghost" data-act="reset" style="margin-top:10px">重置演示数据</button></p>
+  </div></div>`;
+}
+
+function shell() {
+  const ib = inbox(me);
+  const unread = myMails(me).filter(m => m.ts > (me.mailSeen || 0)).length;
+  const navs = [["dashboard", "概览"], ["apply", "申请请假"], ["myapps", "我的申请"]];
+  if (isApprover(me)) navs.push(["approvals", `审批${ib.count ? `<span class="cnt">${ib.count}</span>` : ""}`]);
+  if (me.role === "hr" || me.role === "admin") navs.push(["hr", "HR 后台"]);
+  return `
+  <div class="topbar"><div class="wrap">
+    <span class="logo">LeaveDesk <span style="color:var(--accent)">SG</span> <span class="beta">DEMO</span></span>
+    <span class="spacer"></span>
+    <span style="position:relative">
+      <button class="iconbtn" data-act="mail" aria-label="模拟邮件">📧${unread ? `<span class="badge">${unread}</span>` : ""}</button>
+      ${mailOpen ? mailPanel() : ""}
+    </span>
+    <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleZh(me.role)}</span>
+    <button class="iconbtn" data-act="logout">退出</button>
+  </div></div>
+  <nav class="nav"><div class="wrap">
+    ${navs.map(([v, label]) => `<button data-act="nav" data-v="${v}" class="${view === v ? "on" : ""}">${label}</button>`).join("")}
+  </div></nav>
+  <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, approvals: vApprovals, hr: vHR }[view]()}</div></main>
+  ${vp.detail ? detailModal(vp.detail) : ""}`;
+}
+
+function mailPanel() {
+  const ms = myMails(me).slice(0, 15);
+  return `<div class="mailpanel">${ms.length ? ms.map(m => `
+    <div class="mi"><b>${esc(m.subject)}</b><span class="tm">${fmtTs(m.ts)} · 发至 ${esc(m.to)}</span><p>${esc(m.body)}</p></div>`).join("")
+    : `<div class="mi">暂无邮件</div>`}
+    <div class="mi" style="color:var(--muted)">正式版中此处为 Resend 发出的真实邮件</div></div>`;
+}
+
+/* ---- 概览 ---- */
+function vDashboard() {
+  const cards = db.leaveTypes.filter(t => eligible(t, me) && !t.noDeduct).sort((a, b) => a.sort - b.sort);
+  const main = cards.filter(t => ["annual", "sick", "hosp", "childcare", "oil"].includes(t.code));
+  const rest = cards.filter(t => !main.includes(t));
+  const mine = db.applications.filter(a => a.empId === me.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+  const ib = inbox(me);
+  return `
+    <h2>你好，${esc(me.name)}</h2>
+    <p class="sub">今天是 ${todayStr()} · ${esc(me.dept)} · 审批链：${chainText(me)}</p>
+    ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">你有 <b>${ib.count}</b> 条待处理的审批 <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">去处理</button></div>` : ""}
+    <div class="balgrid">${main.map(balCard).join("")}</div>
+    <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">更多假期（产假 / 陪产假 / 恩恤假 / 婚假等）</summary>
+      <div class="balgrid" style="margin-top:12px">${rest.map(balCard).join("")}</div></details>
+    <div class="card"><h3>最近申请</h3>
+      ${mine.length ? appTable(mine, false) : `<div class="empty">还没有申请记录，点上方「申请请假」发起第一条</div>`}
+    </div>`;
+}
+function chainText(e) {
+  let s = emp(e.approver1) ? emp(e.approver1).name : "—";
+  if (e.twoLevel && e.approver2) s += " → " + emp(e.approver2).name + "（两级）";
+  return s;
+}
+function balCard(t) {
+  const b = bal(me.id, t.code);
+  return `<div class="bal"><div class="t">${esc(t.zh)}</div><div class="en">${esc(t.en)}</div>
+    <div class="n">${fmtD(b.avail)}<small> 天可用</small></div>
+    <div class="d">配额 ${fmtD(b.granted)} · 已用 ${fmtD(b.used)}${b.pending ? " · 审批中 " + fmtD(b.pending) : ""}</div></div>`;
+}
+
+/* ---- 申请 ---- */
+function vApply() {
+  const editing = vp.editId ? db.applications.find(a => a.id === vp.editId) : null;
+  const types = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);
+  const f = vp.form || (editing
+    ? { type: editing.type, start: editing.start, end: editing.end, sh: editing.sh, eh: editing.eh, reason: editing.reason, att: editing.att }
+    : { type: "annual", start: dstr(1), end: dstr(1), sh: false, eh: false, reason: "", att: "" });
+  vp.form = f;
+  const t = lt(f.type), b = bal(me.id, f.type);
+  const days = wdCount(f.start, f.end, f.sh, f.eh);
+  const over = !t.noDeduct && days > b.avail;
+  const backdated = f.start < todayStr();
+  return `
+    <h2>${editing ? "修改并重新提交" : "申请请假"}</h2>
+    <p class="sub">提交后自动 email 给你的审批人：${chainText(me)}</p>
+    ${editing ? `<div class="callout warn" style="margin-bottom:14px">此申请曾被退回：「${esc(lastReturnComment(editing))}」，修改后将重新进入审批。</div>` : ""}
+    <div class="card" style="max-width:640px">
+      <div class="field"><label>假期类型</label>
+        <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.zh)} · ${esc(x.en)}</option>`).join("")}</select>
+        <span class="hint">${t.noDeduct ? "此类型不扣配额，仅作记录" : `可用余额：<b>${fmtD(b.avail)}</b> 天（配额 ${fmtD(b.granted)}，已用 ${fmtD(b.used)}，审批中 ${fmtD(b.pending)}）`}${t.note ? " · " + esc(t.note) : ""}</span>
+      </div>
+      <div class="frow">
+        <div class="field"><label>开始日期</label><input type="date" data-f="start" value="${f.start}"></div>
+        <div class="field"><label>结束日期</label><input type="date" data-f="end" value="${f.end}"></div>
+      </div>
+      <div class="frow">
+        <label class="check"><input type="checkbox" data-f="sh" ${f.sh ? "checked" : ""}> 开始日只休下午（PM 半天）</label>
+        <label class="check"><input type="checkbox" data-f="eh" ${f.eh ? "checked" : ""}> 结束日只休上午（AM 半天）</label>
+      </div>
+      <div class="callout acc" style="margin:12px 0">
+        折算 <b style="font-size:17px">${fmtD(days)}</b> 个工作日（已自动扣除周末与新加坡公共假期）
+        ${backdated ? " · <b>补交</b>（开始日早于今天，病假常见）" : ""}
+      </div>
+      ${over ? `<div class="callout warn" style="margin:0 0 12px">余额不足：本次需 ${fmtD(days)} 天，可用仅 ${fmtD(b.avail)} 天</div>` : ""}
+      <div class="field"><label>事由</label><textarea data-f="reason" rows="2" placeholder="简要说明">${esc(f.reason)}</textarea></div>
+      <div class="field"><label>附件${t.mc ? "（此类型必须附上 MC / 证明）" : "（可选）"}</label>
+        <input type="file" data-f="attfile">${f.att ? `<span class="hint">已选：${esc(f.att)}</span>` : ""}
+        <span class="hint">演示版仅记录文件名；正式版上传至 Supabase Storage</span></div>
+      <div class="actions">
+        <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "重新提交" : "提交申请"}</button>
+        ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">放弃修改</button>` : ""}
+      </div>
+    </div>`;
+}
+function lastReturnComment(a) { const s = [...a.steps].reverse().find(x => x.status === "returned"); return s ? s.comment : ""; }
+
+function doSubmit() {
+  const f = vp.form, t = lt(f.type);
+  const days = wdCount(f.start, f.end, f.sh, f.eh);
+  if (!f.reason.trim()) return toast("请填写事由");
+  if (t.mc && !f.att) return toast("此假期类型必须附上 MC / 证明文件");
+  const overlap = db.applications.some(a => a.empId === me.id && a.id !== vp.editId &&
+    ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
+  if (overlap) return toast("所选日期与已有申请重叠");
+  submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att: f.att, backdated: f.start < todayStr() }, vp.editId);
+  const chain = chainText(me);
+  vp = {}; view = "myapps"; render();
+  toast("已提交，邮件已发给 " + chain.split(" ")[0]);
+}
+
+/* ---- 我的申请 ---- */
+function vMyApps() {
+  const mine = db.applications.filter(a => a.empId === me.id).sort((a, b) => b.createdAt - a.createdAt);
+  return `<h2>我的申请</h2><p class="sub">点击任意一行查看审批时间线</p>
+    <div class="card">${mine.length ? appTable(mine, false) : `<div class="empty">暂无申请</div>`}</div>`;
+}
+function appTable(list, showWho) {
+  return `<div class="tablebox"><table><thead><tr>
+    ${showWho ? "<th>申请人</th>" : ""}<th>类型</th><th>日期</th><th class="num">天数</th><th>状态</th><th>当前节点</th></tr></thead><tbody>
+    ${list.map(a => {
+      const t = lt(a.type);
+      const node = a.status === "pending" ? "等 " + emp(a.steps[a.cur].approverId).name + (a.steps.length > 1 ? `（第 ${a.cur + 1}/${a.steps.length} 级）` : "") : "—";
+      return `<tr class="rowlink" data-act="detail" data-id="${a.id}">
+        ${showWho ? `<td>${esc(emp(a.empId).name)}</td>` : ""}
+        <td>${esc(t.zh)}</td><td class="num">${a.start}${a.end !== a.start ? " ~ " + a.end : ""}</td>
+        <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stZh(a.status)}</span></td><td>${node}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+}
+
+/* ---- 审批 ---- */
+function vApprovals() {
+  const ib = inbox(me);
+  const reports = db.employees.filter(e => e.approver1 === me.id || e.approver2 === me.id).map(e => e.id);
+  const m0 = todayStr().slice(0, 7);
+  const teamLeave = db.applications.filter(a => reports.includes(a.empId) && a.status === "approved" && (a.start.slice(0, 7) === m0 || a.end.slice(0, 7) === m0));
+  return `<h2>审批</h2><p class="sub">待你处理的申请与销假确认</p>
+    <div class="stack">
+    ${ib.todo.length === 0 && ib.cancels.length === 0 ? `<div class="card"><div class="empty">没有待处理事项 🎉</div></div>` : ""}
+    ${ib.todo.map(a => approvalCard(a)).join("")}
+    ${ib.cancels.map(a => cancelCard(a)).join("")}
+    <div class="card"><h3>我的团队 · 本月已批准请假</h3>
+      ${teamLeave.length ? appTable(teamLeave, true) : `<div class="empty">本月团队暂无已批准的请假</div>`}</div>
+    </div>`;
+}
+function approvalCard(a) {
+  const e = emp(a.empId), t = lt(a.type), b = bal(a.empId, a.type);
+  return `<div class="card appcard">
+    <div class="hd"><b>${esc(e.name)} · ${esc(t.zh)}</b><span class="pill st-pending">${a.steps.length > 1 ? `第 ${a.cur + 1}/${a.steps.length} 级` : "待审批"}</span>
+      <span class="meta">提交于 ${fmtTs(a.createdAt)}${a.backdated ? " · 补交" : ""}</span></div>
+    <dl class="kv">
+      <dt>日期</dt><dd>${a.start}${a.end !== a.start ? " 至 " + a.end : ""} · <b>${fmtD(a.days)}</b> 个工作日${a.sh ? " · 首日 PM" : ""}${a.eh ? " · 末日 AM" : ""}</dd>
+      <dt>事由</dt><dd>${esc(a.reason)}</dd>
+      ${a.att ? `<dt>附件</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
+      <dt>TA 的余额</dt><dd>${t.noDeduct ? "此类型不扣配额" : `${esc(t.zh)}可用 ${fmtD(b.avail)} 天（本单已冻结在内）`}</dd>
+    </dl>
+    ${stepsView(a)}
+    <div class="field" style="margin:8px 0 0"><textarea id="cm-${a.id}" rows="2" placeholder="备注 / 原因（拒绝、退回时必填）"></textarea></div>
+    <div class="actions">
+      <button class="btn good" data-act="decide" data-id="${a.id}" data-d="approve">批准${a.cur + 1 < a.steps.length ? "（转下一级）" : ""}</button>
+      <button class="btn warn" data-act="decide" data-id="${a.id}" data-d="return">退回补充</button>
+      <button class="btn bad" data-act="decide" data-id="${a.id}" data-d="reject">拒绝</button>
+    </div></div>`;
+}
+function cancelCard(a) {
+  const e = emp(a.empId), t = lt(a.type);
+  return `<div class="card appcard">
+    <div class="hd"><b>${esc(e.name)} · 申请销假</b><span class="pill st-cancel_requested">销假待确认</span></div>
+    <dl class="kv"><dt>原批准</dt><dd>${esc(t.zh)} ${a.start} 至 ${a.end}，确认后返还 <b>${fmtD(a.days)}</b> 天</dd></dl>
+    <div class="actions">
+      <button class="btn good" data-act="cancelok" data-id="${a.id}">确认销假（返还天数）</button>
+      <button class="btn sec" data-act="cancelno" data-id="${a.id}">驳回销假</button>
+    </div></div>`;
+}
+function stepsView(a) {
+  return `<div class="steps">${a.steps.map((s, i) => {
+    const cls = s.status === "approved" ? "ok" : (s.status === "rejected" || s.status === "returned") ? "no" : (i === a.cur && a.status === "pending") ? "now" : "off";
+    const icon = s.status === "approved" ? "✓" : (s.status === "rejected" ? "✕" : (s.status === "returned" ? "↩" : s.order));
+    const tail = s.status === "approved" ? "已批准" + (s.comment ? "：" + esc(s.comment) : "") :
+      s.status === "rejected" ? "已拒绝：" + esc(s.comment) :
+      s.status === "returned" ? "已退回：" + esc(s.comment) :
+      (i === a.cur && a.status === "pending") ? "待处理" : "等待上一级";
+    return `<div class="step ${cls}"><span class="dot">${icon}</span><span>第 ${s.order} 级 · ${esc(emp(s.approverId).name)} — ${tail}</span></div>`;
+  }).join("")}</div>`;
+}
+
+/* ---- 详情弹窗 ---- */
+function detailModal(id) {
+  const a = db.applications.find(x => x.id === id); if (!a) return "";
+  const t = lt(a.type), e = emp(a.empId);
+  const evs = db.events.filter(x => x.appId === id).sort((x, y) => x.ts - y.ts);
+  const own = a.empId === me.id;
+  const canCancel = own && a.status === "approved" && a.start > todayStr();
+  return `<div class="modalback" data-act="closemodal">
+    <div class="modal" data-stop="1">
+      <div class="hd"><h3>${esc(t.zh)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stZh(a.status)}</span>
+        <button class="iconbtn" data-act="closemodal" aria-label="关闭">✕</button></div>
+      <dl class="kv">
+        <dt>日期</dt><dd>${a.start}${a.end !== a.start ? " 至 " + a.end : ""} · ${fmtD(a.days)} 个工作日${a.sh ? " · 首日 PM" : ""}${a.eh ? " · 末日 AM" : ""}</dd>
+        <dt>事由</dt><dd>${esc(a.reason)}</dd>
+        ${a.att ? `<dt>附件</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
+        <dt>提交时间</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · 补交" : ""}</dd>
+      </dl>
+      ${stepsView(a)}
+      <h3 style="margin-top:14px">时间线</h3>
+      <ul class="timeline">${evs.map(v => `<li><b>${esc(emp(v.actor).name)}</b> ${esc(v.action)}${v.comment ? " — " + esc(v.comment) : ""}<div class="tm">${fmtTs(v.ts)}</div></li>`).join("")}</ul>
+      <div class="actions">
+        ${own && a.status === "pending" ? `<button class="btn sec" data-act="withdraw" data-id="${a.id}">撤回申请</button>` : ""}
+        ${own && a.status === "returned" ? `<button class="btn" data-act="edit" data-id="${a.id}">修改并重新提交</button>` : ""}
+        ${canCancel ? `<button class="btn ghost" data-act="cancelreq" data-id="${a.id}">申请销假（取消这次请假）</button>` : ""}
+        <button class="btn sec" data-act="closemodal">关闭</button>
+      </div>
+    </div></div>`;
+}
+
+/* ---- HR 后台 ---- */
+function vHR() {
+  const tabs = [["records", "全部申请"], ["employees", "员工与审批链"], ["types", "假期配置"], ["ledger", "账本与调整"], ["mail", "邮件外发记录"]];
+  return `<h2>HR 后台</h2><p class="sub">全公司请假记录、审批链设定与假期账本</p>
+    <div class="tabs">${tabs.map(([k, l]) => `<button data-act="hrtab" data-t="${k}" class="${hrTab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    ${{ records: hrRecords, employees: hrEmployees, types: hrTypes, ledger: hrLedger, mail: hrMail }[hrTab]()}`;
+}
+function hrRecords() {
+  const f = vp.stFilter || "all";
+  let list = db.applications.slice().sort((a, b) => b.createdAt - a.createdAt);
+  if (f !== "all") list = list.filter(a => a.status === f);
+  const sts = ["all", "pending", "approved", "rejected", "returned", "withdrawn", "cancel_requested", "cancelled"];
+  return `<div class="card">
+    <div class="field" style="max-width:240px"><label>按状态筛选</label>
+      <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "全部" : stZh(s)}</option>`).join("")}</select></div>
+    ${list.length ? appTable(list, true) : `<div class="empty">暂无记录</div>`}</div>`;
+}
+function hrEmployees() {
+  const opts = (self, sel, excl) => `<option value="">（无）</option>` + db.employees.filter(x => x.id !== self && x.id !== excl)
+    .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px"><b>两级审批按员工设定</b>：默认一级；勾选「两级」并指定第二审批人后，该员工的新申请才走两级链。已在途的申请按提交时的链走完。</div>
+    <div class="tablebox"><table><thead><tr><th>员工</th><th>部门 / 角色</th><th>第 1 级审批人</th><th>两级</th><th>第 2 级审批人</th></tr></thead><tbody>
+    ${db.employees.map(e => `<tr>
+      <td><b>${esc(e.name)}</b><div class="meta">${esc(e.email)}</div></td>
+      <td>${esc(e.dept)} · ${roleZh(e.role)}</td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver1">${opts(e.id, e.approver1, e.approver2)}</select></td>
+      <td><input type="checkbox" data-act="empf" data-id="${e.id}" data-f="twoLevel" ${e.twoLevel ? "checked" : ""}></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel ? "" : "disabled"}>${opts(e.id, e.approver2, e.approver1)}</select></td>
+    </tr>`).join("")}</tbody></table></div></div>`;
+}
+function hrTypes() {
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px">假期类型是<b>配置数据</b>：政策调整（如 Shared Parental Leave 2026 年 4 月起增至 10 周）改这里即可，默认天数只影响之后的年度入账。</div>
+    <div class="tablebox"><table><thead><tr><th>类型</th><th>English</th><th class="num">年度默认天数</th><th>需 MC/证明</th><th>限定</th><th>说明</th></tr></thead><tbody>
+    ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
+      <td><b>${esc(t.zh)}</b></td><td class="meta">${esc(t.en)}</td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
+      <td>${t.mc ? "✅" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "女性" : "男性") : "全员"}${t.noDeduct ? " · 不扣配额" : ""}</td>
+      <td class="meta">${esc(t.note || "")}</td></tr>`).join("")}</tbody></table></div>
+    <h3 style="margin-top:18px">新加坡公共假期（${db.publicHolidays[0].slice(0, 4)}，请假天数折算时自动排除）</h3>
+    <div class="phchips">${db.publicHolidays.map(p => `<span>${p}</span>`).join("")}</div>
+  </div>`;
+}
+function hrLedger() {
+  const f = vp.ledForm || { empId: "e1", type: "oil", delta: 1, reason: "" };
+  vp.ledForm = f;
+  const led = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
+  return `<div class="stack"><div class="card"><h3>手工记账（OIL 入账 / 调整 / 失效）</h3>
+    <div class="frow">
+      <div class="field"><label>员工</label><select data-f="led.empId">${db.employees.map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>假期类型</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.zh)}</option>`).join("")}</select></div>
+      <div class="field"><label>天数（正=入账，负=扣减/失效）</label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
+    </div>
+    <div class="field"><label>原因</label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="如：3 月 8 日周末加班补休"></div>
+    <button class="btn" data-act="ledadd">记入账本</button>
+  </div>
+  <div class="card"><h3>账本明细（最近 30 条）— 余额永远等于交易之和</h3>
+    <div class="tablebox"><table><thead><tr><th>时间</th><th>员工</th><th>类型</th><th class="num">±天数</th><th>原因</th><th>经手</th></tr></thead><tbody>
+    ${led.map(l => `<tr><td class="num meta">${fmtTs(l.ts)}</td><td>${esc(emp(l.empId).name)}</td><td>${esc(lt(l.type).zh)}</td>
+      <td class="num" style="color:${l.delta >= 0 ? "var(--good)" : "var(--bad)"};font-weight:600">${l.delta > 0 ? "+" : ""}${fmtD(l.delta)}</td>
+      <td>${esc(l.reason)}${l.refApp ? ` <span class="meta">(${l.refApp})</span>` : ""}</td><td>${esc(emp(l.by).name)}</td></tr>`).join("")}
+    </tbody></table></div></div></div>`;
+}
+function hrMail() {
+  const ms = db.outbox.slice().sort((a, b) => b.ts - a.ts);
+  return `<div class="card"><h3>模拟邮件外发记录（正式版由 Edge Function + Resend 真实发送）</h3>
+    <div class="tablebox"><table><thead><tr><th>时间</th><th>收件人</th><th>主题</th></tr></thead><tbody>
+    ${ms.map(m => `<tr><td class="num meta">${fmtTs(m.ts)}</td><td class="meta">${esc(m.to)}</td>
+      <td><details><summary style="cursor:pointer">${esc(m.subject)}</summary><p class="meta" style="white-space:pre-wrap;margin:6px 0 0">${esc(m.body)}</p></details></td></tr>`).join("")}
+    </tbody></table></div></div>`;
+}
+
+/* ============ 事件绑定（全局委托） ============ */
+document.addEventListener("click", ev => {
+  const el = ev.target.closest("[data-act]");
+  if (!el) { if (mailOpen && !ev.target.closest(".mailpanel")) { mailOpen = false; render(); } return; }
+  const act = el.dataset.act, id = el.dataset.id;
+  if (act === "closemodal" && ev.target !== el && el.classList.contains("modalback")) return;
+  switch (act) {
+    case "login": me = emp(el.dataset.id); view = "dashboard"; vp = {}; mailOpen = false; render(); break;
+    case "logout": me = null; render(); break;
+    case "reset": resetDemo(); break;
+    case "nav": view = el.dataset.v; vp = {}; mailOpen = false; render(); break;
+    case "mail": mailOpen = !mailOpen; if (mailOpen) { me.mailSeen = nowTs(); save(); } render(); break;
+    case "hrtab": hrTab = el.dataset.t; vp = {}; render(); break;
+    case "detail": vp.detail = id; render(); break;
+    case "closemodal": delete vp.detail; render(); break;
+    case "submit": doSubmit(); break;
+    case "withdraw": withdrawApp(id); delete vp.detail; render(); toast("已撤回"); break;
+    case "edit": vp = { editId: id }; view = "apply"; render(); break;
+    case "cancelreq": requestCancel(id); delete vp.detail; render(); toast("销假申请已发给审批人"); break;
+    case "cancelok": confirmCancel(id, true, ""); render(); toast("已确认销假，天数已返还"); break;
+    case "cancelno": confirmCancel(id, false, ""); render(); toast("已驳回销假"); break;
+    case "ledadd": {
+      const f = vp.ledForm;
+      if (!f.reason.trim()) return toast("请填写原因");
+      if (!f.delta) return toast("天数不能为 0");
+      db.ledger.push({ id: "L" + (++db.seq), empId: f.empId, type: f.type, delta: Number(f.delta), reason: "手工调整：" + f.reason.trim(), refApp: null, by: me.id, ts: nowTs() });
+      save(); vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" }; render(); toast("已记入账本");
+      break;
+    }
+    case "decide": {
+      const d = el.dataset.d;
+      const cm = (document.getElementById("cm-" + id) || {}).value || "";
+      if ((d === "reject" || d === "return") && !cm.trim()) return toast(d === "reject" ? "拒绝必须填写原因" : "退回必须说明需要补充什么");
+      actOnStep(id, d, cm.trim());
+      render(); toast(d === "approve" ? "已批准，邮件已自动发出" : d === "reject" ? "已拒绝，已通知员工" : "已退回，已通知员工");
+      break;
+    }
+  }
+});
+
+document.addEventListener("change", ev => {
+  const el = ev.target;
+  if (el.dataset.act === "empf") {
+    const e = emp(el.dataset.id), f = el.dataset.f;
+    if (f === "twoLevel") { e.twoLevel = el.checked; if (!el.checked) e.approver2 = null; }
+    else e[f] = el.value || null;
+    if (e.twoLevel && e.approver1 && e.approver1 === e.approver2) { e.approver2 = null; toast("第 2 级审批人不能与第 1 级相同"); }
+    save(); render(); toast("已保存 " + e.name + " 的审批链（只影响新申请）");
+    return;
+  }
+  if (el.dataset.act === "typedays") {
+    const t = lt(el.dataset.c); t.days = Number(el.value) || 0; save(); toast("已更新默认天数（影响之后的年度入账）");
+    return;
+  }
+  const f = el.dataset.f;
+  if (!f) return;
+  if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
+  if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (view === "apply" && vp.form) {
+    if (f === "reason") { vp.form.reason = el.value; return; } // input 事件已实时同步，change 不重渲染，避免吞掉紧接着的提交点击
+    if (f === "attfile") { vp.form.att = el.files && el.files[0] ? el.files[0].name : ""; render(); return; }
+    if (f === "sh" || f === "eh") vp.form[f] = el.checked; else vp.form[f] = el.value;
+    if (f === "start" && vp.form.end < vp.form.start) vp.form.end = vp.form.start;
+    render();
+  }
+});
+document.addEventListener("input", ev => {
+  const el = ev.target;
+  if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
+});
+
+/* ============ 启动 ============ */
+load();
+render();
+</script>
+</body>
+</html>
