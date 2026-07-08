@@ -177,3 +177,50 @@ function _sheet() {
 function _host(u) { try { return String(u).replace(/^https?:\/\//, '').split('/')[0]; } catch (e) { return u; } }
 function _esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function _json(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+// ── demo data (测试用) ──────────────────────────────────
+// 在编辑器里选 seedDemo ▸ 运行，写入分布在「今天/4天前/20天前」的示例数据，
+// 这样近1天/近7天/近30天会显示不同数字。测完选 clearDemo ▸ 运行，一键删干净。
+// （只在编辑器运行即可，无需重新部署；刷新看板就能看到。）
+function seedDemo() {
+  const sh = _sheet();
+  const now = Date.now(), H = 3600000, D = 86400000;
+  const buckets = [
+    [12 * H, 5],    // 今天    → 落在近1天内
+    [4 * D, 8],     // 4天前   → 近7天内、近1天外
+    [20 * D, 12]    // 20天前  → 近30天内、近7天外
+  ];
+  const occs = ['情人节', '生日', '母亲节'];
+  const prods = ['暖心礼盒', '缤纷果篮', '开斋节礼盒'];
+  const rows = [];
+  buckets.forEach(function (b, bi) {
+    const base = now - b[0];
+    for (var v = 0; v < b[1]; v++) {
+      var sid = 'demo-' + bi + '-' + v;
+      var lang = (v % 3 === 0) ? 'en' : 'zh';
+      var dev = (v % 2 === 0) ? 'm' : 'd';
+      var ref = (v % 4 === 0) ? 'https://www.google.com/' : '';
+      var depth = Math.max(1, FUNNEL.length - v);   // 阶梯式流失，漏斗越往下越窄
+      for (var s = 0; s < depth; s++) {
+        var name = FUNNEL[s][0];
+        var label = name === 'occasion_open' ? occs[v % occs.length]
+                  : name === 'product_view' ? prods[v % prods.length] : '';
+        rows.push([new Date(base + s * 60000), name, label, sid, lang, dev, name === 'page_view' ? ref : '']);
+      }
+    }
+  });
+  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
+  Logger.log('已写入 ' + rows.length + ' 行示例数据（会话以 demo- 开头）。测完运行 clearDemo 清除。');
+}
+
+function clearDemo() {
+  const sh = _sheet();
+  const last = sh.getLastRow();
+  if (last < 2) return;
+  const sids = sh.getRange(2, 4, last - 1, 1).getValues();   // D 列 = 会话
+  var removed = 0;
+  for (var i = sids.length - 1; i >= 0; i--) {
+    if (String(sids[i][0]).indexOf('demo-') === 0) { sh.deleteRow(i + 2); removed++; }
+  }
+  Logger.log('已删除 ' + removed + ' 行示例数据。');
+}
