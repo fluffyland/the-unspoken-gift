@@ -136,7 +136,7 @@ function _pane(a) {
 }
 
 function _render(data) {
-  const btn = (n, on) => '<button class="rl' + (on ? ' on' : '') + '" data-r="' + n + '" onclick="showR(' + n + ')">近 ' + n + ' 天</button>';
+  const btn = (n, on) => '<button type="button" class="rl' + (on ? ' on' : '') + '" data-r="' + n + '" onclick="showR(' + n + ')">近 ' + n + ' 天</button>';
   return '<!doctype html><meta charset="utf-8"><style>' +
     ':root{--gold:#6E4F31;--deep:#2A2017;--blush:#FAF5EF;--line:#EADFD2}' +
     'body{margin:0;background:var(--blush);color:var(--deep);font-family:-apple-system,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;padding:20px 14px 60px}' +
@@ -156,10 +156,11 @@ function _render(data) {
     '<div class="pane" id="p1" style="display:none">' + _pane(data[1]) + '</div>' +
     '<div class="pane" id="p7">' + _pane(data[7]) + '</div>' +
     '<div class="pane" id="p30" style="display:none">' + _pane(data[30]) + '</div>' +
-    '<p class="foot">© The Unspoken Gift · 无 cookie · 数据仅存于你的 Google 表</p>' +
+    '<p class="foot">© The Unspoken Gift · 无 cookie · 数据仅存于你的 Google 表 · v2</p>' +
     '</div>' +
-    '<script>function showR(n){[1,7,30].forEach(function(x){document.getElementById("p"+x).style.display=(x===n?"":"none");});' +
-    'var bs=document.getElementsByClassName("rl");for(var i=0;i<bs.length;i++){var on=(parseInt(bs[i].getAttribute("data-r"),10)===n);bs[i].className=on?"rl on":"rl";}}<\/script>';
+    '<script>function showR(n){[1,7,30].forEach(function(x){var el=document.getElementById("p"+x);if(el)el.style.display=(x===n?"":"none");});' +
+    'var bs=document.getElementsByClassName("rl");for(var i=0;i<bs.length;i++){var on=(parseInt(bs[i].getAttribute("data-r"),10)===n);bs[i].className=on?"rl on":"rl";}}' +
+    'var _bs=document.getElementsByClassName("rl");for(var _i=0;_i<_bs.length;_i++){_bs[_i].addEventListener("click",function(){showR(parseInt(this.getAttribute("data-r"),10));});}<\/script>';
 }
 
 // ── helpers ─────────────────────────────────────────────
