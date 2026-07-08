@@ -22,7 +22,11 @@
 - **Michelle** 审批：Tam、Phyllis（Bookshop）、Amanda、Paulin、Daisy（School Account）
 - **Alice**（Retail Head & **HR**）审批：Yukong；并拥有 HR Console 全部权限
 - **Usam**（Warehouse Dept Head）审批：文翰
-- 全员默认一级审批；HR 可在 HR Console → Employees 给任何人改成两级
+- **Belinda**（Merchandising Dept Head）审批：Barry
+- **Maggie**、**Annie**（Finance）：直接向 Doris 汇报，无部门主管
+- 全员默认一级审批；HR 可在 HR Console → Employees 给任何人改成两级；
+  共 18 人，每位审批人（Michelle / Doris / Alice / Usam / Belinda）手上都留了至少一条
+  待审批申请，方便你直接登录试点批准/拒绝/退回
 
 ## 与隐私相关（重要）
 

@@ -202,7 +202,7 @@ td.num{font-variant-numeric:tabular-nums}
 <script>
 "use strict";
 /* ============ Data layer (demo: localStorage; production: Supabase) ============ */
-const LS_KEY = "sghr_demo_v3";
+const LS_KEY = "sghr_demo_v4";
 let db, me = null, view = "dashboard", vp = {}, hrTab = "records", mailOpen = false;
 
 const pad = n => String(n).padStart(2, "0");
@@ -237,6 +237,10 @@ function seed() {
     E("burak",    "Burak",    "",                        "Logistics",                 "M", "employee", "doris"),
     E("lin",      "Lin",      "Operation Manager",       "Operation Team",            "M", "approver", "doris"),
     E("wenbin",   "文斌",     "",                        "Operation Team",            "M", "employee", "doris"),
+    E("belinda",  "Belinda",  "Merchandising Dept Head", "Merchandising Team",        "F", "approver", "doris"),
+    E("barry",    "Barry",    "",                        "Merchandising Team",        "M", "employee", "belinda"),
+    E("maggie",   "Maggie",   "",                        "Finance",                   "F", "employee", "doris"),
+    E("annie",    "Annie",    "",                        "Finance",                   "F", "employee", "doris"),
   ];
   const leaveTypes = [
     { code: "annual", en: "Annual Leave", zh: "年假", mc: false, gender: null, noDeduct: false, days: 14, sort: 1 },
@@ -357,7 +361,17 @@ function seed() {
   ev("A8", "burak", "Submitted", "", nowTs() - 3 * 3600e3);
   mail("doris@company.sg", "[Action required] Burak's Compassionate Leave application", "Burak applied for compassionate leave " + dstr(2) + " to " + dstr(3) + ". Please review in LeaveDesk.", nowTs() - 3 * 3600e3);
 
-  return { v: 2, seq: 8, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
+  // Pending with Belinda: Barry's annual leave
+  applications.push({
+    id: "A9", empId: "barry", type: "annual", start: dstr(6), end: dstr(6), sh: false, eh: false,
+    days: wdCount(dstr(6), dstr(6), false, false, publicHolidays), reason: "Dental appointment", att: "", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "belinda", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 4 * 3600e3, backdated: false
+  });
+  ev("A9", "barry", "Submitted", "", nowTs() - 4 * 3600e3);
+  mail("belinda@company.sg", "[Action required] Barry's Annual Leave application", "Barry applied for annual leave on " + dstr(6) + ". Please review in LeaveDesk.", nowTs() - 4 * 3600e3);
+
+  return { v: 2, seq: 9, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
 }
 
 /* Working-day count (excludes weekends + SG public holidays; supports half days) */
