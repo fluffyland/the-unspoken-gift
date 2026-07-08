@@ -181,7 +181,9 @@ td.num{font-variant-numeric:tabular-nums}
 .rl-admin{background:var(--warn-soft);color:var(--warn)}
 .footnote{color:var(--muted);font-size:12.5px;margin-top:20px;line-height:1.7}
 
-.mailpanel{position:absolute;right:0;top:44px;width:min(360px,88vw);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);z-index:40;max-height:420px;overflow-y:auto}
+.mailbtn{position:relative;z-index:41}
+.mailbackdrop{position:fixed;inset:0;z-index:39;background:transparent}
+.mailpanel{position:absolute;right:0;top:44px;width:min(360px,88vw);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);z-index:40;max-height:min(420px,calc(100vh - 70px));overflow-y:auto}
 .mailpanel .mi{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
 .mailpanel .mi b{display:block;font-size:13px}
 .mailpanel .mi .tm{color:var(--muted);font-size:11.5px}
@@ -200,7 +202,7 @@ td.num{font-variant-numeric:tabular-nums}
 <script>
 "use strict";
 /* ============ Data layer (demo: localStorage; production: Supabase) ============ */
-const LS_KEY = "sghr_demo_v2";
+const LS_KEY = "sghr_demo_v3";
 let db, me = null, view = "dashboard", vp = {}, hrTab = "records", mailOpen = false;
 
 const pad = n => String(n).padStart(2, "0");
@@ -315,7 +317,47 @@ function seed() {
   ev("A4", "michelle", "Submitted", "", nowTs() - 3600e3);
   mail("doris@company.sg", "[Action required] Michelle's Annual Leave application", "Michelle applied for annual leave " + dstr(21) + " to " + dstr(23) + ". Please review in LeaveDesk.", nowTs() - 3600e3);
 
-  return { v: 2, seq: 5, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
+  // Pending with Alice: Yukong's sick leave (needs MC)
+  applications.push({
+    id: "A5", empId: "yukong", type: "sick", start: dstr(-1), end: dstr(0), sh: false, eh: false,
+    days: wdCount(dstr(-1), dstr(0), false, false, publicHolidays), reason: "Down with the flu", att: "MC_polyclinic.pdf", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "alice", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 5 * 3600e3, backdated: true
+  });
+  ev("A5", "yukong", "Submitted", "", nowTs() - 5 * 3600e3);
+  mail("alice@company.sg", "[Action required] Yukong's Sick Leave application", "Yukong applied for sick leave " + dstr(-1) + " to " + dstr(0) + ". Please review in LeaveDesk.", nowTs() - 5 * 3600e3);
+
+  // Pending with Usam: 文翰's annual leave
+  applications.push({
+    id: "A6", empId: "wenhan", type: "annual", start: dstr(15), end: dstr(15), sh: false, eh: false,
+    days: wdCount(dstr(15), dstr(15), false, false, publicHolidays), reason: "Attending a family event", att: "", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "usam", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 6 * 3600e3, backdated: false
+  });
+  ev("A6", "wenhan", "Submitted", "", nowTs() - 6 * 3600e3);
+  mail("usam@company.sg", "[Action required] 文翰's Annual Leave application", "文翰 applied for annual leave on " + dstr(15) + ". Please review in LeaveDesk.", nowTs() - 6 * 3600e3);
+
+  // Pending with Michelle: Phyllis's annual leave (a second one in her queue)
+  applications.push({
+    id: "A7", empId: "phyllis", type: "annual", start: dstr(9), end: dstr(11), sh: false, eh: true,
+    days: wdCount(dstr(9), dstr(11), false, true, publicHolidays), reason: "Visiting family overseas", att: "", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "michelle", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 8 * 3600e3, backdated: false
+  });
+  ev("A7", "phyllis", "Submitted", "", nowTs() - 8 * 3600e3);
+  mail("michelle@company.sg", "[Action required] Phyllis's Annual Leave application", "Phyllis applied for annual leave " + dstr(9) + " to " + dstr(11) + ". Please review in LeaveDesk.", nowTs() - 8 * 3600e3);
+
+  // Pending with Doris: Burak's compassionate leave
+  applications.push({
+    id: "A8", empId: "burak", type: "compassionate", start: dstr(2), end: dstr(3), sh: false, eh: false,
+    days: wdCount(dstr(2), dstr(3), false, false, publicHolidays), reason: "Family bereavement", att: "", status: "pending", cur: 0,
+    steps: [{ order: 1, approverId: "doris", status: "pending", comment: "", ts: null }],
+    createdAt: nowTs() - 3 * 3600e3, backdated: false
+  });
+  ev("A8", "burak", "Submitted", "", nowTs() - 3 * 3600e3);
+  mail("doris@company.sg", "[Action required] Burak's Compassionate Leave application", "Burak applied for compassionate leave " + dstr(2) + " to " + dstr(3) + ". Please review in LeaveDesk.", nowTs() - 3 * 3600e3);
+
+  return { v: 2, seq: 8, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
 }
 
 /* Working-day count (excludes weekends + SG public holidays; supports half days) */
@@ -535,8 +577,8 @@ function shell() {
     <span class="logo">LeaveDesk <span style="color:var(--accent)">SG</span> <span class="beta">DEMO</span></span>
     <span class="spacer"></span>
     <span style="position:relative">
-      <button class="iconbtn" data-act="mail" aria-label="Simulated email">📧${unread ? `<span class="badge">${unread}</span>` : ""}</button>
-      ${mailOpen ? mailPanel() : ""}
+      <button class="iconbtn mailbtn" data-act="mail" aria-label="Simulated email">📧${unread ? `<span class="badge">${unread}</span>` : ""}</button>
+      ${mailOpen ? `<div class="mailbackdrop" data-act="closemail"></div>${mailPanel()}` : ""}
     </span>
     <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleName(me.role)}</span>
     <button class="iconbtn" data-act="logout">Sign out</button>
@@ -852,6 +894,7 @@ document.addEventListener("click", ev => {
     case "reset": resetDemo(); break;
     case "nav": view = el.dataset.v; vp = {}; mailOpen = false; render(); break;
     case "mail": mailOpen = !mailOpen; if (mailOpen) { me.mailSeen = nowTs(); save(); } render(); break;
+    case "closemail": mailOpen = false; render(); break;
     case "hrtab": hrTab = el.dataset.t; vp = {}; render(); break;
     case "detail": vp.detail = id; render(); break;
     case "closemodal": delete vp.detail; render(); break;
