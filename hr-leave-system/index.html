@@ -191,6 +191,25 @@ td.num{font-variant-numeric:tabular-nums}
 
 #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 20px;border-radius:99px;font-size:14px;font-weight:600;box-shadow:var(--shadow);z-index:99;opacity:0;pointer-events:none;transition:opacity .25s}
 #toast.show{opacity:1}
+.calhead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.calhead h3{margin:0;font-size:16px;min-width:150px;text-align:center;font-variant-numeric:tabular-nums}
+.calbox{overflow-x:auto}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;min-width:700px}
+.cal .dow{font-size:11.5px;font-weight:700;color:var(--muted);text-align:center;letter-spacing:.05em;padding:4px 0}
+.cal .day{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-height:78px;padding:4px 5px;font-size:12px}
+.cal .day.off{background:var(--gray-soft);border-color:transparent}
+.cal .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.cal .dnum{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between}
+.cal .dnum .ph{color:var(--warn);font-weight:600;font-size:10.5px}
+.cal .chips{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.lvchip{border-radius:5px;padding:1px 5px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lvchip.ap{background:var(--accent);color:var(--accent-ink)}
+.lvchip.pd{background:var(--gray-soft);color:var(--muted);opacity:.65;border:1px dashed var(--line)}
+.legend{display:flex;gap:16px;align-items:center;font-size:12.5px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+.ackbox{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;font-weight:600;margin-top:10px}
+.ackbox input{width:16px;height:16px;margin-top:3px}
+.conflictlist{margin:8px 0 0;padding:0;list-style:none;font-size:13px}
+.conflictlist li{display:flex;gap:8px;align-items:center;padding:3px 0}
 .phchips{display:flex;flex-wrap:wrap;gap:6px}
 .phchips span{background:var(--gray-soft);border-radius:6px;padding:2px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
 .empty{color:var(--muted);font-size:14px;padding:26px 0;text-align:center}
@@ -202,7 +221,7 @@ td.num{font-variant-numeric:tabular-nums}
 <script>
 "use strict";
 /* ============ Data layer (demo: localStorage; production: Supabase) ============ */
-const LS_KEY = "sghr_demo_v4";
+const LS_KEY = "sghr_demo_v5";
 let db, me = null, view = "dashboard", vp = {}, hrTab = "records", mailOpen = false;
 
 const pad = n => String(n).padStart(2, "0");
@@ -221,7 +240,7 @@ function seed() {
   // (even where their day-to-day reporting line differs). Everyone is single-level;
   // HR can switch anyone to a two-step chain in HR Console → Employees.
   const E = (id, name, title, dept, gender, role, approver1) =>
-    ({ id, name, title, dept, gender, role, email: id + "@company.sg", joinDate: (y - 2) + "-01-01", approver1, approver2: null, twoLevel: false, mailSeen: 0 });
+    ({ id, name, title, dept, gender, role, email: id + "@shanghai-uniforms.com", joinDate: (y - 2) + "-01-01", approver1, approver2: null, twoLevel: false, annualBase: 14, active: true, mailSeen: 0 });
   const employees = [
     E("doris",    "Doris",    "Managing Director",       "Management",                "F", "admin",    null),
     E("michelle", "Michelle", "Sales Operation Manager", "Sales Operation",           "F", "approver", "doris"),
@@ -289,7 +308,7 @@ function seed() {
   ev("A1", "tam", "Submitted", "", nowTs() - 20 * 864e5);
   ev("A1", "michelle", "Approved", "Rest well", nowTs() - 19.5 * 864e5);
   ledger.push({ id: "L" + (ledger.length + 1), empId: "tam", type: "sick", delta: -1, reason: "Leave taken", refApp: "A1", by: "michelle", ts: nowTs() - 19.5 * 864e5 });
-  mail("tam@company.sg", "[Approved] Your Sick Leave application (1 day)", "Michelle approved your sick leave on " + dstr(-20) + ".\nNote: Rest well", nowTs() - 19.5 * 864e5);
+  mail("tam@shanghai-uniforms.com", "[Approved] Your Sick Leave application (1 day)", "Michelle approved your sick leave on " + dstr(-20) + ".\nNote: Rest well", nowTs() - 19.5 * 864e5);
 
   // Pending with Michelle: Tam's annual leave
   applications.push({
@@ -299,7 +318,7 @@ function seed() {
     createdAt: nowTs() - 864e5, backdated: false
   });
   ev("A2", "tam", "Submitted", "", nowTs() - 864e5);
-  mail("michelle@company.sg", "[Action required] Tam's Annual Leave application", "Tam applied for annual leave " + dstr(7) + " to " + dstr(8) + ". Please review in LeaveDesk.", nowTs() - 864e5);
+  mail("michelle@shanghai-uniforms.com", "[Action required] Tam's Annual Leave application", "Tam applied for annual leave " + dstr(7) + " to " + dstr(8) + ". Please review in LeaveDesk.", nowTs() - 864e5);
 
   // Pending DIRECT with Doris: 文斌 (bypasses Lin per company rule)
   applications.push({
@@ -309,7 +328,7 @@ function seed() {
     createdAt: nowTs() - 2 * 3600e3, backdated: false
   });
   ev("A3", "wenbin", "Submitted", "", nowTs() - 2 * 3600e3);
-  mail("doris@company.sg", "[Action required] 文斌's Annual Leave application", "文斌 applied for annual leave " + dstr(12) + " to " + dstr(13) + ". Please review in LeaveDesk.", nowTs() - 2 * 3600e3);
+  mail("doris@shanghai-uniforms.com", "[Action required] 文斌's Annual Leave application", "文斌 applied for annual leave " + dstr(12) + " to " + dstr(13) + ". Please review in LeaveDesk.", nowTs() - 2 * 3600e3);
 
   // Pending with Doris: Michelle's own leave
   applications.push({
@@ -319,7 +338,7 @@ function seed() {
     createdAt: nowTs() - 3600e3, backdated: false
   });
   ev("A4", "michelle", "Submitted", "", nowTs() - 3600e3);
-  mail("doris@company.sg", "[Action required] Michelle's Annual Leave application", "Michelle applied for annual leave " + dstr(21) + " to " + dstr(23) + ". Please review in LeaveDesk.", nowTs() - 3600e3);
+  mail("doris@shanghai-uniforms.com", "[Action required] Michelle's Annual Leave application", "Michelle applied for annual leave " + dstr(21) + " to " + dstr(23) + ". Please review in LeaveDesk.", nowTs() - 3600e3);
 
   // Pending with Alice: Yukong's sick leave (needs MC)
   applications.push({
@@ -329,7 +348,7 @@ function seed() {
     createdAt: nowTs() - 5 * 3600e3, backdated: true
   });
   ev("A5", "yukong", "Submitted", "", nowTs() - 5 * 3600e3);
-  mail("alice@company.sg", "[Action required] Yukong's Sick Leave application", "Yukong applied for sick leave " + dstr(-1) + " to " + dstr(0) + ". Please review in LeaveDesk.", nowTs() - 5 * 3600e3);
+  mail("alice@shanghai-uniforms.com", "[Action required] Yukong's Sick Leave application", "Yukong applied for sick leave " + dstr(-1) + " to " + dstr(0) + ". Please review in LeaveDesk.", nowTs() - 5 * 3600e3);
 
   // Pending with Usam: 文翰's annual leave
   applications.push({
@@ -339,7 +358,7 @@ function seed() {
     createdAt: nowTs() - 6 * 3600e3, backdated: false
   });
   ev("A6", "wenhan", "Submitted", "", nowTs() - 6 * 3600e3);
-  mail("usam@company.sg", "[Action required] 文翰's Annual Leave application", "文翰 applied for annual leave on " + dstr(15) + ". Please review in LeaveDesk.", nowTs() - 6 * 3600e3);
+  mail("usam@shanghai-uniforms.com", "[Action required] 文翰's Annual Leave application", "文翰 applied for annual leave on " + dstr(15) + ". Please review in LeaveDesk.", nowTs() - 6 * 3600e3);
 
   // Pending with Michelle: Phyllis's annual leave (a second one in her queue)
   applications.push({
@@ -349,7 +368,7 @@ function seed() {
     createdAt: nowTs() - 8 * 3600e3, backdated: false
   });
   ev("A7", "phyllis", "Submitted", "", nowTs() - 8 * 3600e3);
-  mail("michelle@company.sg", "[Action required] Phyllis's Annual Leave application", "Phyllis applied for annual leave " + dstr(9) + " to " + dstr(11) + ". Please review in LeaveDesk.", nowTs() - 8 * 3600e3);
+  mail("michelle@shanghai-uniforms.com", "[Action required] Phyllis's Annual Leave application", "Phyllis applied for annual leave " + dstr(9) + " to " + dstr(11) + ". Please review in LeaveDesk.", nowTs() - 8 * 3600e3);
 
   // Pending with Doris: Burak's compassionate leave
   applications.push({
@@ -359,7 +378,7 @@ function seed() {
     createdAt: nowTs() - 3 * 3600e3, backdated: false
   });
   ev("A8", "burak", "Submitted", "", nowTs() - 3 * 3600e3);
-  mail("doris@company.sg", "[Action required] Burak's Compassionate Leave application", "Burak applied for compassionate leave " + dstr(2) + " to " + dstr(3) + ". Please review in LeaveDesk.", nowTs() - 3 * 3600e3);
+  mail("doris@shanghai-uniforms.com", "[Action required] Burak's Compassionate Leave application", "Burak applied for compassionate leave " + dstr(2) + " to " + dstr(3) + ". Please review in LeaveDesk.", nowTs() - 3 * 3600e3);
 
   // Pending with Belinda: Barry's annual leave
   applications.push({
@@ -369,9 +388,42 @@ function seed() {
     createdAt: nowTs() - 4 * 3600e3, backdated: false
   });
   ev("A9", "barry", "Submitted", "", nowTs() - 4 * 3600e3);
-  mail("belinda@company.sg", "[Action required] Barry's Annual Leave application", "Barry applied for annual leave on " + dstr(6) + ". Please review in LeaveDesk.", nowTs() - 4 * 3600e3);
+  mail("belinda@shanghai-uniforms.com", "[Action required] Barry's Annual Leave application", "Barry applied for annual leave on " + dstr(6) + ". Please review in LeaveDesk.", nowTs() - 4 * 3600e3);
 
-  return { v: 2, seq: 9, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
+  // Same-day overlap scenario (tests the department warning + acknowledge flow):
+  // Amanda, Paulin AND their approver Michelle all applied for the same day.
+  const nextWd = off => { const d = new Date(); d.setDate(d.getDate() + off); while ([0, 6].includes(d.getDay()) || publicHolidays.includes(iso(d))) d.setDate(d.getDate() + 1); return iso(d); };
+  const clashDay = nextWd(10);
+  const mkPending = (id, empId, approverId, reason, hoursAgo) => {
+    applications.push({
+      id, empId, type: "annual", start: clashDay, end: clashDay, sh: false, eh: false,
+      days: 1, reason, att: "", status: "pending", cur: 0,
+      steps: [{ order: 1, approverId, status: "pending", comment: "", ts: null }],
+      createdAt: nowTs() - hoursAgo * 3600e3, backdated: false
+    });
+    ev(id, empId, "Submitted", "", nowTs() - hoursAgo * 3600e3);
+  };
+  mkPending("A10", "amanda", "michelle", "School vendor fair", 10);
+  mkPending("A11", "paulin", "michelle", "Personal errand", 9);
+  mkPending("A12", "michelle", "doris", "Personal appointment", 7);
+  mail("michelle@shanghai-uniforms.com", "[Action required] Amanda's Annual Leave application", "Amanda applied for annual leave on " + clashDay + ". Please review in LeaveDesk.", nowTs() - 10 * 3600e3);
+  mail("michelle@shanghai-uniforms.com", "[Action required] Paulin's Annual Leave application", "Paulin applied for annual leave on " + clashDay + ". Please review in LeaveDesk.", nowTs() - 9 * 3600e3);
+  mail("doris@shanghai-uniforms.com", "[Action required] Michelle's Annual Leave application", "Michelle applied for annual leave on " + clashDay + ". Please review in LeaveDesk.", nowTs() - 7 * 3600e3);
+
+  // One approved future leave so the calendar shows a solid chip
+  const daisyDay = nextWd(5);
+  applications.push({
+    id: "A13", empId: "daisy", type: "annual", start: daisyDay, end: daisyDay, sh: false, eh: false,
+    days: 1, reason: "Family day", att: "", status: "approved", cur: 0,
+    steps: [{ order: 1, approverId: "michelle", status: "approved", comment: "", ts: nowTs() - 864e5 }],
+    createdAt: nowTs() - 1.5 * 864e5, backdated: false
+  });
+  ev("A13", "daisy", "Submitted", "", nowTs() - 1.5 * 864e5);
+  ev("A13", "michelle", "Approved", "", nowTs() - 864e5);
+  ledger.push({ id: "L" + (ledger.length + 1), empId: "daisy", type: "annual", delta: -1, reason: "Leave taken", refApp: "A13", by: "michelle", ts: nowTs() - 864e5 });
+  mail("daisy@shanghai-uniforms.com", "[Approved] Your Annual Leave application (1 day)", "Michelle approved your annual leave on " + daisyDay + ".", nowTs() - 864e5);
+
+  return { v: 2, seq: 13, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
 }
 
 /* Working-day count (excludes weekends + SG public holidays; supports half days) */
@@ -451,17 +503,20 @@ function submitApp(data, editId) {
   return { id, auto: false };
 }
 
-function actOnStep(appId, action, comment) {
+function actOnStep(appId, action, comment, acked) {
   const a = db.applications.find(x => x.id === appId);
   if (!a || a.status !== "pending") return;
   const step = a.steps[a.cur];
   if (step.approverId !== me.id) return;
+  // Server-side rule (mirrored in schema.sql): overlapping team leave must be acknowledged
+  if (action === "approve" && overlapConflicts(a).length && !acked) { toast("Please acknowledge the overlapping leave first"); return; }
+  const ackTag = action === "approve" && acked ? " (overlap acknowledged)" : "";
   step.comment = comment || ""; step.ts = nowTs();
   const applicant = a.empId, t = lt(a.type);
   if (action === "approve") {
     step.status = "approved";
     if (a.cur + 1 < a.steps.length) {
-      logEv(appId, me.id, "Approved (Level " + step.order + ")", comment);
+      logEv(appId, me.id, "Approved (Level " + step.order + ")" + ackTag, comment);
       a.cur++; a.steps[a.cur].status = "pending";
       sendMail(a.steps[a.cur].approverId, "[Action required · Level " + a.steps[a.cur].order + "] " + emp(applicant).name + "'s " + t.en + " application",
         "Level " + step.order + " (" + me.name + ") has approved. Your final approval is required.");
@@ -469,7 +524,7 @@ function actOnStep(appId, action, comment) {
         me.name + " approved. Waiting for final approval by " + emp(a.steps[a.cur].approverId).name + ".");
     } else {
       a.status = "approved";
-      logEv(appId, me.id, "Approved", comment);
+      logEv(appId, me.id, "Approved" + ackTag, comment);
       if (!t.noDeduct) db.ledger.push({ id: "L" + (++db.seq), empId: applicant, type: a.type, delta: -a.days, reason: "Leave taken", refApp: appId, by: me.id, ts: nowTs() });
       sendMail(applicant, "[Approved] Your " + t.en + " application (" + fmtD(a.days) + " day(s))",
         me.name + " approved your " + t.en + " " + a.start + " to " + a.end + "." + (comment ? "\nNote: " + comment : ""));
@@ -534,12 +589,32 @@ function inbox(u) {
   const cancels = db.applications.filter(a => a.status === "cancel_requested" && a.steps.length && a.steps[0].approverId === u.id);
   return { todo, cancels, count: todo.length + cancels.length };
 }
+/* "Department" for the overlap warning = the applicant's immediate team:
+   same-dept colleagues, teammates sharing the same approver, their approver,
+   and their own direct reports (so a manager counts as part of the team). */
+function conflictGroup(empId) {
+  const e = emp(empId), ids = new Set();
+  for (const x of db.employees) {
+    if (x.id === empId || x.active === false) continue;
+    if (x.dept === e.dept) ids.add(x.id);
+    if (x.approver1 && e.approver1 && x.approver1 === e.approver1) ids.add(x.id);
+    if (x.id === e.approver1) ids.add(x.id);
+    if (x.approver1 === empId) ids.add(x.id);
+  }
+  return ids;
+}
+function overlapConflicts(a) {
+  const group = conflictGroup(a.empId);
+  return db.applications.filter(x => x.id !== a.id && group.has(x.empId) &&
+    ["pending", "approved", "cancel_requested"].includes(x.status) &&
+    !(x.end < a.start || x.start > a.end));
+}
 function isApprover(u) { return u.role !== "employee" || db.employees.some(e => e.approver1 === u.id || e.approver2 === u.id); }
 function myMails(u) { return db.outbox.filter(m => m.to === u.email).sort((a, b) => b.ts - a.ts); }
 function myDecisions(u) {
   // Sourced from the immutable event log (not from steps, which are rebuilt on
   // resubmission) so history survives amend-and-resubmit cycles.
-  const isDecision = act => act === "Approved" || act.startsWith("Approved (Level") ||
+  const isDecision = act => act.startsWith("Approved") ||
     act === "Rejected" || act === "Returned" ||
     act === "Cancellation confirmed" || act === "Cancellation declined";
   return db.events
@@ -562,7 +637,7 @@ function loginPage() {
   return `<div class="login"><div class="loginbox">
     <h1>LeaveDesk <span style="color:var(--accent)">SG</span></h1>
     <p class="tag">Leave management for your team · Demo (data stays in this browser)</p>
-    <div class="acclist">${db.employees.map(e => `
+    <div class="acclist">${db.employees.filter(e => e.active !== false).map(e => `
       <button class="acc" data-act="login" data-id="${e.id}">
         <span class="avatar">${esc(e.name[0])}</span>
         <span class="who"><b>${esc(e.name)}</b><span>${esc(e.title || e.dept)}</span></span>
@@ -583,7 +658,7 @@ function loginPage() {
 function shell() {
   const ib = inbox(me);
   const unread = myMails(me).filter(m => m.ts > (me.mailSeen || 0)).length;
-  const navs = [["dashboard", "Overview"], ["apply", "Apply"], ["myapps", "My applications"]];
+  const navs = [["dashboard", "Overview"], ["apply", "Apply"], ["myapps", "My applications"], ["calendar", "Calendar"]];
   if (isApprover(me)) navs.push(["approvals", `Approvals${ib.count ? `<span class="cnt">${ib.count}</span>` : ""}`]);
   if (me.role === "hr" || me.role === "admin") navs.push(["hr", "HR Console"]);
   return `
@@ -600,8 +675,8 @@ function shell() {
   <nav class="nav"><div class="wrap">
     ${navs.map(([v, label]) => `<button data-act="nav" data-v="${v}" class="${view === v ? "on" : ""}">${label}</button>`).join("")}
   </div></nav>
-  <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}`;
+  <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}`;
 }
 
 function mailPanel() {
@@ -678,8 +753,9 @@ function vApply() {
       </div>
       ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day(s) but only ${fmtD(b.avail)} available</div>` : ""}
       <div class="field"><label>Reason</label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
-      <div class="field"><label>Attachment${t.mc ? " (MC / supporting document required for this type)" : " (optional)"}</label>
-        <input type="file" data-f="attfile">${f.att ? `<span class="hint">Selected: ${esc(f.att)}</span>` : ""}
+      ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
+      <div class="field"><label>Attachment${t.mc ? " (photo or PDF of your MC — required)" : " (optional)"}</label>
+        <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att)}</span>` : ""}
         <span class="hint">Demo stores the file name only; production uploads to secure storage</span></div>
       <div class="actions">
         <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
@@ -693,7 +769,8 @@ function doSubmit() {
   const f = vp.form, t = lt(f.type);
   const days = wdCount(f.start, f.end, f.sh, f.eh);
   if (!f.reason.trim()) return toast("Please fill in the reason");
-  if (t.mc && !f.att) return toast("This leave type requires an MC / supporting document");
+  if (t.mc && !f.att) return toast("This leave type requires a photo or PDF of your MC");
+  if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("The MC attachment must be a photo or PDF");
   const overlap = db.applications.some(a => a.empId === me.id && a.id !== vp.editId &&
     ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
   if (overlap) return toast("These dates overlap an existing application");
@@ -720,6 +797,55 @@ function appTable(list, showWho) {
         <td>${esc(t.en)}</td><td class="num">${a.start}${a.end !== a.start ? " ~ " + a.end : ""}</td>
         <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stName(a.status)}</span></td><td>${node}</td></tr>`;
     }).join("")}</tbody></table></div>`;
+}
+
+/* ---- Company calendar ---- */
+function vCalendar() {
+  const m = vp.calMonth || todayStr().slice(0, 7);
+  vp.calMonth = m;
+  const [Y, M] = m.split("-").map(Number);
+  const dim = new Date(Y, M, 0).getDate();
+  const startPad = (new Date(Y, M - 1, 1).getDay() + 6) % 7; // Monday-first grid
+  const monthName = new Date(Y, M - 1, 1).toLocaleString("en-SG", { month: "long", year: "numeric" });
+  const leaves = db.applications.filter(a => {
+    const e = emp(a.empId);
+    return e && e.active !== false && ["approved", "pending", "cancel_requested"].includes(a.status);
+  });
+  const cells = [];
+  for (let i = 0; i < startPad; i++) cells.push(`<div class="day off"></div>`);
+  for (let d = 1; d <= dim; d++) {
+    const ds = Y + "-" + pad(M) + "-" + pad(d);
+    const dow = new Date(Y, M - 1, d).getDay();
+    const isPH = db.publicHolidays.includes(ds);
+    const off = dow === 0 || dow === 6 || isPH;
+    const chips = leaves.filter(a => a.start <= ds && ds <= a.end).map(a => {
+      const approved = a.status !== "pending";
+      return `<span class="lvchip ${approved ? "ap" : "pd"}" title="${esc(emp(a.empId).name)} — ${approved ? "Approved" : "Pending approval"}">${esc(emp(a.empId).name)}</span>`;
+    }).join("");
+    cells.push(`<div class="day${off ? " off" : ""}${ds === todayStr() ? " today" : ""}">
+      <div class="dnum"><span>${d}</span>${isPH ? `<span class="ph">PH</span>` : ""}</div>
+      <div class="chips">${chips}</div></div>`);
+  }
+  return `<h2>Company leave calendar</h2>
+    <p class="sub">Everyone can see who is away. Approved leave shows in solid colour; leave still pending approval is faded.</p>
+    <div class="card">
+      <div class="calhead">
+        <button class="btn sec" data-act="calmove" data-dir="-1">‹ Prev</button>
+        <h3>${esc(monthName)}</h3>
+        <button class="btn sec" data-act="calmove" data-dir="1">Next ›</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" data-act="calmove" data-dir="0">Today</button>
+      </div>
+      <div class="calbox"><div class="cal">
+        ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`).join("")}
+        ${cells.join("")}
+      </div></div>
+      <div class="legend">
+        <span><span class="lvchip ap">Name</span> approved</span>
+        <span><span class="lvchip pd">Name</span> pending approval</span>
+        <span>Grey days = weekend / public holiday (PH)</span>
+      </div>
+    </div>`;
 }
 
 /* ---- Approvals ---- */
@@ -754,6 +880,7 @@ function vApprovals() {
 }
 function approvalCard(a) {
   const e = emp(a.empId), t = lt(a.type), b = bal(a.empId, a.type);
+  const conflicts = overlapConflicts(a);
   return `<div class="card appcard">
     <div class="hd"><b>${esc(e.name)} · ${esc(t.en)}</b><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span>
       <span class="meta">Submitted ${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</span></div>
@@ -763,10 +890,17 @@ function approvalCard(a) {
       ${a.att ? `<dt>Attachment</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
       <dt>Their balance</dt><dd>${t.noDeduct ? "This type is recorded only — no deduction" : `${esc(t.en)}: ${fmtD(b.avail)} day(s) available (this request already reserved)`}</dd>
     </dl>
+    ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 Remind ${esc(e.name)}: the original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
     ${stepsView(a)}
+    ${conflicts.length ? `<div class="callout warn" style="margin:8px 0 0">
+      <b>⚠ Same-team leave overlap</b> — others in ${esc(e.name)}'s team are also away on these dates:
+      <ul class="conflictlist">${conflicts.map(c => `<li><b>${esc(emp(c.empId).name)}</b><span class="meta">${c.start}${c.end !== c.start ? " ~ " + c.end : ""}</span><span class="pill st-${c.status === "pending" ? "pending" : "approved"}">${c.status === "pending" ? "Pending" : "Approved"}</span></li>`).join("")}</ul>
+      <label class="ackbox"><input type="checkbox" id="ack-${a.id}" data-act="ackbox" data-id="${a.id}">
+        I acknowledge that multiple people in this team will be on leave on the same day(s), and still approve.</label>
+    </div>` : ""}
     <div class="field" style="margin:8px 0 0"><textarea id="cm-${a.id}" rows="2" placeholder="Note / reason (required when rejecting or returning)"></textarea></div>
     <div class="actions">
-      <button class="btn good" data-act="decide" data-id="${a.id}" data-d="approve">Approve${a.cur + 1 < a.steps.length ? " (send to next level)" : ""}</button>
+      <button class="btn good" data-act="decide" data-id="${a.id}" data-d="approve" ${conflicts.length ? "disabled" : ""}>Approve${a.cur + 1 < a.steps.length ? " (send to next level)" : ""}</button>
       <button class="btn warn" data-act="decide" data-id="${a.id}" data-d="return">Return</button>
       <button class="btn bad" data-act="decide" data-id="${a.id}" data-d="reject">Reject</button>
     </div></div>`;
@@ -811,6 +945,7 @@ function detailModal(id) {
         ${a.att ? `<dt>Attachment</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
       </dl>
+      ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
       ${stepsView(a)}
       <h3 style="margin-top:14px">Timeline</h3>
       <ul class="timeline">${evs.map(v => `<li><b>${esc(emp(v.actor).name)}</b> ${esc(v.action)}${v.comment ? " — " + esc(v.comment) : ""}<div class="tm">${fmtTs(v.ts)}</div></li>`).join("")}</ul>
@@ -840,19 +975,115 @@ function hrRecords() {
       <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "All" : stName(s)}</option>`).join("")}</select></div>
     ${list.length ? appTable(list, true) : `<div class="empty">No records</div>`}</div>`;
 }
-function hrEmployees() {
-  const opts = (self, sel, excl) => `<option value="">(none — auto-approve)</option>` + db.employees.filter(x => x.id !== self && x.id !== excl)
+function activeEmps() { return db.employees.filter(e => e.active !== false); }
+function apprOpts(self, sel, excl) {
+  return `<option value="">(none — auto-approve)</option>` + activeEmps().filter(x => x.id !== self && x.id !== excl)
     .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+}
+/* Annual-leave calculation: joined this year → pro-rated by remaining months;
+   otherwise base + 1 day per additional full year of service. */
+function annualCalc(joinDate, base) {
+  const y = new Date().getFullYear();
+  const jy = Number(String(joinDate).slice(0, 4)) || y, jm = Number(String(joinDate).slice(5, 7)) || 1;
+  if (jy >= y) {
+    const monthsLeft = 12 - jm + 1;
+    const days = Math.ceil(base * monthsLeft / 12 * 2) / 2;
+    return { days, note: `pro-rated: ${monthsLeft}/12 months × ${base} = ${fmtD(days)} day(s) for this year` };
+  }
+  const extra = Math.max(0, y - jy - 1);
+  return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year(s) of service = ${fmtD(base + extra)} day(s)` };
+}
+function hrEmployees() {
+  const former = db.employees.filter(e => e.active === false);
   return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px"><b>Two-level approval is set per employee</b>: default is one level. Tick “2-level” and pick a second approver to route that employee's new applications through two approvals. In-flight applications keep the route they were submitted with.</div>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Dept / Role</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th></tr></thead><tbody>
-    ${db.employees.map(e => `<tr data-emp="${e.id}">
+    <div class="callout acc" style="margin-bottom:14px"><b>Approval routing is set per employee</b> (one level by default; tick “2-level” for a second approver — in-flight applications keep their original route). Annual leave: joined this year = pro-rated by month; +1 day per additional year of service on each annual grant.</div>
+    <div class="actions" style="margin:0 0 14px"><button class="btn" data-act="empadd">+ Add employee</button></div>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Dept / Role</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th>Actions</th></tr></thead><tbody>
+    ${activeEmps().map(e => `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)} · ${roleName(e.role)}</td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver1">${opts(e.id, e.approver1, e.approver2)}</select></td>
+      <td class="num">${esc(e.joinDate)}</td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver1">${apprOpts(e.id, e.approver1, e.approver2)}</select></td>
       <td><input type="checkbox" data-act="empf" data-id="${e.id}" data-f="twoLevel" ${e.twoLevel ? "checked" : ""}></td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel ? "" : "disabled"}>${opts(e.id, e.approver2, e.approver1)}</select></td>
-    </tr>`).join("")}</tbody></table></div></div>`;
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${e.annualBase ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase"></td>
+      <td><div class="actions" style="margin:0">
+        <button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button>
+        <button class="btn ghost" style="padding:5px 10px" data-act="oilopen" data-id="${e.id}">+ OIL</button>
+        <button class="btn bad" style="padding:5px 10px" data-act="offopen" data-id="${e.id}">Offboard</button>
+      </div></td>
+    </tr>`).join("")}</tbody></table></div>
+    ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
+      <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Joined</th><th>Last working day</th></tr></thead><tbody>
+      ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${esc(e.joinDate)}</td><td class="num">${esc(e.lastDay || "—")}</td></tr>`).join("")}
+      </tbody></table></div></details>` : ""}
+    </div>`;
+}
+function empModal() {
+  const m = vp.empModal, f = m.form;
+  const isAdd = m.mode === "add";
+  const calc = annualCalc(f.joinDate, Number(f.annualBase) || 14);
+  return `<div class="modalback" data-act="closemodal"><div class="modal">
+    <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
+      <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <div class="frow">
+      <div class="field"><label>Name</label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
+      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@shanghai-uniforms.com"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Department</label><input type="text" data-f="em.dept" value="${esc(f.dept)}"></div>
+      <div class="field"><label>Job title (optional)</label><input type="text" data-f="em.title" value="${esc(f.title)}"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Gender</label><select data-f="em.gender">
+        <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
+        <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
+      <div class="field"><label>Role</label><select data-f="em.role">
+        ${["employee", "approver", "hr", "admin"].map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select></div>
+      <div class="field"><label>Join date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Level 1 approver</label><select data-f="em.approver1">${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
+      <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" data-f="em.twoLevel" ${f.twoLevel ? "checked" : ""}> 2-level</label></div>
+      <div class="field"><label>Level 2 approver</label><select data-f="em.approver2" ${f.twoLevel ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select></div>
+    </div>
+    <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}"></div>
+    ${isAdd ? `<div class="callout acc">This year's annual leave will be credited automatically: <b>${fmtD(calc.days)} day(s)</b> — ${esc(calc.note)}.<br>Sick 14 / Hospitalisation 60 / Childcare 6 / Compassionate 3 / Marriage 3 are credited at standard entitlements.</div>` : `<div class="callout acc">Changing the base affects future annual grants only; use Ledger & adjustments for corrections this year.</div>`}
+    <div class="actions">
+      <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+function oilModal() {
+  const m = vp.oilModal, e = emp(m.empId);
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:460px">
+    <div class="hd"><h3>Credit off-in-lieu — ${esc(e.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <p class="meta" style="margin:0 0 12px">Current OIL balance: <b>${fmtD(bal(m.empId, "oil").avail)}</b> day(s)</p>
+    <div class="field" style="max-width:160px"><label>Days to credit</label><input type="number" step="0.5" min="0.5" data-f="oil.days" value="${m.days}"></div>
+    <div class="field"><label>Reason</label><input type="text" data-f="oil.reason" value="${esc(m.reason)}" placeholder="e.g. Worked on Sunday 12 Jul stocktake"></div>
+    <div class="actions">
+      <button class="btn" data-act="oilsave">Credit OIL</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+function offModal() {
+  const m = vp.offModal, e = emp(m.empId);
+  const bals = db.leaveTypes.filter(t => !t.noDeduct && eligible(t, e)).map(t => ({ t, avail: bal(m.empId, t.code).avail })).filter(x => x.avail !== 0);
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:520px">
+    <div class="hd"><h3>Offboard — ${esc(e.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <div class="field" style="max-width:200px"><label>Last working day</label><input type="date" data-f="off.lastDay" value="${m.lastDay}"></div>
+    <div class="callout warn" style="margin:0 0 12px"><b>Remaining balances to settle:</b>
+      ${bals.length ? `<ul class="conflictlist">${bals.map(x => `<li>${esc(x.t.en)}: <b>${fmtD(x.avail)}</b> day(s)</li>`).join("")}</ul>` : " none — all balances are zero."}
+    </div>
+    <div class="field"><label>How to settle the remaining balance</label>
+      <label class="check"><input type="radio" name="offmode" data-f="off.mode" value="encash" ${m.mode === "encash" ? "checked" : ""}> Encash — pay out the days (recorded in the ledger for payroll)</label>
+      <label class="check"><input type="radio" name="offmode" data-f="off.mode" value="clear" ${m.mode === "clear" ? "checked" : ""}> Clear — forfeit the remaining days</label>
+    </div>
+    <p class="meta">Pending applications will be withdrawn automatically. The account is removed from sign-in and rosters; all history stays in the records.</p>
+    <div class="actions">
+      <button class="btn bad" data-act="offsave">Confirm offboarding</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
 }
 function hrTypes() {
   return `<div class="card">
@@ -873,7 +1104,7 @@ function hrLedger() {
   const led = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
   return `<div class="stack"><div class="card"><h3>Manual entry (off-in-lieu credit / adjustment / expiry)</h3>
     <div class="frow">
-      <div class="field"><label>Employee</label><select data-f="led.empId">${db.employees.map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Employee</label><select data-f="led.empId">${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
       <div class="field"><label>Leave type</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
       <div class="field"><label>Days (+ credit / − deduct)</label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
     </div>
@@ -910,8 +1141,62 @@ document.addEventListener("click", ev => {
     case "mail": mailOpen = !mailOpen; if (mailOpen) { me.mailSeen = nowTs(); save(); } render(); break;
     case "closemail": mailOpen = false; render(); break;
     case "hrtab": hrTab = el.dataset.t; vp = {}; render(); break;
+    case "calmove": {
+      const dir = Number(el.dataset.dir);
+      if (!dir) vp.calMonth = todayStr().slice(0, 7);
+      else { const [Y, M] = (vp.calMonth || todayStr().slice(0, 7)).split("-").map(Number); const d = new Date(Y, M - 1 + dir, 1); vp.calMonth = d.getFullYear() + "-" + pad(d.getMonth() + 1); }
+      render(); break;
+    }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; render(); break;
+    case "empadd": vp.empModal = { mode: "add", id: null, form: { name: "", email: "", dept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "doris", twoLevel: false, approver2: null, annualBase: 14 } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "empsave": {
+      const m = vp.empModal, f = m.form;
+      if (!f.name.trim()) return toast("Please fill in the name");
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
+      if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
+      if (f.twoLevel && (!f.approver2 || f.approver2 === f.approver1)) return toast("2-level routing needs a different Level 2 approver");
+      const base = Number(f.annualBase) || 14;
+      if (m.mode === "add") {
+        const nid = "u" + (++db.seq);
+        db.employees.push({ id: nid, name: f.name.trim(), email: f.email.trim(), dept: f.dept.trim() || "—", title: f.title.trim(), gender: f.gender, role: f.role, joinDate: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null, twoLevel: !!f.twoLevel, annualBase: base, active: true, mailSeen: 0 });
+        const calc = annualCalc(f.joinDate, base);
+        const led = (type, delta, reason) => db.ledger.push({ id: "L" + (++db.seq), empId: nid, type, delta, reason, refApp: null, by: me.id, ts: nowTs() });
+        if (calc.days > 0) led("annual", calc.days, "Pro-rated entitlement (joined " + f.joinDate + ")");
+        led("sick", 14, "Entitlement on joining"); led("hosp", 60, "Entitlement on joining");
+        led("childcare", 6, "Entitlement on joining"); led("compassionate", 3, "Entitlement on joining"); led("marriage", 3, "Entitlement on joining");
+        save(); delete vp.empModal; render(); toast(f.name.trim() + " added — " + fmtD(calc.days) + " day(s) annual leave credited");
+      } else {
+        const e = emp(m.id);
+        Object.assign(e, { name: f.name.trim(), email: f.email.trim(), dept: f.dept.trim() || e.dept, title: f.title.trim(), gender: f.gender, role: f.role, joinDate: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null, twoLevel: !!f.twoLevel, annualBase: base });
+        save(); delete vp.empModal; render(); toast("Saved " + e.name + "'s profile");
+      }
+      break;
+    }
+    case "oilopen": vp.oilModal = { empId: id, days: 1, reason: "" }; render(); break;
+    case "oilsave": {
+      const m = vp.oilModal;
+      if (!(Number(m.days) > 0)) return toast("Days must be more than 0");
+      if (!m.reason.trim()) return toast("Please fill in the reason");
+      db.ledger.push({ id: "L" + (++db.seq), empId: m.empId, type: "oil", delta: Number(m.days), reason: "Off-in-lieu credit: " + m.reason.trim(), refApp: null, by: me.id, ts: nowTs() });
+      save(); const nm = emp(m.empId).name; delete vp.oilModal; render(); toast("Credited " + fmtD(Number(m.days)) + " day(s) OIL to " + nm);
+      break;
+    }
+    case "offopen": vp.offModal = { empId: id, lastDay: todayStr(), mode: "encash" }; render(); break;
+    case "offsave": {
+      const m = vp.offModal, e = emp(m.empId);
+      if (e.id === me.id) return toast("You cannot offboard yourself");
+      for (const a of db.applications) if (a.empId === e.id && a.status === "pending") { a.status = "withdrawn"; logEv(a.id, me.id, "Withdrawn (offboarding)"); }
+      for (const t of db.leaveTypes) {
+        if (t.noDeduct || !eligible(t, e)) continue;
+        const avail = bal(e.id, t.code).avail;
+        if (avail !== 0) db.ledger.push({ id: "L" + (++db.seq), empId: e.id, type: t.code, delta: -avail, reason: "Offboarding (last day " + m.lastDay + ") — balance " + (m.mode === "encash" ? "encashed" : "cleared"), refApp: null, by: me.id, ts: nowTs() });
+      }
+      e.active = false; e.lastDay = m.lastDay;
+      save(); delete vp.offModal; render(); toast(e.name + " offboarded — balances settled, account deactivated");
+      break;
+    }
     case "submit": doSubmit(); break;
     case "withdraw": withdrawApp(id); delete vp.detail; render(); toast("Application withdrawn"); break;
     case "edit": vp = { editId: id }; view = "apply"; render(); break;
@@ -935,7 +1220,8 @@ document.addEventListener("click", ev => {
       const d = el.dataset.d;
       const cm = (document.getElementById("cm-" + id) || {}).value || "";
       if ((d === "reject" || d === "return") && !cm.trim()) return toast(d === "reject" ? "A reason is required when rejecting" : "Please say what needs to be added before returning");
-      actOnStep(id, d, cm.trim());
+      const ackEl = document.getElementById("ack-" + id);
+      actOnStep(id, d, cm.trim(), !!(ackEl && ackEl.checked));
       render(); toast(d === "approve" ? "Approved — emails sent automatically" : d === "reject" ? "Rejected — employee notified" : "Returned — employee notified");
       break;
     }
@@ -944,8 +1230,14 @@ document.addEventListener("click", ev => {
 
 document.addEventListener("change", ev => {
   const el = ev.target;
+  if (el.dataset.act === "ackbox") {
+    const btn = document.querySelector(`[data-act="decide"][data-d="approve"][data-id="${el.dataset.id}"]`);
+    if (btn) btn.disabled = !el.checked;
+    return;
+  }
   if (el.dataset.act === "empf") {
     const e = emp(el.dataset.id), f = el.dataset.f;
+    if (f === "annualBase") { e.annualBase = Number(el.value) || 14; save(); toast("Annual base updated (affects future annual grants)"); return; }
     if (f === "twoLevel") { e.twoLevel = el.checked; if (!el.checked) e.approver2 = null; }
     else e[f] = el.value || null;
     if (e.twoLevel && e.approver1 && e.approver1 === e.approver2) { e.approver2 = null; toast("Level 2 approver must differ from level 1"); }
@@ -960,6 +1252,14 @@ document.addEventListener("change", ev => {
   if (!f) return;
   if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
   if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("em.") && vp.empModal) {
+    const k = f.slice(3);
+    vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
+    if (["joinDate", "twoLevel", "approver1", "approver2"].includes(k)) render(); // refresh pro-rate preview / dependent selects
+    return;
+  }
+  if (f.startsWith("oil.") && vp.oilModal) { vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("off.") && vp.offModal) { vp.offModal[f.slice(4)] = el.value; return; }
   if (view === "apply" && vp.form) {
     if (f === "reason") { vp.form.reason = el.value; return; } // synced live via input; skipping re-render here keeps the submit click from being swallowed
     if (f === "attfile") { vp.form.att = el.files && el.files[0] ? el.files[0].name : ""; render(); return; }
@@ -971,6 +1271,11 @@ document.addEventListener("change", ev => {
 document.addEventListener("input", ev => {
   const el = ev.target;
   if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
+  const f = el.dataset.f || "";
+  // Sync modal text fields live so the save click (which blurs the field) never loses input
+  if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") vp.empModal.form[f.slice(3)] = el.value;
+  if (vp.oilModal && f.startsWith("oil.")) vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+  if (vp.offModal && f.startsWith("off.") && el.type !== "radio") vp.offModal[f.slice(4)] = el.value;
 });
 
 /* ============ Boot ============ */

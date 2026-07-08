@@ -21,9 +21,11 @@ create table if not exists employees (
   gender        text check (gender in ('M','F')),
   role          text not null default 'employee'
                 check (role in ('employee','approver','hr','admin')),
-  approver1     uuid references employees (id),
+  approver1     uuid references employees (id),  -- 空 = 无需审批（如 Managing Director，提交即自动批准）
   approver2     uuid references employees (id),
   two_level     boolean not null default false,   -- HR 按员工勾选是否两级审批
+  annual_base   numeric(5,1) not null default 14, -- 年假基数；每多一年服务 +1（年度入账时计算）
+  last_working_day date,                          -- 离职日（offboard 时填写）
   active        boolean not null default true,
   created_at    timestamptz not null default now(),
   check (approver2 is distinct from id and approver1 is distinct from id),
@@ -104,6 +106,7 @@ create table if not exists applications (
                                 'withdrawn','cancel_requested','cancelled')),
   current_step int not null default 1,
   backdated   boolean not null default false,
+  overlap_acknowledged boolean not null default false, -- 同团队同日请假，审批人已知晓
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -225,24 +228,58 @@ begin
     returning id into app_id;
   end if;
 
-  -- 按员工档案生成审批链（一级或两级）；在途申请不受之后档案变更影响
-  insert into approval_steps (application_id, step_order, approver_id, status)
-  values (app_id, 1, me.approver1, 'pending');
-  if me.two_level and me.approver2 is not null then
-    insert into approval_steps (application_id, step_order, approver_id, status)
-    values (app_id, 2, me.approver2, 'waiting');
-  end if;
-
   insert into application_events (application_id, actor, action)
   values (app_id, me.id, case when p_resubmit_id is null then 'submitted' else 'resubmitted' end);
+
+  if me.approver1 is null then
+    -- 无审批人（Managing Director）：提交即自动批准、记账，事件流通知 HR 备案
+    update applications set status='approved', updated_at=now() where id=app_id;
+    if not t.no_deduct then
+      insert into leave_ledger (emp_id, leave_type, delta_days, reason, ref_application, created_by)
+      values (me.id, p_type, -d, '请假扣减', app_id, me.id);
+    end if;
+    insert into application_events (application_id, actor, action, comment)
+    values (app_id, me.id, 'auto_approved', 'No approver required (Managing Director)');
+  else
+    -- 按员工档案生成审批链（一级或两级）；在途申请不受之后档案变更影响
+    insert into approval_steps (application_id, step_order, approver_id, status)
+    values (app_id, 1, me.approver1, 'pending');
+    if me.two_level and me.approver2 is not null then
+      insert into approval_steps (application_id, step_order, approver_id, status)
+      values (app_id, 2, me.approver2, 'waiting');
+    end if;
+  end if;
   return app_id;
 end $$;
 
+-- 同团队重叠请假检查：申请人的直属团队 = 同部门 ∪ 同一审批人的队友 ∪ 其审批人 ∪ 其直接下属
+create or replace function overlapping_team_leave(p_app uuid)
+returns table (emp_name text, start_date date, end_date date, status text)
+language sql stable security definer set search_path = public as $$
+  with app as (select * from applications where id = p_app),
+  grp as (
+    select x.id from employees x, app a
+    join employees e on e.id = a.emp_id
+    where x.id <> e.id and x.active
+      and (x.dept = e.dept
+           or (x.approver1 is not null and x.approver1 = e.approver1)
+           or x.id = e.approver1
+           or x.approver1 = e.id)
+  )
+  select e.name, o.start_date, o.end_date, o.status
+  from applications o
+  join employees e on e.id = o.emp_id, app a
+  where o.id <> a.id and o.emp_id in (select id from grp)
+    and o.status in ('pending','approved','cancel_requested')
+    and not (o.end_date < a.start_date or o.start_date > a.end_date);
+$$;
+
 -- 审批动作：approve / reject / return（当前节点审批人才能调）
-create or replace function act_on_step(p_app uuid, p_action text, p_comment text default null)
+-- p_ack：同团队同日请假时必须传 true（前端勾选 acknowledge），否则拒绝批准
+create or replace function act_on_step(p_app uuid, p_action text, p_comment text default null, p_ack boolean default false)
 returns void language plpgsql security definer set search_path = public as $$
 declare me_id uuid := current_emp_id(); a applications%rowtype; s approval_steps%rowtype;
-        t leave_types%rowtype; nxt approval_steps%rowtype;
+        t leave_types%rowtype; nxt approval_steps%rowtype; has_overlap boolean;
 begin
   select * into a from applications where id = p_app for update;
   if a.id is null or a.status <> 'pending' then raise exception '申请不在待审批状态'; end if;
@@ -255,6 +292,11 @@ begin
   select * into t from leave_types where code = a.leave_type;
 
   if p_action = 'approve' then
+    select exists (select 1 from overlapping_team_leave(p_app)) into has_overlap;
+    if has_overlap and not p_ack then
+      raise exception '同团队有人同日请假，必须勾选知晓（acknowledge）后才能批准';
+    end if;
+    if has_overlap then update applications set overlap_acknowledged = true where id = p_app; end if;
     update approval_steps set status='approved', comment=p_comment, acted_at=now() where id=s.id;
     select * into nxt from approval_steps
       where application_id=p_app and step_order=a.current_step+1;
@@ -262,7 +304,7 @@ begin
       update approval_steps set status='pending' where id=nxt.id;
       update applications set current_step=current_step+1, updated_at=now() where id=p_app;
       insert into application_events (application_id,actor,action,comment)
-      values (p_app, me_id, 'step_approved', p_comment);
+      values (p_app, me_id, case when has_overlap then 'step_approved_overlap_ack' else 'step_approved' end, p_comment);
     else
       update applications set status='approved', updated_at=now() where id=p_app;
       if not t.no_deduct then
@@ -270,7 +312,7 @@ begin
         values (a.emp_id, a.leave_type, -a.days, '请假扣减', p_app, me_id);
       end if;
       insert into application_events (application_id,actor,action,comment)
-      values (p_app, me_id, 'approved', p_comment);
+      values (p_app, me_id, case when has_overlap then 'approved_overlap_ack' else 'approved' end, p_comment);
     end if;
   elsif p_action = 'reject' then
     update approval_steps set status='rejected', comment=p_comment, acted_at=now() where id=s.id;
@@ -376,23 +418,100 @@ create policy events_read on application_events for select to authenticated
                                  where s2.application_id = a.id and s2.approver_id = current_emp_id()))));
 
 -- ---------- 13. 年度入账（HR 每年 1 月 1 日执行一次；也可做成 pg_cron 定时） ----------
+-- 年假 = 员工 annual_base + 每多一年服务 +1；入职当年按剩余月份 pro-rate（向上取 0.5）
+-- 允许在 SQL Editor（postgres，无登录态）或 HR 账号下执行
+create or replace function annual_entitlement_for(p_emp uuid, p_year int)
+returns numeric language sql stable as $$
+  select case
+    when extract(year from e.join_date) >= p_year
+      then ceil(e.annual_base * (12 - extract(month from e.join_date) + 1) / 12 * 2) / 2
+    else e.annual_base + greatest(0, p_year - extract(year from e.join_date) - 1)
+  end
+  from employees e where e.id = p_emp;
+$$;
+
 create or replace function grant_annual_entitlements(p_year int)
 returns int language plpgsql security definer set search_path = public as $$
-declare n int := 0; r record;
+declare n int := 0; r record; amt numeric;
 begin
-  if not is_hr() then raise exception '只有 HR 能执行年度入账'; end if;
+  if auth.uid() is not null and not is_hr() then raise exception '只有 HR 能执行年度入账'; end if;
   for r in
     select e.id as emp_id, t.code, t.default_days
     from employees e cross join leave_types t
-    where e.active and t.default_days > 0
+    where e.active and (t.default_days > 0 or t.code = 'annual')
       and (t.gender_eligibility is null or t.gender_eligibility = e.gender)
       and not exists (select 1 from leave_ledger l
                       where l.emp_id = e.id and l.leave_type = t.code
                         and l.reason = p_year || ' 年度配额')
   loop
-    insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
-    values (r.emp_id, r.code, r.default_days, p_year || ' 年度配额', current_emp_id());
-    n := n + 1;
+    amt := case when r.code = 'annual' then annual_entitlement_for(r.emp_id, p_year) else r.default_days end;
+    if amt > 0 then
+      insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
+      values (r.emp_id, r.code, amt, p_year || ' 年度配额', current_emp_id());
+      n := n + 1;
+    end if;
   end loop;
   return n;
 end $$;
+
+-- ---------- 14. 全员请假日历（只暴露 姓名/部门/日期/状态，全公司可读） ----------
+create or replace view leave_calendar as
+select e.name, e.dept, a.start_date, a.end_date,
+       case when a.status = 'pending' then 'pending' else 'approved' end as status
+from applications a join employees e on e.id = a.emp_id
+where a.status in ('pending','approved','cancel_requested') and e.active;
+grant select on leave_calendar to authenticated;
+
+-- ---------- 15. 注册自动关联员工档案（按邮箱匹配，无需手工填 UUID） ----------
+create or replace function link_employee_on_signup()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  update employees set auth_user_id = new.id
+  where lower(email) = lower(new.email) and auth_user_id is null;
+  return new;
+end $$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users for each row execute function link_employee_on_signup();
+
+-- ---------- 16. 离职结算（HR）：撤回在途申请 → 余额结清（encash/clear）→ 停用账号 ----------
+create or replace function offboard_employee(p_emp uuid, p_last_day date, p_mode text)
+returns void language plpgsql security definer set search_path = public as $$
+declare me_id uuid := current_emp_id(); r record; remaining numeric;
+begin
+  if not is_hr() then raise exception '只有 HR 能执行离职结算'; end if;
+  if p_mode not in ('encash','clear') then raise exception 'mode 必须是 encash 或 clear'; end if;
+  if p_emp = me_id then raise exception '不能对自己执行离职结算'; end if;
+
+  update applications set status='withdrawn', updated_at=now()
+    where emp_id=p_emp and status='pending';
+  insert into application_events (application_id, actor, action, comment)
+    select id, me_id, 'withdrawn', 'Offboarding' from applications
+    where emp_id=p_emp and status='withdrawn' and updated_at >= now() - interval '5 seconds';
+
+  for r in select leave_type, sum(delta_days) as balance from leave_ledger
+           where emp_id=p_emp group by leave_type having sum(delta_days) <> 0
+  loop
+    insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
+    values (p_emp, r.leave_type, -r.balance,
+            'Offboarding (last day ' || p_last_day || ') — balance ' ||
+            case when p_mode='encash' then 'encashed' else 'cleared' end, me_id);
+  end loop;
+
+  update employees set active=false, last_working_day=p_last_day where id=p_emp;
+end $$;
+
+-- ---------- 17. 附件存储（MC 照片/PDF）：私有 bucket + 本人上传 / 本人+链上审批人+HR 可读 ----------
+insert into storage.buckets (id, name, public) values ('attachments','attachments',false)
+on conflict (id) do nothing;
+
+create policy att_upload on storage.objects for insert to authenticated
+  with check (bucket_id = 'attachments'
+              and (storage.foldername(name))[1] = current_emp_id()::text);
+create policy att_read on storage.objects for select to authenticated
+  using (bucket_id = 'attachments'
+         and ((storage.foldername(name))[1] = current_emp_id()::text
+              or is_hr()
+              or exists (select 1 from approval_steps s join applications a on a.id = s.application_id
+                         where s.approver_id = current_emp_id()
+                           and (storage.foldername(name))[1] = a.emp_id::text)));
