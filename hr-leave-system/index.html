@@ -195,7 +195,7 @@ td.num{font-variant-numeric:tabular-nums}
 
 #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 20px;border-radius:99px;font-size:14px;font-weight:600;box-shadow:var(--shadow);z-index:99;opacity:0;pointer-events:none;transition:opacity .25s}
 #toast.show{opacity:1}
-.calhead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.calhead{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .calhead h3{margin:0;font-size:16px;min-width:150px;text-align:center;font-variant-numeric:tabular-nums}
 .calbox{overflow-x:auto}
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;min-width:700px}
@@ -846,10 +846,14 @@ function vCalendar() {
   const dim = new Date(Y, M, 0).getDate();
   const startPad = (new Date(Y, M - 1, 1).getDay() + 6) % 7; // Monday-first grid
   const monthName = new Date(Y, M - 1, 1).toLocaleString("en-SG", { month: "long", year: "numeric" });
+  const q = (vp.calSearch || "").toLowerCase();
   const leaves = db.applications.filter(a => {
     const e = emp(a.empId);
-    return e && e.active !== false && ["approved", "pending", "cancel_requested"].includes(a.status);
+    return e && e.active !== false && ["approved", "pending", "cancel_requested"].includes(a.status)
+      && (!q || e.name.toLowerCase().includes(q));
   });
+  // When searching one person, list their leave in this month above the grid
+  const monthHits = q ? leaves.filter(a => a.start.slice(0, 7) <= m && m <= a.end.slice(0, 7)) : [];
   const cells = [];
   for (let i = 0; i < startPad; i++) cells.push(`<div class="day off"></div>`);
   for (let d = 1; d <= dim; d++) {
@@ -873,8 +877,13 @@ function vCalendar() {
         <h3>${esc(monthName)}</h3>
         <button class="btn sec" data-act="calmove" data-dir="1">Next ›</button>
         <span class="spacer"></span>
+        <input type="search" id="calsearch" data-f="calSearch" value="${esc(vp.calSearch || "")}" placeholder="🔍 Search a name…" style="max-width:190px">
         <button class="btn ghost" data-act="calmove" data-dir="0">Today</button>
       </div>
+      ${q ? `<div class="callout acc" style="margin-bottom:10px">${
+        monthHits.length
+          ? `<b>${esc(vp.calSearch)}</b> — leave in ${esc(monthName)}: ` + monthHits.map(a => `${esc(emp(a.empId).name)} ${fmtRange(a.start, a.end)} (${a.status === "pending" ? "pending" : "approved"})`).join(" · ")
+          : `No leave found for “${esc(vp.calSearch)}” in ${esc(monthName)} — try Prev/Next month`}</div>` : ""}
       <div class="calbox"><div class="cal">
         ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`).join("")}
         ${cells.join("")}
@@ -1001,14 +1010,19 @@ function vHR() {
     ${{ records: hrRecords, employees: hrEmployees, types: hrTypes, ledger: hrLedger, mail: hrMail, settings: hrSettings }[hrTab]()}`;
 }
 function hrRecords() {
-  const f = vp.stFilter || "all";
+  const f = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
   let list = db.applications.slice().sort((a, b) => b.createdAt - a.createdAt);
   if (f !== "all") list = list.filter(a => a.status === f);
+  if (q) list = list.filter(a => { const e = emp(a.empId); return e && (e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q)); });
   const sts = ["all", "pending", "approved", "rejected", "returned", "withdrawn", "cancel_requested", "cancelled"];
   return `<div class="card">
-    <div class="field" style="max-width:240px"><label>Filter by status</label>
-      <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "All" : stName(s)}</option>`).join("")}</select></div>
-    ${list.length ? appTable(list, true) : `<div class="empty">No records</div>`}</div>`;
+    <div class="frow" style="align-items:flex-end;margin-bottom:10px">
+      <div class="field" style="max-width:260px"><label>Search employee</label>
+        <input type="search" id="recsearch" data-f="recSearch" value="${esc(vp.recSearch || "")}" placeholder="Type a name…"></div>
+      <div class="field" style="max-width:220px"><label>Status</label>
+        <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "All" : stName(s)}</option>`).join("")}</select></div>
+    </div>
+    ${list.length ? appTable(list, true) : `<div class="empty">No records${q ? ` for “${esc(vp.recSearch)}”` : ""}</div>`}</div>`;
 }
 function activeEmps() { return db.employees.filter(e => e.active !== false); }
 function apprOpts(self, sel, excl) {
@@ -1406,10 +1420,11 @@ document.addEventListener("input", ev => {
   const el = ev.target;
   if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
   const f = el.dataset.f || "";
-  if (f === "empSearch") {
+  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch" };
+  if (liveSearch[f]) {
     // Live filter; re-render then restore focus/caret so typing isn't interrupted
-    vp.empSearch = el.value; render();
-    const s = document.getElementById("empsearch");
+    vp[f] = el.value; render();
+    const s = document.getElementById(liveSearch[f]);
     if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
     return;
   }
