@@ -408,7 +408,7 @@ create policy ledger_hr_insert on leave_ledger for insert to authenticated
 create policy app_read on applications for select to authenticated
   using (emp_id = current_emp_id() or is_hr()
          or exists (select 1 from approval_steps s
-                    where s.application_id = id and s.approver_id = current_emp_id()));
+                    where s.application_id = applications.id and s.approver_id = current_emp_id()));
 create policy steps_read on approval_steps for select to authenticated
   using (exists (select 1 from applications a where a.id = application_id
                  and (a.emp_id = current_emp_id() or is_hr()
