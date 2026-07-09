@@ -134,8 +134,12 @@ td.num{font-variant-numeric:tabular-nums}
 
 .applist{display:flex;flex-direction:column;gap:12px}
 .appcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px}
-.appcard .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
-.appcard .hd b{font-size:15px}
+.appcard .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.appcard .hd b{font-size:15.5px}
+.typechip{background:var(--gray-soft);border-radius:6px;padding:2px 9px;font-size:12px;color:var(--muted);white-space:nowrap}
+.appcard .when{font-size:15px;margin:2px 0;font-variant-numeric:tabular-nums}
+.appcard .why{font-size:13.5px;margin:0 0 2px;overflow-wrap:anywhere}
+.appcard .metarow{font-size:12.5px;color:var(--muted);margin:2px 0 6px}
 .meta{color:var(--muted);font-size:13px}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:8px 0}
 .kv dt{color:var(--muted)}
@@ -207,12 +211,25 @@ td.num{font-variant-numeric:tabular-nums}
 .lvchip.pd{background:var(--gray-soft);color:var(--muted);opacity:.65;border:1px dashed var(--line)}
 .legend{display:flex;gap:16px;align-items:center;font-size:12.5px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
 .ackbox{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;font-weight:600;margin-top:10px}
-.ackbox input{width:16px;height:16px;margin-top:3px}
+.ackbox input{width:16px;height:16px;margin-top:3px;flex:none}
 .conflictlist{margin:8px 0 0;padding:0;list-style:none;font-size:13px}
-.conflictlist li{display:flex;gap:8px;align-items:center;padding:3px 0}
+.conflictlist li{display:grid;grid-template-columns:minmax(64px,max-content) 1fr auto;gap:10px;align-items:center;padding:3px 0}
+.conflictlist .cldate{font-variant-numeric:tabular-nums;white-space:nowrap}
 .phchips{display:flex;flex-wrap:wrap;gap:6px}
 .phchips span{background:var(--gray-soft);border-radius:6px;padding:2px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
 .empty{color:var(--muted);font-size:14px;padding:26px 0;text-align:center}
+
+/* Phone layout: tighter cards, full-width tap targets */
+@media (max-width:560px){
+  .wrap{padding:0 10px}
+  .appcard{padding:12px}
+  .appcard .actions .btn{flex:1;padding:10px 6px;text-align:center}
+  .callout{padding:10px}
+  .kv{grid-template-columns:1fr;gap:1px 0}
+  .kv dt{margin-top:6px}
+  .conflictlist li{grid-template-columns:minmax(56px,max-content) 1fr auto;gap:7px}
+  .modal{padding:14px}
+}
 </style>
 </head>
 <body>
@@ -230,7 +247,17 @@ const todayStr = () => iso(new Date());
 const dstr = off => { const d = new Date(); d.setDate(d.getDate() + off); return iso(d); };
 const nowTs = () => Date.now();
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const fmtTs = ts => { const d = new Date(ts); return iso(d) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+/* Human dates: "20 Jul" (year only when it differs from the current year) */
+const fmtDate = s => { const [y, m, d] = String(s).split("-").map(Number); return d + " " + MON[m - 1] + (y !== new Date().getFullYear() ? " " + y : ""); };
+/* "20 Jul" · "18–20 Jul" · "28 Jul – 2 Aug" */
+const fmtRange = (s, e) => {
+  if (!e || e === s) return fmtDate(s);
+  const [ys, ms] = String(s).split("-").map(Number), [ye, me] = String(e).split("-").map(Number);
+  if (ys === ye && ms === me) return Number(String(s).slice(8)) + "–" + fmtDate(e);
+  return fmtDate(s) + " – " + fmtDate(e);
+};
+const fmtTs = ts => { const d = new Date(ts); return fmtDate(iso(d)) + ", " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
 const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
 
 function seed() {
@@ -806,7 +833,7 @@ function appTable(list, showWho) {
       const node = a.status === "pending" && a.steps.length ? emp(a.steps[a.cur].approverId).name + (a.steps.length > 1 ? ` (level ${a.cur + 1}/${a.steps.length})` : "") : "—";
       return `<tr class="rowlink" data-act="detail" data-id="${a.id}">
         ${showWho ? `<td>${esc(emp(a.empId).name)}</td>` : ""}
-        <td>${esc(t.en)}</td><td class="num">${a.start}${a.end !== a.start ? " ~ " + a.end : ""}</td>
+        <td>${esc(t.en)}</td><td class="num">${fmtRange(a.start, a.end)}</td>
         <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stName(a.status)}</span></td><td>${node}</td></tr>`;
     }).join("")}</tbody></table></div>`;
 }
@@ -877,7 +904,7 @@ function vApprovals() {
         <th>Employee</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>My decision</th><th>Note</th><th>Final status</th><th>Decided on</th></tr></thead><tbody>
         ${history.map(h => `<tr class="rowlink" data-act="detail" data-id="${h.a.id}">
           <td>${esc(emp(h.a.empId).name)}</td><td>${esc(lt(h.a.type).en)}</td>
-          <td class="num">${h.a.start}${h.a.end !== h.a.start ? " ~ " + h.a.end : ""}</td>
+          <td class="num">${fmtRange(h.a.start, h.a.end)}</td>
           <td class="num">${fmtD(h.a.days)}</td>
           <td><span class="pill ${h.decision.startsWith("Approved") || h.decision === "Cancellation confirmed" ? "st-approved" : h.decision === "Rejected" ? "st-rejected" : "st-returned"}">${h.decision}</span></td>
           <td class="meta">${esc(h.comment || "—")}</td>
@@ -894,25 +921,21 @@ function approvalCard(a) {
   const e = emp(a.empId), t = lt(a.type), b = bal(a.empId, a.type);
   const conflicts = overlapConflicts(a);
   return `<div class="card appcard">
-    <div class="hd"><b>${esc(e.name)} · ${esc(t.en)}</b><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span>
-      <span class="meta">Submitted ${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</span></div>
-    <dl class="kv">
-      <dt>Dates</dt><dd>${a.start}${a.end !== a.start ? " to " + a.end : ""} · <b>${fmtD(a.days)}</b> working day(s)${a.sh ? " · first day PM" : ""}${a.eh ? " · last day AM" : ""}</dd>
-      <dt>Reason</dt><dd>${esc(a.reason)}</dd>
-      ${a.att ? `<dt>Attachment</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
-      <dt>Their balance</dt><dd>${t.noDeduct ? "This type is recorded only — no deduction" : `${esc(t.en)}: ${fmtD(b.avail)} day(s) available (this request already reserved)`}</dd>
-    </dl>
+    <div class="hd"><b>${esc(e.name)}</b><span class="typechip">${esc(t.en)}</span><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span></div>
+    <div class="when">${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}${a.sh ? " (first day PM)" : ""}${a.eh ? " (last day AM)" : ""}</div>
+    <div class="why">${esc(a.reason)}</div>
+    <div class="metarow">${t.noDeduct ? "Recorded only — no deduction" : `Balance after this: <b>${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"}`}${a.att ? ` · 📎 ${esc(a.att)}` : ""} · Submitted ${fmtDate(iso(new Date(a.createdAt)))}${a.backdated ? " · backdated" : ""}</div>
     ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 Remind ${esc(e.name)}: the original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
-    ${stepsView(a)}
+    ${a.steps.length > 1 ? stepsView(a) : ""}
     ${conflicts.length ? `<div class="callout warn" style="margin:8px 0 0">
-      <b>⚠ Same-team leave overlap</b> — others in ${esc(e.name)}'s team are also away on these dates:
-      <ul class="conflictlist">${conflicts.map(c => `<li><b>${esc(emp(c.empId).name)}</b><span class="meta">${c.start}${c.end !== c.start ? " ~ " + c.end : ""}</span><span class="pill st-${c.status === "pending" ? "pending" : "approved"}">${c.status === "pending" ? "Pending" : "Approved"}</span></li>`).join("")}</ul>
+      <b>⚠ Same-team overlap</b> — also away:
+      <ul class="conflictlist">${conflicts.map(c => `<li><b>${esc(emp(c.empId).name)}</b><span class="cldate">${fmtRange(c.start, c.end)}</span><span class="pill st-${c.status === "pending" ? "pending" : "approved"}">${c.status === "pending" ? "Pending" : "Approved"}</span></li>`).join("")}</ul>
       <label class="ackbox"><input type="checkbox" id="ack-${a.id}" data-act="ackbox" data-id="${a.id}">
-        I acknowledge that multiple people in this team will be on leave on the same day(s), and still approve.</label>
+        I'm aware of the overlap — approve anyway.</label>
     </div>` : ""}
     <div class="field" style="margin:8px 0 0"><textarea id="cm-${a.id}" rows="2" placeholder="Note / reason (required when rejecting or returning)"></textarea></div>
     <div class="actions">
-      <button class="btn good" data-act="decide" data-id="${a.id}" data-d="approve" ${conflicts.length ? "disabled" : ""}>Approve${a.cur + 1 < a.steps.length ? " (send to next level)" : ""}</button>
+      <button class="btn good" data-act="decide" data-id="${a.id}" data-d="approve" ${conflicts.length ? "disabled" : ""}>Approve${a.cur + 1 < a.steps.length ? " → next level" : ""}</button>
       <button class="btn warn" data-act="decide" data-id="${a.id}" data-d="return">Return</button>
       <button class="btn bad" data-act="decide" data-id="${a.id}" data-d="reject">Reject</button>
     </div></div>`;
@@ -921,7 +944,7 @@ function cancelCard(a) {
   const e = emp(a.empId), t = lt(a.type);
   return `<div class="card appcard">
     <div class="hd"><b>${esc(e.name)} · cancellation request</b><span class="pill st-cancel_requested">Cancellation requested</span></div>
-    <dl class="kv"><dt>Approved leave</dt><dd>${esc(t.en)} ${a.start} to ${a.end} — confirming refunds <b>${fmtD(a.days)}</b> day(s)</dd></dl>
+    <dl class="kv"><dt>Approved leave</dt><dd>${esc(t.en)} · ${fmtRange(a.start, a.end)} — confirming refunds <b>${fmtD(a.days)}</b> day(s)</dd></dl>
     <div class="actions">
       <button class="btn good" data-act="cancelok" data-id="${a.id}">Confirm cancellation (refund days)</button>
       <button class="btn sec" data-act="cancelno" data-id="${a.id}">Decline</button>
@@ -952,7 +975,7 @@ function detailModal(id) {
       <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
         <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
       <dl class="kv">
-        <dt>Dates</dt><dd>${a.start}${a.end !== a.start ? " to " + a.end : ""} · ${fmtD(a.days)} working day(s)${a.sh ? " · first day PM" : ""}${a.eh ? " · last day AM" : ""}</dd>
+        <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day(s)${a.sh ? " · first day PM" : ""}${a.eh ? " · last day AM" : ""}</dd>
         <dt>Reason</dt><dd>${esc(a.reason)}</dd>
         ${a.att ? `<dt>Attachment</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
