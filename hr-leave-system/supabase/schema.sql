@@ -518,3 +518,48 @@ create policy att_read on storage.objects for select to authenticated
               or exists (select 1 from approval_steps s join applications a on a.id = s.application_id
                          where s.approver_id = current_emp_id()
                            and (storage.foldername(name))[1] = a.emp_id::text)));
+
+-- ---------- 18. 部门（团队）：统一的下拉列表，杜绝 "Operation/Operations" 拼写分裂 ----------
+-- 员工的 dept 引用这里的 name；改名 on update cascade 自动同步到每个成员。
+create table if not exists departments (
+  name       text primary key,
+  created_at timestamptz not null default now()
+);
+
+-- 把已有员工的部门回填进列表，然后加外键（幂等，可重复执行）
+insert into departments (name)
+select distinct dept from employees where dept is not null
+on conflict (name) do nothing;
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'employees_dept_fkey') then
+    alter table employees
+      add constraint employees_dept_fkey foreign key (dept)
+      references departments (name) on update cascade;
+  end if;
+end $$;
+
+alter table departments enable row level security;
+drop policy if exists dept_read  on departments;
+drop policy if exists dept_write on departments;
+create policy dept_read  on departments for select to authenticated using (true);
+create policy dept_write on departments for all    to authenticated
+  using (is_hr()) with check (is_hr());
+
+-- ---------- 19. 公司设置：系统可被任何小公司复用，公司信息是数据不是代码 ----------
+create table if not exists org_settings (
+  id           int primary key default 1 check (id = 1),  -- 单行表
+  company_name text not null default 'My Company',
+  email_domain text,
+  country      text not null default 'Singapore'
+);
+insert into org_settings (id, company_name, email_domain)
+values (1, 'Shanghai Uniforms', 'shanghai-uniforms.com')
+on conflict (id) do nothing;
+
+alter table org_settings enable row level security;
+drop policy if exists org_read  on org_settings;
+drop policy if exists org_write on org_settings;
+create policy org_read  on org_settings for select to authenticated using (true);
+create policy org_write on org_settings for update to authenticated
+  using (is_hr()) with check (is_hr());

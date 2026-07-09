@@ -4,6 +4,13 @@
 （真实登录、真实邮件、数据集中在云端数据库），按下面步骤搭 Supabase 后端。
 全程免费额度足够 20–100 人公司使用。
 
+## 本项目的连接信息（已创建，2026-07）
+
+- Project URL: `https://aypyolzkdupkpefpxius.supabase.co`
+- anon public key（前端连接用，公开安全 —— 权限全部由数据库 RLS 强制）:
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5cHlvbHprZHVwa3BlZnB4aXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDM0MTMsImV4cCI6MjA5OTA3OTQxM30.hoRS_j8yBTJkcQBG_IZRuVgDD06ZGCRam8lqz923f6s`
+- ⏳ 待办：`schema.sql` 与 `seed.sql` 还未在 SQL Editor 执行（执行后表才会存在）
+
 ## 第 1 步：创建 Supabase 项目（约 5 分钟）
 
 1. 打开 https://supabase.com → 用 GitHub 或 Google 账号注册 → **New project**

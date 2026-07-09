@@ -5,6 +5,13 @@
 -- Doris（MD）无审批人 → 请假自动批准备案
 -- =============================================================
 
+-- 0) 部门（团队）列表 —— 员工的 dept 引用这里，必须先建
+insert into departments (name) values
+  ('Management'), ('Sales Operation'), ('Bookshop Operation'), ('Retail Operation'),
+  ('School Account Operations'), ('Warehouse'), ('Logistics'), ('Operation Team'),
+  ('Merchandising Team'), ('Finance')
+on conflict (name) do nothing;
+
 -- 1) 先插入 Doris（无审批人）
 insert into employees (name, email, join_date, dept, gender, role, approver1, annual_base)
 values ('Doris', 'doris@shanghai-uniforms.com', '2015-01-01', 'Management', 'F', 'admin', null, 21)

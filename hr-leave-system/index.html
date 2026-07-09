@@ -221,7 +221,7 @@ td.num{font-variant-numeric:tabular-nums}
 <script>
 "use strict";
 /* ============ Data layer (demo: localStorage; production: Supabase) ============ */
-const LS_KEY = "sghr_demo_v5";
+const LS_KEY = "sghr_demo_v6";
 let db, me = null, view = "dashboard", vp = {}, hrTab = "records", mailOpen = false;
 
 const pad = n => String(n).padStart(2, "0");
@@ -423,7 +423,14 @@ function seed() {
   ledger.push({ id: "L" + (ledger.length + 1), empId: "daisy", type: "annual", delta: -1, reason: "Leave taken", refApp: "A13", by: "michelle", ts: nowTs() - 864e5 });
   mail("daisy@shanghai-uniforms.com", "[Approved] Your Annual Leave application (1 day)", "Michelle approved your annual leave on " + daisyDay + ".", nowTs() - 864e5);
 
-  return { v: 2, seq: 13, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
+  // Teams are a managed list (single source of truth) so every employee picks
+  // from the same names — no "Operation" vs "Operations" typo splits.
+  const departments = [...new Set(employees.map(e => e.dept))];
+  // Org settings make the system reusable by any small company: nothing about
+  // the company is hard-coded in the UI.
+  const org = { company: "Shanghai Uniforms", emailDomain: "shanghai-uniforms.com", country: "Singapore" };
+
+  return { v: 3, seq: 13, org, departments, employees, leaveTypes, publicHolidays, ledger, applications, events, outbox };
 }
 
 /* Working-day count (excludes weekends + SG public holidays; supports half days) */
@@ -641,7 +648,7 @@ function render() {
 function loginPage() {
   return `<div class="login"><div class="loginbox">
     <h1>LeaveDesk <span style="color:var(--accent)">SG</span></h1>
-    <p class="tag">Leave management for your team · Demo (data stays in this browser)</p>
+    <p class="tag">${esc(db.org?.company || "Your company")} · Leave management · Demo (data stays in this browser)</p>
     <div class="acclist">${db.employees.filter(e => e.active !== false).map(e => `
       <button class="acc" data-act="login" data-id="${e.id}">
         <span class="avatar">${esc(e.name[0])}</span>
@@ -668,7 +675,7 @@ function shell() {
   if (me.role === "hr" || me.role === "admin") navs.push(["hr", "HR Console"]);
   return `
   <div class="topbar"><div class="wrap">
-    <span class="logo">LeaveDesk <span style="color:var(--accent)">SG</span> <span class="beta">DEMO</span></span>
+    <span class="logo">LeaveDesk <span style="color:var(--accent)">·</span> ${esc(db.org?.company || "")} <span class="beta">DEMO</span></span>
     <span class="spacer"></span>
     <span style="position:relative">
       <button class="iconbtn mailbtn" data-act="mail" aria-label="Simulated email">📧${unread ? `<span class="badge">${unread}</span>` : ""}</button>
@@ -965,10 +972,10 @@ function detailModal(id) {
 
 /* ---- HR Console ---- */
 function vHR() {
-  const tabs = [["records", "All records"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Ledger & adjustments"], ["mail", "Email log"]];
+  const tabs = [["records", "All records"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Ledger & adjustments"], ["mail", "Email log"], ["settings", "Company settings"]];
   return `<h2>HR Console</h2><p class="sub">Company-wide records, approval routing and the leave ledger</p>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-act="hrtab" data-t="${k}" class="${hrTab === k ? "on" : ""}">${l}</button>`).join("")}</div>
-    ${{ records: hrRecords, employees: hrEmployees, types: hrTypes, ledger: hrLedger, mail: hrMail }[hrTab]()}`;
+    ${{ records: hrRecords, employees: hrEmployees, types: hrTypes, ledger: hrLedger, mail: hrMail, settings: hrSettings }[hrTab]()}`;
 }
 function hrRecords() {
   const f = vp.stFilter || "all";
@@ -998,13 +1005,42 @@ function annualCalc(joinDate, base) {
   const extra = Math.max(0, y - jy - 1);
   return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year(s) of service = ${fmtD(base + extra)} day(s)` };
 }
+function empMatches(e, q, deptF) {
+  if (deptF && deptF !== "all" && e.dept !== deptF) return false;
+  if (!q) return true;
+  const s = q.toLowerCase();
+  return [e.name, e.email, e.title || "", e.dept].some(v => String(v).toLowerCase().includes(s));
+}
 function hrEmployees() {
   const former = db.employees.filter(e => e.active === false);
+  const q = vp.empSearch || "", deptF = vp.empDept || "all";
+  const shown = activeEmps().filter(e => empMatches(e, q, deptF));
+  const deptCount = d => db.employees.filter(e => e.active !== false && e.dept === d).length;
   return `<div class="card">
     <div class="callout acc" style="margin-bottom:14px"><b>Approval routing is set per employee</b> (one level by default; tick “2-level” for a second approver — in-flight applications keep their original route). Annual leave: joined this year = pro-rated by month; +1 day per additional year of service on each annual grant.</div>
-    <div class="actions" style="margin:0 0 14px"><button class="btn" data-act="empadd">+ Add employee</button></div>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Dept / Role</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th>Actions</th></tr></thead><tbody>
-    ${activeEmps().map(e => `<tr data-emp="${e.id}">
+    <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
+      <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
+      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th><th></th></tr></thead><tbody>
+        ${db.departments.map(d => `<tr>
+          <td><input type="text" value="${esc(d)}" data-act="deptname" data-old="${esc(d)}" style="width:100%"></td>
+          <td class="num">${deptCount(d)}</td>
+          <td>${deptCount(d) === 0 ? `<button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button>` : `<span class="meta">in use</span>`}</td>
+        </tr>`).join("")}</tbody></table></div>
+      <div class="actions" style="margin-top:8px">
+        <input type="text" id="newteam" placeholder="New team name" style="max-width:220px">
+        <button class="btn sec" data-act="deptadd">+ Add team</button>
+      </div>
+    </details>
+    <div class="frow" style="align-items:flex-end;margin-bottom:14px">
+      <div class="field" style="max-width:260px"><label>Search</label><input type="search" id="empsearch" data-f="empSearch" value="${esc(q)}" placeholder="Name, email, title…"></div>
+      <div class="field" style="max-width:220px"><label>Team</label><select data-f="empDept">
+        <option value="all" ${deptF === "all" ? "selected" : ""}>All teams</option>
+        ${db.departments.map(d => `<option value="${esc(d)}" ${deptF === d ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></div>
+      <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
+    </div>
+    <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team / Role</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th>Actions</th></tr></thead><tbody>
+    ${shown.length ? shown.map(e => `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)} · ${roleName(e.role)}</td>
       <td class="num">${esc(e.joinDate)}</td>
@@ -1017,7 +1053,7 @@ function hrEmployees() {
         <button class="btn ghost" style="padding:5px 10px" data-act="oilopen" data-id="${e.id}">+ OIL</button>
         <button class="btn bad" style="padding:5px 10px" data-act="offopen" data-id="${e.id}">Offboard</button>
       </div></td>
-    </tr>`).join("")}</tbody></table></div>
+    </tr>`).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Joined</th><th>Last working day</th></tr></thead><tbody>
       ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${esc(e.joinDate)}</td><td class="num">${esc(e.lastDay || "—")}</td></tr>`).join("")}
@@ -1033,11 +1069,14 @@ function empModal() {
       <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <div class="frow">
       <div class="field"><label>Name</label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
-      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@shanghai-uniforms.com"></div>
+      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}"></div>
     </div>
     <div class="frow">
-      <div class="field"><label>Department</label><input type="text" data-f="em.dept" value="${esc(f.dept)}"></div>
-      <div class="field"><label>Job title (optional)</label><input type="text" data-f="em.title" value="${esc(f.title)}"></div>
+      <div class="field"><label>Team / department</label><select data-f="em.dept">
+        ${db.departments.map(d => `<option value="${esc(d)}" ${f.dept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}
+        <option value="__new" ${f.dept === "__new" ? "selected" : ""}>＋ New team…</option></select></div>
+      ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
+      <div class="field"><label>Position / job title</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Sales Executive"></div>
     </div>
     <div class="frow">
       <div class="field"><label>Gender</label><select data-f="em.gender">
@@ -1099,8 +1138,23 @@ function hrTypes() {
       <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
       <td>${t.mc ? "✅" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}${t.noDeduct ? " · no deduction" : ""}</td>
       <td class="meta">${esc(t.note || "")}</td></tr>`).join("")}</tbody></table></div>
-    <h3 style="margin-top:18px">Singapore public holidays (${db.publicHolidays[0].slice(0, 4)}) — excluded automatically when counting leave days</h3>
-    <div class="phchips">${db.publicHolidays.map(p => `<span>${p}</span>`).join("")}</div>
+    <p class="meta" style="margin-top:14px">Public holidays are managed in the <b>Company settings</b> tab.</p>
+  </div>`;
+}
+function hrSettings() {
+  const o = db.org || {};
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px"><b>Nothing about your company is hard-coded.</b> Any small company can use this system: set your name and email domain here, manage teams in the Employees tab, adjust leave types and their quotas in the Leave types tab, and maintain the public-holiday list below.</div>
+    <div class="frow">
+      <div class="field" style="max-width:280px"><label>Company name (shown everywhere)</label><input type="text" data-act="orgf" data-k="company" value="${esc(o.company || "")}"></div>
+      <div class="field" style="max-width:280px"><label>Email domain (new-employee hint)</label><input type="text" data-act="orgf" data-k="emailDomain" value="${esc(o.emailDomain || "")}" placeholder="company.com"></div>
+    </div>
+    <h3 style="margin-top:18px">Public holidays — excluded automatically when counting leave days</h3>
+    <div class="phchips">${db.publicHolidays.slice().sort().map(p => `<span>${p} <a data-act="phdel" data-d="${p}" style="cursor:pointer;font-weight:700" title="Remove">✕</a></span>`).join("")}</div>
+    <div class="actions" style="margin-top:10px">
+      <input type="date" id="newph" style="max-width:180px">
+      <button class="btn sec" data-act="phadd">+ Add holiday</button>
+    </div>
   </div>`;
 }
 function hrLedger() {
@@ -1154,18 +1208,39 @@ document.addEventListener("click", ev => {
     }
     case "detail": vp.detail = id; render(); break;
     case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; render(); break;
-    case "empadd": vp.empModal = { mode: "add", id: null, form: { name: "", email: "", dept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "doris", twoLevel: false, approver2: null, annualBase: 14 } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "doris", twoLevel: false, approver2: null, annualBase: 14 } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "deptadd": {
+      const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
+      if (!name) return toast("Please type the team name first");
+      if (db.departments.some(d => d.toLowerCase() === name.toLowerCase())) return toast("This team already exists");
+      db.departments.push(name); save(); vp.teamsOpen = true; render(); toast("Team \"" + name + "\" added");
+      break;
+    }
+    case "deptdel": {
+      const name = el.dataset.name;
+      if (db.employees.some(e => e.active !== false && e.dept === name)) return toast("This team still has members");
+      db.departments = db.departments.filter(d => d !== name); save(); vp.teamsOpen = true; render(); toast("Team \"" + name + "\" deleted");
+      break;
+    }
     case "empsave": {
       const m = vp.empModal, f = m.form;
       if (!f.name.trim()) return toast("Please fill in the name");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
       if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
       if (f.twoLevel && (!f.approver2 || f.approver2 === f.approver1)) return toast("2-level routing needs a different Level 2 approver");
+      let dept = f.dept;
+      if (dept === "__new") {
+        dept = (f.newDept || "").trim();
+        if (!dept) return toast("Please type the new team's name");
+        const existing = db.departments.find(d => d.toLowerCase() === dept.toLowerCase());
+        if (existing) dept = existing; else db.departments.push(dept);
+      }
+      if (!dept) return toast("Please choose a team");
       const base = Number(f.annualBase) || 14;
       if (m.mode === "add") {
         const nid = "u" + (++db.seq);
-        db.employees.push({ id: nid, name: f.name.trim(), email: f.email.trim(), dept: f.dept.trim() || "—", title: f.title.trim(), gender: f.gender, role: f.role, joinDate: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null, twoLevel: !!f.twoLevel, annualBase: base, active: true, mailSeen: 0 });
+        db.employees.push({ id: nid, name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender, role: f.role, joinDate: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null, twoLevel: !!f.twoLevel, annualBase: base, active: true, mailSeen: 0 });
         const calc = annualCalc(f.joinDate, base);
         const led = (type, delta, reason) => db.ledger.push({ id: "L" + (++db.seq), empId: nid, type, delta, reason, refApp: null, by: me.id, ts: nowTs() });
         if (calc.days > 0) led("annual", calc.days, "Pro-rated entitlement (joined " + f.joinDate + ")");
@@ -1174,7 +1249,7 @@ document.addEventListener("click", ev => {
         save(); delete vp.empModal; render(); toast(f.name.trim() + " added — " + fmtD(calc.days) + " day(s) annual leave credited");
       } else {
         const e = emp(m.id);
-        Object.assign(e, { name: f.name.trim(), email: f.email.trim(), dept: f.dept.trim() || e.dept, title: f.title.trim(), gender: f.gender, role: f.role, joinDate: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null, twoLevel: !!f.twoLevel, annualBase: base });
+        Object.assign(e, { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender, role: f.role, joinDate: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null, twoLevel: !!f.twoLevel, annualBase: base });
         save(); delete vp.empModal; render(); toast("Saved " + e.name + "'s profile");
       }
       break;
@@ -1221,6 +1296,14 @@ document.addEventListener("click", ev => {
       save(); vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" }; render(); toast("Added to ledger");
       break;
     }
+    case "phadd": {
+      const inp = document.getElementById("newph"), d = inp?.value;
+      if (!d) return toast("Pick a date first");
+      if (db.publicHolidays.includes(d)) return toast("Already in the list");
+      db.publicHolidays.push(d); db.publicHolidays.sort(); save(); render(); toast("Holiday added");
+      break;
+    }
+    case "phdel": db.publicHolidays = db.publicHolidays.filter(p => p !== el.dataset.d); save(); render(); toast("Holiday removed"); break;
     case "decide": {
       const d = el.dataset.d;
       const cm = (document.getElementById("cm-" + id) || {}).value || "";
@@ -1253,14 +1336,32 @@ document.addEventListener("change", ev => {
     const t = lt(el.dataset.c); t.days = Number(el.value) || 0; save(); toast("Default days updated (affects future annual grants)");
     return;
   }
+  if (el.dataset.act === "orgf") {
+    db.org = db.org || {};
+    db.org[el.dataset.k] = el.value.trim();
+    save(); render(); toast("Company settings saved");
+    return;
+  }
+  if (el.dataset.act === "deptname") {
+    const oldName = el.dataset.old, newName = el.value.trim();
+    if (!newName) { el.value = oldName; return toast("Team name cannot be empty"); }
+    if (newName === oldName) return;
+    if (db.departments.some(d => d !== oldName && d.toLowerCase() === newName.toLowerCase())) { el.value = oldName; return toast("Another team already has this name"); }
+    db.departments = db.departments.map(d => d === oldName ? newName : d);
+    let n = 0;
+    for (const e of db.employees) if (e.dept === oldName) { e.dept = newName; n++; }
+    save(); vp.teamsOpen = true; render(); toast(`Team renamed to "${newName}" — ${n} member(s) updated`);
+    return;
+  }
   const f = el.dataset.f;
   if (!f) return;
   if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
+  if (f === "empDept") { vp.empDept = el.value; render(); return; }
   if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
-    if (["joinDate", "twoLevel", "approver1", "approver2"].includes(k)) render(); // refresh pro-rate preview / dependent selects
+    if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) render(); // refresh pro-rate preview / dependent selects / new-team field
     return;
   }
   if (f.startsWith("oil.") && vp.oilModal) { vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
@@ -1273,10 +1374,22 @@ document.addEventListener("change", ev => {
     render();
   }
 });
+// <details> open state is lost on re-render; remember the Teams panel's state
+document.addEventListener("toggle", ev => {
+  if (ev.target.hasAttribute && ev.target.hasAttribute("data-teams")) vp.teamsOpen = ev.target.open;
+}, true);
+
 document.addEventListener("input", ev => {
   const el = ev.target;
   if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
   const f = el.dataset.f || "";
+  if (f === "empSearch") {
+    // Live filter; re-render then restore focus/caret so typing isn't interrupted
+    vp.empSearch = el.value; render();
+    const s = document.getElementById("empsearch");
+    if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    return;
+  }
   // Sync modal text fields live so the save click (which blurs the field) never loses input
   if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") vp.empModal.form[f.slice(3)] = el.value;
   if (vp.oilModal && f.startsWith("oil.")) vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
