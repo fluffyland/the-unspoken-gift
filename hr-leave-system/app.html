@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeaveDesk — Leave Management</title>
+<style>
+:root{
+  --bg:#f2f4f7; --surface:#ffffff; --line:#dfe4ea; --ink:#1c2530; --muted:#5d6a79;
+  --accent:#0c6b60; --accent-ink:#ffffff; --accent-soft:#e2f0ed; --accent-line:#b8dcd5;
+  --good:#1a7a4a; --good-soft:#e2f2e8;
+  --warn:#96590e; --warn-soft:#fcefd9;
+  --bad:#b23a31; --bad-soft:#fbe6e4;
+  --info:#6a4da3; --info-soft:#eee8f8;
+  --gray-soft:#e9edf2;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 4px 14px rgba(20,30,40,.05);
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#10161d; --surface:#1a222c; --line:#2b3644; --ink:#e7edf3; --muted:#95a2b2;
+    --accent:#37a08f; --accent-ink:#08211d; --accent-soft:#15352f; --accent-line:#26584f;
+    --good:#4cbf82; --good-soft:#173226;
+    --warn:#e0a34e; --warn-soft:#38290f;
+    --bad:#e57a70; --bad-soft:#3a1c19;
+    --info:#ab90e0; --info-soft:#291f3d;
+    --gray-soft:#232d39;
+    --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f2f4f7; --surface:#ffffff; --line:#dfe4ea; --ink:#1c2530; --muted:#5d6a79;
+  --accent:#0c6b60; --accent-ink:#ffffff; --accent-soft:#e2f0ed; --accent-line:#b8dcd5;
+  --good:#1a7a4a; --good-soft:#e2f2e8; --warn:#96590e; --warn-soft:#fcefd9;
+  --bad:#b23a31; --bad-soft:#fbe6e4; --info:#6a4da3; --info-soft:#eee8f8;
+  --gray-soft:#e9edf2;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 4px 14px rgba(20,30,40,.05);
+}
+:root[data-theme="dark"]{
+  --bg:#10161d; --surface:#1a222c; --line:#2b3644; --ink:#e7edf3; --muted:#95a2b2;
+  --accent:#37a08f; --accent-ink:#08211d; --accent-soft:#15352f; --accent-line:#26584f;
+  --good:#4cbf82; --good-soft:#173226; --warn:#e0a34e; --warn-soft:#38290f;
+  --bad:#e57a70; --bad-soft:#3a1c19; --info:#ab90e0; --info-soft:#291f3d;
+  --gray-soft:#232d39;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+}
+button{font:inherit;cursor:pointer;border:none;border-radius:8px}
+input,select,textarea{
+  font:inherit;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-width:100%;
+}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+a{color:var(--accent)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+.wrap{max-width:1060px;margin:0 auto;padding:0 16px}
+.topbar{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.topbar .wrap{display:flex;align-items:center;gap:12px;height:56px}
+.logo{display:flex;align-items:baseline;gap:8px;font-weight:700;font-size:17px;letter-spacing:.2px}
+.logo .beta{font-size:11px;font-weight:600;color:var(--warn);background:var(--warn-soft);padding:1px 8px;border-radius:99px;letter-spacing:.08em}
+.spacer{flex:1}
+.userchip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+.iconbtn{background:transparent;color:var(--muted);padding:6px 10px;border-radius:8px;position:relative}
+.iconbtn:hover{background:var(--gray-soft);color:var(--ink)}
+.badge{position:absolute;top:0;right:2px;background:var(--bad);color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:0 5px;line-height:15px}
+.nav{background:var(--surface);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;gap:2px;overflow-x:auto}
+.nav button{background:transparent;color:var(--muted);padding:11px 14px;border-radius:0;border-bottom:2px solid transparent;white-space:nowrap;font-weight:500}
+.nav button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.nav button:hover{color:var(--ink)}
+.nav .cnt{display:inline-block;min-width:18px;text-align:center;background:var(--bad);color:#fff;border-radius:99px;font-size:11px;font-weight:700;padding:0 5px;margin-left:6px;line-height:17px}
+
+main{padding:22px 0 60px}
+h2{font-size:19px;margin:0 0 4px}
+h3{font-size:15px;margin:0 0 10px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+.stack{display:flex;flex-direction:column;gap:16px}
+
+.balgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:20px}
+.bal{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px}
+.bal .t{font-size:13px;font-weight:600}
+.bal .en{font-size:11px;color:var(--muted);letter-spacing:.04em}
+.bal .n{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;margin:2px 0 0;color:var(--accent)}
+.bal .n small{font-size:13px;color:var(--muted);font-weight:500}
+.bal .d{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+.pill{display:inline-block;font-size:12px;font-weight:600;border-radius:99px;padding:2px 10px;white-space:nowrap}
+.st-pending{background:var(--warn-soft);color:var(--warn)}
+.st-approved{background:var(--good-soft);color:var(--good)}
+.st-rejected{background:var(--bad-soft);color:var(--bad)}
+.st-returned{background:var(--warn-soft);color:var(--warn)}
+.st-withdrawn{background:var(--gray-soft);color:var(--muted)}
+.st-cancel_requested{background:var(--info-soft);color:var(--info)}
+.st-cancelled{background:var(--gray-soft);color:var(--muted)}
+
+.tablebox{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{color:var(--muted);font-weight:600;text-align:left;font-size:12px;letter-spacing:.03em}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.rowlink{cursor:pointer}
+tr.rowlink:hover td{background:var(--gray-soft)}
+td.num{font-variant-numeric:tabular-nums}
+
+.btn{background:var(--accent);color:var(--accent-ink);padding:9px 18px;font-weight:600}
+.btn:hover{filter:brightness(1.07)}
+.btn.sec{background:var(--gray-soft);color:var(--ink)}
+.btn.good{background:var(--good);color:#fff}
+.btn.warn{background:var(--warn);color:#fff}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent-line)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.field label{font-size:13px;font-weight:600}
+.field .hint{font-size:12px;color:var(--muted)}
+.frow{display:flex;gap:14px;flex-wrap:wrap}
+.frow .field{flex:1;min-width:160px}
+.check{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.check input{width:16px;height:16px}
+
+.callout{border-radius:var(--r);padding:12px 16px;font-size:13.5px;border:1px solid}
+.callout.acc{background:var(--accent-soft);border-color:var(--accent-line);color:var(--ink)}
+.callout.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--ink)}
+
+.applist{display:flex;flex-direction:column;gap:12px}
+.appcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px}
+.appcard .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.appcard .hd b{font-size:15.5px}
+.typechip{background:var(--gray-soft);border-radius:6px;padding:2px 9px;font-size:12px;color:var(--muted);white-space:nowrap}
+.appcard .when{font-size:15px;margin:2px 0;font-variant-numeric:tabular-nums}
+.appcard .why{font-size:13.5px;margin:0 0 2px;overflow-wrap:anywhere}
+.appcard .metarow{font-size:12.5px;color:var(--muted);margin:2px 0 6px}
+.meta{color:var(--muted);font-size:13px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:8px 0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+.steps{display:flex;flex-direction:column;gap:6px;margin:10px 0;font-size:13.5px}
+.step{display:flex;align-items:center;gap:8px}
+.step .dot{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none}
+.step.ok .dot{background:var(--good-soft);color:var(--good)}
+.step.now .dot{background:var(--warn-soft);color:var(--warn)}
+.step.off .dot{background:var(--gray-soft);color:var(--muted)}
+.step.no .dot{background:var(--bad-soft);color:var(--bad)}
+
+.timeline{list-style:none;margin:10px 0 0;padding:0;font-size:13px}
+.timeline li{padding:6px 0 6px 18px;border-left:2px solid var(--line);position:relative}
+.timeline li::before{content:"";position:absolute;left:-5px;top:12px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.timeline .tm{color:var(--muted);font-size:12px}
+
+.modalback{position:fixed;inset:0;background:rgba(10,15,20,.45);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto}
+.modal{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);max-width:620px;width:100%;padding:22px}
+.modal .hd{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.modal .hd h3{flex:1;margin:0;font-size:17px}
+
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.tabs button{background:var(--gray-soft);color:var(--muted);padding:7px 14px;font-weight:600;font-size:13px;border-radius:99px}
+.tabs button.on{background:var(--accent);color:var(--accent-ink)}
+
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:30px 16px}
+.loginbox{max-width:760px;width:100%}
+.loginbox h1{font-size:26px;margin:0 0 4px;letter-spacing:.2px}
+.loginbox .tag{color:var(--muted);margin:0 0 20px;font-size:14px}
+.acclist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.acc{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:11px 13px;text-align:left;width:100%}
+.acc:hover{border-color:var(--accent);}
+.acc .who{flex:1;min-width:0}
+.acc .who b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc .who span{font-size:12px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rolechip{font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 7px;letter-spacing:.05em;flex:none}
+.rl-employee{background:var(--gray-soft);color:var(--muted)}
+.rl-approver{background:var(--accent-soft);color:var(--accent)}
+.rl-hr{background:var(--info-soft);color:var(--info)}
+.rl-admin{background:var(--warn-soft);color:var(--warn)}
+.footnote{color:var(--muted);font-size:12.5px;margin-top:20px;line-height:1.7}
+
+.mailbtn{position:relative;z-index:41}
+.mailbackdrop{position:fixed;inset:0;z-index:39;background:transparent}
+.mailpanel{position:absolute;right:0;top:44px;width:min(360px,88vw);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);z-index:40;max-height:min(420px,calc(100vh - 70px));overflow-y:auto}
+.mailpanel .mi{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.mailpanel .mi b{display:block;font-size:13px}
+.mailpanel .mi .tm{color:var(--muted);font-size:11.5px}
+.mailpanel .mi p{margin:4px 0 0;color:var(--muted);white-space:pre-wrap}
+
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 20px;border-radius:99px;font-size:14px;font-weight:600;box-shadow:var(--shadow);z-index:99;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast.show{opacity:1}
+.calhead{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.calhead h3{margin:0;font-size:16px;min-width:150px;text-align:center;font-variant-numeric:tabular-nums}
+.calbox{overflow-x:auto}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;min-width:700px}
+.cal .dow{font-size:11.5px;font-weight:700;color:var(--muted);text-align:center;letter-spacing:.05em;padding:4px 0}
+.cal .day{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-height:78px;padding:4px 5px;font-size:12px}
+.cal .day.off{background:var(--gray-soft);border-color:transparent}
+.cal .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.cal .dnum{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between}
+.cal .dnum .ph{color:var(--warn);font-weight:600;font-size:10.5px}
+.cal .chips{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.lvchip{border-radius:5px;padding:1px 5px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lvchip.ap{background:var(--accent);color:var(--accent-ink)}
+.lvchip.pd{background:var(--gray-soft);color:var(--muted);opacity:.65;border:1px dashed var(--line)}
+.legend{display:flex;gap:16px;align-items:center;font-size:12.5px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+.ackbox{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;font-weight:600;margin-top:10px}
+.ackbox input{width:16px;height:16px;margin-top:3px;flex:none}
+.conflictlist{margin:8px 0 0;padding:0;list-style:none;font-size:13px}
+.conflictlist li{display:grid;grid-template-columns:minmax(64px,max-content) 1fr auto;gap:10px;align-items:center;padding:3px 0}
+.conflictlist .cldate{font-variant-numeric:tabular-nums;white-space:nowrap}
+.phchips{display:flex;flex-wrap:wrap;gap:6px}
+.phchips span{background:var(--gray-soft);border-radius:6px;padding:2px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:14px;padding:26px 0;text-align:center}
+
+/* Phone layout: tighter cards, full-width tap targets */
+@media (max-width:560px){
+  .wrap{padding:0 10px}
+  .appcard{padding:12px}
+  .appcard .actions .btn{flex:1;padding:10px 6px;text-align:center}
+  .callout{padding:10px}
+  .kv{grid-template-columns:1fr;gap:1px 0}
+  .kv dt{margin-top:6px}
+  .conflictlist li{grid-template-columns:minmax(56px,max-content) 1fr auto;gap:7px}
+  .modal{padding:14px}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" role="status"></div>
+<script src="supabase.min.js"></script>
+<script>
+"use strict";
+/* ============ Production build — talks to Supabase (real login + database) ============ */
+const SUPABASE_URL = "https://aypyolzkdupkpefpxius.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5cHlvbHprZHVwa3BlZnB4aXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDM0MTMsImV4cCI6MjA5OTA3OTQxM30.hoRS_j8yBTJkcQBG_IZRuVgDD06ZGCRam8lqz923f6s";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* db is an in-memory cache hydrated from Supabase; renderers read from it unchanged. */
+let db, me = null, view = "dashboard", vp = {}, hrTab = "records", mailOpen = false, booting = true;
+
+const pad = n => String(n).padStart(2, "0");
+const iso = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+const todayStr = () => iso(new Date());
+const dstr = off => { const d = new Date(); d.setDate(d.getDate() + off); return iso(d); };
+const nowTs = () => Date.now();
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+/* Human dates: "20 Jul" (year only when it differs from the current year) */
+const fmtDate = s => { const [y, m, d] = String(s).split("-").map(Number); return d + " " + MON[m - 1] + (y !== new Date().getFullYear() ? " " + y : ""); };
+/* "20 Jul" · "18–20 Jul" · "28 Jul – 2 Aug" */
+const fmtRange = (s, e) => {
+  if (!e || e === s) return fmtDate(s);
+  const [ys, ms] = String(s).split("-").map(Number), [ye, me] = String(e).split("-").map(Number);
+  if (ys === ye && ms === me) return Number(String(s).slice(8)) + "–" + fmtDate(e);
+  return fmtDate(s) + " – " + fmtDate(e);
+};
+const fmtTs = ts => { const d = new Date(ts); return fmtDate(iso(d)) + ", " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
+
+/* ============ Supabase → in-memory cache (renderers read db.* unchanged) ============ */
+const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
+  role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
+  twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
+const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
+  gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days), sort: r.sort, note: r.note || "" });
+/* DB action codes → display strings the history/timeline renderers expect */
+const mapAction = c => ({
+  submitted: "Submitted", resubmitted: "Resubmitted",
+  step_approved: "Approved (a level)", step_approved_overlap_ack: "Approved (overlap acknowledged)",
+  approved: "Approved", approved_overlap_ack: "Approved (overlap acknowledged)",
+  rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", auto_approved: "Auto-approved",
+  cancel_requested: "Cancellation requested", cancelled: "Cancellation confirmed", cancel_denied: "Cancellation declined"
+}[c] || c);
+
+async function loadAll() {
+  const [empR, typeR, phR, deptR, orgR] = await Promise.all([
+    sb.from("employees").select("*"),
+    sb.from("leave_types").select("*"),
+    sb.from("public_holidays").select("holiday"),
+    sb.from("departments").select("name"),
+    sb.from("org_settings").select("*").maybeSingle()
+  ]);
+  const firstErr = [empR, typeR, phR, deptR, orgR].map(r => r.error).find(Boolean);
+  if (firstErr) throw firstErr;
+
+  const employees = (empR.data || []).map(mapEmp).sort((a, b) => a.name.localeCompare(b.name));
+  const leaveTypes = (typeR.data || []).map(mapType).sort((a, b) => a.sort - b.sort);
+  const publicHolidays = (phR.data || []).map(x => x.holiday);
+  const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
+  const o = orgR.data || {};
+  const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "" };
+
+  const [appR, ledR] = await Promise.all([
+    sb.from("applications").select("*").order("created_at", { ascending: false }),
+    sb.from("leave_ledger").select("*")
+  ]);
+  if (appR.error) throw appR.error;
+  const apps = appR.data || [], appIds = apps.map(a => a.id);
+  let steps = [], events = [];
+  if (appIds.length) {
+    const [sR, eR] = await Promise.all([
+      sb.from("approval_steps").select("*").in("application_id", appIds),
+      sb.from("application_events").select("*").in("application_id", appIds)
+    ]);
+    steps = sR.data || []; events = eR.data || [];
+  }
+  const applications = apps.map(a => ({
+    id: a.id, empId: a.emp_id, type: a.leave_type, start: a.start_date, end: a.end_date,
+    sh: a.start_half, eh: a.end_half, days: Number(a.days), reason: a.reason, att: a.attachment_path || "",
+    status: a.status, cur: Math.max(0, (a.current_step || 1) - 1), backdated: a.backdated,
+    createdAt: Date.parse(a.created_at),
+    steps: steps.filter(s => s.application_id === a.id).sort((x, y) => x.step_order - y.step_order)
+      .map(s => ({ order: s.step_order, approverId: s.approver_id, status: s.status, comment: s.comment || "", ts: s.acted_at ? Date.parse(s.acted_at) : null }))
+  }));
+  const ledger = (ledR.data || []).map(l => ({ id: l.id, empId: l.emp_id, type: l.leave_type,
+    delta: Number(l.delta_days), reason: l.reason, refApp: l.ref_application, by: l.created_by, ts: Date.parse(l.created_at) }));
+  const ev = events.map(v => ({ appId: v.application_id, actor: v.actor, action: mapAction(v.action),
+    comment: v.comment || "", ts: Date.parse(v.created_at) })).sort((a, b) => a.ts - b.ts);
+
+  // Company-wide calendar comes from a dedicated view (everyone can read it),
+  // separate from `applications` which RLS limits to your own + those you approve.
+  const calR = await sb.from("leave_calendar").select("*");
+  const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status }));
+
+  db = { org, departments, employees, leaveTypes, publicHolidays, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+
+  // Approvers (non-HR) can't read applicants' ledger under RLS; fetch just the
+  // available-days number for each application in their inbox via a definer RPC.
+  if (me && me.role !== "hr" && me.role !== "admin") {
+    const need = applications.filter(a => a.empId !== me.id &&
+      (["pending", "cancel_requested"].includes(a.status)) && a.steps.some(s => s.approverId === me.id));
+    await Promise.all(need.map(async a => {
+      const { data } = await sb.rpc("leave_available", { p_emp: a.empId, p_code: a.type });
+      if (data != null) db.balCache[a.empId + "|" + a.type] = Number(data);
+    }));
+  }
+}
+
+/* Working-day count (excludes weekends + SG public holidays; supports half days) */
+function wdCount(start, end, sh, eh, phList) {
+  const ph = phList || db.publicHolidays;
+  const s = new Date(start + "T00:00:00"), e = new Date(end + "T00:00:00");
+  if (!(s <= e)) return 0;
+  const list = [];
+  for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const wd = d.getDay();
+    if (wd !== 0 && wd !== 6 && !ph.includes(iso(d))) list.push(iso(d));
+  }
+  let n = list.length;
+  if (sh && list[0] === start) n -= 0.5;
+  if (eh && list[list.length - 1] === end) n -= 0.5;
+  if (n <= 0 && list.length) n = 0.5;
+  return n;
+}
+
+/* Refresh the cache from Supabase and re-render (called after every mutation) */
+async function reload() { await loadAll(); render(); }
+/* Resolve the signed-in auth user to their employee row */
+async function loadMe() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) { me = null; return false; }
+  const { data, error } = await sb.from("employees").select("*").eq("auth_user_id", user.id).maybeSingle();
+  if (error || !data) { me = { unlinked: true, email: user.email }; return false; }
+  me = mapEmp(data);
+  return true;
+}
+async function signOut() { await sb.auth.signOut(); me = null; db = null; view = "dashboard"; vp = {}; render(); }
+
+const emp = id => db.employees.find(e => e.id === id);
+const lt = c => db.leaveTypes.find(t => t.code === c);
+const roleName = r => ({ employee: "Employee", approver: "Approver", hr: "HR", admin: "Admin" }[r] || r);
+const stName = s => ({ pending: "Pending", approved: "Approved", rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", cancel_requested: "Cancellation requested", cancelled: "Cancelled" }[s] || s);
+
+function canSeeLedger(empId) { return empId === me.id || me.role === "hr" || me.role === "admin"; }
+function bal(empId, code) {
+  const key = empId + "|" + code;
+  // Approvers see only a precomputed available-days number for applicants (RLS
+  // hides the raw ledger); granted/used are unknown to them.
+  if (!canSeeLedger(empId) && key in db.balCache) return { granted: null, used: null, pending: 0, avail: db.balCache[key], limited: true };
+  let granted = 0, used = 0;
+  for (const l of db.ledger) if (l.empId === empId && l.type === code) { if (l.delta > 0) granted += l.delta; else used -= l.delta; }
+  let pending = 0;
+  for (const a of db.applications) if (a.empId === empId && a.type === code && a.status === "pending") pending += a.days;
+  return { granted, used, pending, avail: granted - used - pending };
+}
+function eligible(t, e) { return !t.gender || t.gender === e.gender; }
+
+/* ============ State machine — all writes go through security-definer RPCs ============ */
+/* The database enforces every rule (permissions, balance, overlap ack, routing);
+   these are thin wrappers that call the RPC, surface errors, then reload. */
+function rpcErr(error) {
+  const m = (error && (error.message || error.hint || "")) || "Something went wrong";
+  toast(m.length > 120 ? m.slice(0, 120) + "…" : m);
+}
+
+async function submitApp(data, editId) {
+  const { data: id, error } = await sb.rpc("submit_application", {
+    p_type: data.type, p_start: data.start, p_end: data.end, p_sh: data.sh, p_eh: data.eh,
+    p_reason: data.reason, p_attachment: data.att || null, p_resubmit_id: editId || null
+  });
+  if (error) { rpcErr(error); return null; }
+  await loadAll();
+  const a = db.applications.find(x => x.id === id);
+  return { id, auto: a && a.status === "approved" };
+}
+
+async function actOnStep(appId, action, comment, acked) {
+  const { error } = await sb.rpc("act_on_step", { p_app: appId, p_action: action, p_comment: comment || null, p_ack: !!acked });
+  if (error) { rpcErr(error); return false; }
+  await loadAll();
+  return true;
+}
+async function withdrawApp(appId) {
+  const { error } = await sb.rpc("withdraw_application", { p_app: appId });
+  if (error) { rpcErr(error); return false; }
+  await loadAll(); return true;
+}
+async function requestCancel(appId) {
+  const { error } = await sb.rpc("request_cancel", { p_app: appId });
+  if (error) { rpcErr(error); return false; }
+  await loadAll(); return true;
+}
+async function confirmCancel(appId, ok, comment) {
+  const { error } = await sb.rpc("confirm_cancel", { p_app: appId, p_ok: ok, p_comment: comment || null });
+  if (error) { rpcErr(error); return false; }
+  await loadAll(); return true;
+}
+
+/* ============ Queries ============ */
+function inbox(u) {
+  const todo = db.applications.filter(a => a.status === "pending" && a.steps.length && a.steps[a.cur].approverId === u.id);
+  const cancels = db.applications.filter(a => a.status === "cancel_requested" && a.steps.length && a.steps[0].approverId === u.id);
+  return { todo, cancels, count: todo.length + cancels.length };
+}
+/* "Department" for the overlap warning = the applicant's immediate team:
+   same-dept colleagues, teammates sharing the same approver, their approver,
+   and their own direct reports (so a manager counts as part of the team). */
+function conflictGroup(empId) {
+  // A "department" for conflict purposes = people sharing the same dept field,
+  // plus the person's own manager (the leader counts as a department member),
+  // plus this person's own direct reports if they are a manager.
+  // We deliberately do NOT group by "same approver1": at the top of the org
+  // everyone reports directly to the Managing Director (Doris), and those
+  // direct reports are heads of DIFFERENT departments — they are not one team.
+  const e = emp(empId), ids = new Set();
+  for (const x of db.employees) {
+    if (x.id === empId || x.active === false) continue;
+    if (x.dept === e.dept) ids.add(x.id);   // same department
+    if (x.id === e.approver1) ids.add(x.id); // my manager (leader is in the dept)
+    if (x.approver1 === empId) ids.add(x.id); // my direct reports (if I lead)
+  }
+  return ids;
+}
+function overlapConflicts(a) {
+  const group = conflictGroup(a.empId);
+  return db.applications.filter(x => x.id !== a.id && group.has(x.empId) &&
+    ["pending", "approved", "cancel_requested"].includes(x.status) &&
+    !(x.end < a.start || x.start > a.end));
+}
+function isApprover(u) { return u.role !== "employee" || db.employees.some(e => e.approver1 === u.id || e.approver2 === u.id); }
+function myDecisions(u) {
+  // Sourced from the immutable event log (not from steps, which are rebuilt on
+  // resubmission) so history survives amend-and-resubmit cycles.
+  const isDecision = act => act.startsWith("Approved") ||
+    act === "Rejected" || act === "Returned" ||
+    act === "Cancellation confirmed" || act === "Cancellation declined";
+  return db.events
+    .filter(v => v.actor === u.id && isDecision(v.action))
+    .map(v => ({ a: db.applications.find(x => x.id === v.appId), decision: v.action, comment: v.comment, ts: v.ts }))
+    .filter(r => r.a)
+    .sort((x, y) => y.ts - x.ts);
+}
+
+/* ============ Views ============ */
+const $app = () => document.getElementById("app");
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
+
+function render() {
+  $app().innerHTML = (me && !me.unlinked) ? shell() : loginPage();
+  window.scrollTo(0, 0);
+}
+
+function loginPage() {
+  const unlinked = me && me.unlinked;
+  return `<div class="login"><div class="loginbox">
+    <h1>LeaveDesk</h1>
+    <p class="tag">Leave management · sign in with your work email</p>
+    ${unlinked ? `<div class="callout warn" style="margin-bottom:14px">You're signed in as <b>${esc(me.email)}</b>, but this email isn't linked to any employee record yet. Ask HR to add you (same email) in the system, then sign in again.
+      <div class="actions"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
+    <form class="acclist" id="loginform" autocomplete="on">
+      <div class="field"><label>Work email</label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
+      <div class="field"><label>Password</label><input type="password" id="li-pass" autocomplete="current-password" required></div>
+      <div class="actions" style="margin-top:6px"><button class="btn" type="submit" data-act="dologin" style="width:100%">Sign in</button></div>
+    </form>`}
+    <p class="footnote"><b>One account per person.</b> Database-level permissions (row-level security)
+    ensure each person only sees their own data — staff see their own leave, approvers see their
+    team's applications, and only HR sees everything. Forgot your password? Ask HR to reset it.</p>
+  </div></div>`;
+}
+
+function shell() {
+  const ib = inbox(me);
+  const navs = [["dashboard", "Overview"], ["apply", "Apply"], ["myapps", "My applications"], ["calendar", "Calendar"]];
+  if (isApprover(me)) navs.push(["approvals", `Approvals${ib.count ? `<span class="cnt">${ib.count}</span>` : ""}`]);
+  if (me.role === "hr" || me.role === "admin") navs.push(["hr", "HR Console"]);
+  return `
+  <div class="topbar"><div class="wrap">
+    <span class="logo">LeaveDesk <span style="color:var(--accent)">·</span> ${esc(db.org?.company || "")}</span>
+    <span class="spacer"></span>
+    <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleName(me.role)}</span>
+    <button class="iconbtn" data-act="logout">Sign out</button>
+  </div></div>
+  <nav class="nav"><div class="wrap">
+    ${navs.map(([v, label]) => `<button data-act="nav" data-v="${v}" class="${view === v ? "on" : ""}">${label}</button>`).join("")}
+  </div></nav>
+  <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}`;
+}
+
+/* ---- Overview ---- */
+function vDashboard() {
+  const cards = db.leaveTypes.filter(t => eligible(t, me) && !t.noDeduct).sort((a, b) => a.sort - b.sort);
+  const main = cards.filter(t => ["annual", "sick", "hosp", "childcare", "oil"].includes(t.code));
+  const rest = cards.filter(t => !main.includes(t));
+  const mine = db.applications.filter(a => a.empId === me.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+  const ib = inbox(me);
+  return `
+    <h2>Hello, ${esc(me.name)}</h2>
+    <p class="sub">Today is ${todayStr()} · ${esc(me.dept)} · Approval route: ${chainText(me)}</p>
+    ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item(s) waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
+    <div class="balgrid">${main.map(balCard).join("")}</div>
+    <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">More leave types (Maternity / Paternity / Compassionate / Marriage …)</summary>
+      <div class="balgrid" style="margin-top:12px">${rest.map(balCard).join("")}</div></details>
+    <div class="card"><h3>Recent applications</h3>
+      ${mine.length ? appTable(mine, false) : `<div class="empty">No applications yet — use “Apply” above to submit your first one</div>`}
+    </div>`;
+}
+function chainText(e) {
+  if (!e.approver1) return "auto-approved (Managing Director)";
+  let s = emp(e.approver1) ? emp(e.approver1).name : "—";
+  if (e.twoLevel && e.approver2) s += " → " + emp(e.approver2).name + " (2 levels)";
+  return s;
+}
+function balCard(t) {
+  const b = bal(me.id, t.code);
+  return `<div class="bal"><div class="t">${esc(t.en)}</div><div class="en">${esc(t.zh)}</div>
+    <div class="n">${fmtD(b.avail)}<small> days left</small></div>
+    <div class="d">Entitled ${fmtD(b.granted)} · Used ${fmtD(b.used)}${b.pending ? " · Pending " + fmtD(b.pending) : ""}</div></div>`;
+}
+
+/* ---- Apply ---- */
+function vApply() {
+  const editing = vp.editId ? db.applications.find(a => a.id === vp.editId) : null;
+  const types = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);
+  const f = vp.form || (editing
+    ? { type: editing.type, start: editing.start, end: editing.end, sh: editing.sh, eh: editing.eh, reason: editing.reason, att: editing.att }
+    : { type: "annual", start: dstr(1), end: dstr(1), sh: false, eh: false, reason: "", att: "" });
+  vp.form = f;
+  const t = lt(f.type), b = bal(me.id, f.type);
+  const days = wdCount(f.start, f.end, f.sh, f.eh);
+  const over = !t.noDeduct && days > b.avail;
+  const backdated = f.start < todayStr();
+  return `
+    <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
+    <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
+    ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
+    <div class="card" style="max-width:640px">
+      <div class="field"><label>Leave type</label>
+        <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}（${esc(x.zh)}）</option>`).join("")}</select>
+        <span class="hint">${t.noDeduct ? "This type is recorded only — no balance deduction" : `Available: <b>${fmtD(b.avail)}</b> days (entitled ${fmtD(b.granted)}, used ${fmtD(b.used)}, pending ${fmtD(b.pending)})`}${t.note ? " · " + esc(t.note) : ""}</span>
+      </div>
+      <div class="frow">
+        <div class="field"><label>Start date</label><input type="date" data-f="start" value="${f.start}"></div>
+        <div class="field"><label>End date</label><input type="date" data-f="end" value="${f.end}"></div>
+      </div>
+      <div class="frow">
+        <label class="check"><input type="checkbox" data-f="sh" ${f.sh ? "checked" : ""}> First day: PM only (half day)</label>
+        <label class="check"><input type="checkbox" data-f="eh" ${f.eh ? "checked" : ""}> Last day: AM only (half day)</label>
+      </div>
+      <div class="callout acc" style="margin:12px 0">
+        <b style="font-size:17px">${fmtD(days)}</b> working day(s) — weekends & Singapore public holidays excluded automatically
+        ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
+      </div>
+      ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day(s) but only ${fmtD(b.avail)} available</div>` : ""}
+      <div class="field"><label>Reason</label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
+      ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
+      <div class="field"><label>Attachment${t.mc ? " (photo or PDF of your MC — required)" : " (optional)"}</label>
+        <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att)}</span>` : ""}
+        <span class="hint">Demo stores the file name only; production uploads to secure storage</span></div>
+      <div class="actions">
+        <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
+        ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
+      </div>
+    </div>`;
+}
+function lastReturnComment(a) { const s = [...a.steps].reverse().find(x => x.status === "returned"); return s ? s.comment : ""; }
+
+async function doSubmit() {
+  const f = vp.form, t = lt(f.type);
+  const days = wdCount(f.start, f.end, f.sh, f.eh);
+  if (!f.reason.trim()) return toast("Please fill in the reason");
+  if (t.mc && !f.att) return toast("This leave type requires a photo or PDF of your MC");
+  if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("The MC attachment must be a photo or PDF");
+  const overlap = db.applications.some(a => a.empId === me.id && a.id !== vp.editId &&
+    ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
+  if (overlap) return toast("These dates overlap an existing application");
+  const editId = vp.editId;
+  const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att: f.att, backdated: f.start < todayStr() }, editId);
+  if (!res) return; // error already shown
+  const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
+  vp = {}; view = "myapps"; render();
+  toast(res.auto ? "Recorded & auto-approved — HR notified" : "Submitted — sent to " + approverName);
+}
+
+/* ---- My applications ---- */
+function vMyApps() {
+  const mine = db.applications.filter(a => a.empId === me.id).sort((a, b) => b.createdAt - a.createdAt);
+  return `<h2>My applications</h2><p class="sub">Click any row to see the full approval timeline</p>
+    <div class="card">${mine.length ? appTable(mine, false) : `<div class="empty">No applications yet</div>`}</div>`;
+}
+function appTable(list, showWho) {
+  return `<div class="tablebox"><table><thead><tr>
+    ${showWho ? "<th>Employee</th>" : ""}<th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th><th>Waiting on</th></tr></thead><tbody>
+    ${list.map(a => {
+      const t = lt(a.type);
+      const node = a.status === "pending" && a.steps.length ? emp(a.steps[a.cur].approverId).name + (a.steps.length > 1 ? ` (level ${a.cur + 1}/${a.steps.length})` : "") : "—";
+      return `<tr class="rowlink" data-act="detail" data-id="${a.id}">
+        ${showWho ? `<td>${esc(emp(a.empId).name)}</td>` : ""}
+        <td>${esc(t.en)}</td><td class="num">${fmtRange(a.start, a.end)}</td>
+        <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stName(a.status)}</span></td><td>${node}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+}
+
+/* ---- Company calendar ---- */
+function vCalendar() {
+  const m = vp.calMonth || todayStr().slice(0, 7);
+  vp.calMonth = m;
+  const [Y, M] = m.split("-").map(Number);
+  const dim = new Date(Y, M, 0).getDate();
+  const startPad = (new Date(Y, M - 1, 1).getDay() + 6) % 7; // Monday-first grid
+  const monthName = new Date(Y, M - 1, 1).toLocaleString("en-SG", { month: "long", year: "numeric" });
+  const q = (vp.calSearch || "").toLowerCase();
+  // Company-wide leave from the leave_calendar view (name/dates/status only)
+  const leaves = (db.calendar || []).filter(a => !q || a.name.toLowerCase().includes(q));
+  // When searching one person, list their leave in this month above the grid
+  const monthHits = q ? leaves.filter(a => a.start.slice(0, 7) <= m && m <= a.end.slice(0, 7)) : [];
+  const cells = [];
+  for (let i = 0; i < startPad; i++) cells.push(`<div class="day off"></div>`);
+  for (let d = 1; d <= dim; d++) {
+    const ds = Y + "-" + pad(M) + "-" + pad(d);
+    const dow = new Date(Y, M - 1, d).getDay();
+    const isPH = db.publicHolidays.includes(ds);
+    const off = dow === 0 || dow === 6 || isPH;
+    const chips = leaves.filter(a => a.start <= ds && ds <= a.end).map(a => {
+      const approved = a.status !== "pending";
+      return `<span class="lvchip ${approved ? "ap" : "pd"}" title="${esc(a.name)} — ${approved ? "Approved" : "Pending approval"}">${esc(a.name)}</span>`;
+    }).join("");
+    cells.push(`<div class="day${off ? " off" : ""}${ds === todayStr() ? " today" : ""}">
+      <div class="dnum"><span>${d}</span>${isPH ? `<span class="ph">PH</span>` : ""}</div>
+      <div class="chips">${chips}</div></div>`);
+  }
+  return `<h2>Company leave calendar</h2>
+    <p class="sub">Everyone can see who is away. Approved leave shows in solid colour; leave still pending approval is faded.</p>
+    <div class="card">
+      <div class="calhead">
+        <button class="btn sec" data-act="calmove" data-dir="-1">‹ Prev</button>
+        <h3>${esc(monthName)}</h3>
+        <button class="btn sec" data-act="calmove" data-dir="1">Next ›</button>
+        <span class="spacer"></span>
+        <input type="search" id="calsearch" data-f="calSearch" value="${esc(vp.calSearch || "")}" placeholder="🔍 Search a name…" style="max-width:190px">
+        <button class="btn ghost" data-act="calmove" data-dir="0">Today</button>
+      </div>
+      ${q ? `<div class="callout acc" style="margin-bottom:10px">${
+        monthHits.length
+          ? `<b>${esc(vp.calSearch)}</b> — leave in ${esc(monthName)}: ` + monthHits.map(a => `${esc(a.name)} ${fmtRange(a.start, a.end)} (${a.status === "pending" ? "pending" : "approved"})`).join(" · ")
+          : `No leave found for “${esc(vp.calSearch)}” in ${esc(monthName)} — try Prev/Next month`}</div>` : ""}
+      <div class="calbox"><div class="cal">
+        ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`).join("")}
+        ${cells.join("")}
+      </div></div>
+      <div class="legend">
+        <span><span class="lvchip ap">Name</span> approved</span>
+        <span><span class="lvchip pd">Name</span> pending approval</span>
+        <span>Grey days = weekend / public holiday (PH)</span>
+      </div>
+    </div>`;
+}
+
+/* ---- Approvals ---- */
+function vApprovals() {
+  const ib = inbox(me);
+  const reports = db.employees.filter(e => e.approver1 === me.id || e.approver2 === me.id).map(e => e.id);
+  const m0 = todayStr().slice(0, 7);
+  const teamLeave = db.applications.filter(a => reports.includes(a.empId) && a.status === "approved" && (a.start.slice(0, 7) === m0 || a.end.slice(0, 7) === m0));
+  const history = myDecisions(me);
+  return `<h2>Approvals</h2><p class="sub">Applications waiting for you, your decision history, and your team's leave</p>
+    <div class="stack">
+    ${ib.todo.length === 0 && ib.cancels.length === 0 ? `<div class="card"><div class="empty">Nothing waiting for you 🎉</div></div>` : ""}
+    ${ib.todo.map(a => approvalCard(a)).join("")}
+    ${ib.cancels.map(a => cancelCard(a)).join("")}
+    <div class="card"><h3>Decision history</h3>
+      ${history.length ? `<div class="tablebox"><table><thead><tr>
+        <th>Employee</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>My decision</th><th>Note</th><th>Final status</th><th>Decided on</th></tr></thead><tbody>
+        ${history.map(h => `<tr class="rowlink" data-act="detail" data-id="${h.a.id}">
+          <td>${esc(emp(h.a.empId).name)}</td><td>${esc(lt(h.a.type).en)}</td>
+          <td class="num">${fmtRange(h.a.start, h.a.end)}</td>
+          <td class="num">${fmtD(h.a.days)}</td>
+          <td><span class="pill ${h.decision.startsWith("Approved") || h.decision === "Cancellation confirmed" ? "st-approved" : h.decision === "Rejected" ? "st-rejected" : "st-returned"}">${h.decision}</span></td>
+          <td class="meta">${esc(h.comment || "—")}</td>
+          <td><span class="pill st-${h.a.status}">${stName(h.a.status)}</span></td>
+          <td class="num meta">${fmtTs(h.ts)}</td></tr>`).join("")}
+        </tbody></table></div>`
+      : `<div class="empty">You haven't decided on any application yet</div>`}
+    </div>
+    <div class="card"><h3>My team · approved leave this month</h3>
+      ${teamLeave.length ? appTable(teamLeave, true) : `<div class="empty">No approved leave in your team this month</div>`}</div>
+    </div>`;
+}
+function approvalCard(a) {
+  const e = emp(a.empId), t = lt(a.type), b = bal(a.empId, a.type);
+  const conflicts = overlapConflicts(a);
+  return `<div class="card appcard">
+    <div class="hd"><b>${esc(e.name)}</b><span class="typechip">${esc(t.en)}</span><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span></div>
+    <div class="when">${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}${a.sh ? " (first day PM)" : ""}${a.eh ? " (last day AM)" : ""}</div>
+    <div class="why">${esc(a.reason)}</div>
+    <div class="metarow">${t.noDeduct ? "Recorded only — no deduction" : `Balance after this: <b>${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"}`}${a.att ? ` · 📎 ${esc(a.att)}` : ""} · Submitted ${fmtDate(iso(new Date(a.createdAt)))}${a.backdated ? " · backdated" : ""}</div>
+    ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 Remind ${esc(e.name)}: the original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
+    ${a.steps.length > 1 ? stepsView(a) : ""}
+    ${conflicts.length ? `<div class="callout warn" style="margin:8px 0 0">
+      <b>⚠ Same-team overlap</b> — also away:
+      <ul class="conflictlist">${conflicts.map(c => `<li><b>${esc(emp(c.empId).name)}</b><span class="cldate">${fmtRange(c.start, c.end)}</span><span class="pill st-${c.status === "pending" ? "pending" : "approved"}">${c.status === "pending" ? "Pending" : "Approved"}</span></li>`).join("")}</ul>
+      <label class="ackbox"><input type="checkbox" id="ack-${a.id}" data-act="ackbox" data-id="${a.id}">
+        I'm aware of the overlap — approve anyway.</label>
+    </div>` : ""}
+    <div class="field" style="margin:8px 0 0"><textarea id="cm-${a.id}" rows="2" placeholder="Note / reason (required when rejecting or returning)"></textarea></div>
+    <div class="actions">
+      <button class="btn good" data-act="decide" data-id="${a.id}" data-d="approve" ${conflicts.length ? "disabled" : ""}>Approve${a.cur + 1 < a.steps.length ? " → next level" : ""}</button>
+      <button class="btn warn" data-act="decide" data-id="${a.id}" data-d="return">Return</button>
+      <button class="btn bad" data-act="decide" data-id="${a.id}" data-d="reject">Reject</button>
+    </div></div>`;
+}
+function cancelCard(a) {
+  const e = emp(a.empId), t = lt(a.type);
+  return `<div class="card appcard">
+    <div class="hd"><b>${esc(e.name)} · cancellation request</b><span class="pill st-cancel_requested">Cancellation requested</span></div>
+    <dl class="kv"><dt>Approved leave</dt><dd>${esc(t.en)} · ${fmtRange(a.start, a.end)} — confirming refunds <b>${fmtD(a.days)}</b> day(s)</dd></dl>
+    <div class="actions">
+      <button class="btn good" data-act="cancelok" data-id="${a.id}">Confirm cancellation (refund days)</button>
+      <button class="btn sec" data-act="cancelno" data-id="${a.id}">Decline</button>
+    </div></div>`;
+}
+function stepsView(a) {
+  if (!a.steps.length) return `<div class="steps"><div class="step ok"><span class="dot">✓</span><span>Auto-approved — Managing Director, no approver required</span></div></div>`;
+  return `<div class="steps">${a.steps.map((s, i) => {
+    const cls = s.status === "approved" ? "ok" : (s.status === "rejected" || s.status === "returned") ? "no" : (i === a.cur && a.status === "pending") ? "now" : "off";
+    const icon = s.status === "approved" ? "✓" : (s.status === "rejected" ? "✕" : (s.status === "returned" ? "↩" : s.order));
+    const tail = s.status === "approved" ? "Approved" + (s.comment ? ": " + esc(s.comment) : "") :
+      s.status === "rejected" ? "Rejected: " + esc(s.comment) :
+      s.status === "returned" ? "Returned: " + esc(s.comment) :
+      (i === a.cur && a.status === "pending") ? "Pending" : "Waiting for previous level";
+    return `<div class="step ${cls}"><span class="dot">${icon}</span><span>Level ${s.order} · ${esc(emp(s.approverId).name)} — ${tail}</span></div>`;
+  }).join("")}</div>`;
+}
+
+/* ---- Detail modal ---- */
+function detailModal(id) {
+  const a = db.applications.find(x => x.id === id); if (!a) return "";
+  const t = lt(a.type), e = emp(a.empId);
+  const evs = db.events.filter(x => x.appId === id).sort((x, y) => x.ts - y.ts);
+  const own = a.empId === me.id;
+  const canCancel = own && a.status === "approved" && a.start > todayStr();
+  return `<div class="modalback" data-act="closemodal">
+    <div class="modal" data-stop="1">
+      <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
+        <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+      <dl class="kv">
+        <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day(s)${a.sh ? " · first day PM" : ""}${a.eh ? " · last day AM" : ""}</dd>
+        <dt>Reason</dt><dd>${esc(a.reason)}</dd>
+        ${a.att ? `<dt>Attachment</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
+        <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
+      </dl>
+      ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
+      ${stepsView(a)}
+      <h3 style="margin-top:14px">Timeline</h3>
+      <ul class="timeline">${evs.map(v => `<li><b>${esc(emp(v.actor).name)}</b> ${esc(v.action)}${v.comment ? " — " + esc(v.comment) : ""}<div class="tm">${fmtTs(v.ts)}</div></li>`).join("")}</ul>
+      <div class="actions">
+        ${own && a.status === "pending" ? `<button class="btn sec" data-act="withdraw" data-id="${a.id}">Withdraw</button>` : ""}
+        ${own && a.status === "returned" ? `<button class="btn" data-act="edit" data-id="${a.id}">Amend & resubmit</button>` : ""}
+        ${canCancel ? `<button class="btn ghost" data-act="cancelreq" data-id="${a.id}">Cancel this leave</button>` : ""}
+        <button class="btn sec" data-act="closemodal">Close</button>
+      </div>
+    </div></div>`;
+}
+
+/* ---- HR Console ---- */
+function vHR() {
+  const tabs = [["records", "All records"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Ledger & adjustments"], ["settings", "Company settings"]];
+  if (!tabs.some(t => t[0] === hrTab)) hrTab = "records";
+  return `<h2>HR Console</h2><p class="sub">Company-wide records, approval routing and the leave ledger</p>
+    <div class="tabs">${tabs.map(([k, l]) => `<button data-act="hrtab" data-t="${k}" class="${hrTab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    ${{ records: hrRecords, employees: hrEmployees, types: hrTypes, ledger: hrLedger, settings: hrSettings }[hrTab]()}`;
+}
+function hrRecords() {
+  const f = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
+  let list = db.applications.slice().sort((a, b) => b.createdAt - a.createdAt);
+  if (f !== "all") list = list.filter(a => a.status === f);
+  if (q) list = list.filter(a => { const e = emp(a.empId); return e && (e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q)); });
+  const sts = ["all", "pending", "approved", "rejected", "returned", "withdrawn", "cancel_requested", "cancelled"];
+  return `<div class="card">
+    <div class="frow" style="align-items:flex-end;margin-bottom:10px">
+      <div class="field" style="max-width:260px"><label>Search employee</label>
+        <input type="search" id="recsearch" data-f="recSearch" value="${esc(vp.recSearch || "")}" placeholder="Type a name…"></div>
+      <div class="field" style="max-width:220px"><label>Status</label>
+        <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "All" : stName(s)}</option>`).join("")}</select></div>
+    </div>
+    ${list.length ? appTable(list, true) : `<div class="empty">No records${q ? ` for “${esc(vp.recSearch)}”` : ""}</div>`}</div>`;
+}
+function activeEmps() { return db.employees.filter(e => e.active !== false); }
+function apprOpts(self, sel, excl) {
+  return `<option value="">(none — auto-approve)</option>` + activeEmps().filter(x => x.id !== self && x.id !== excl)
+    .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+}
+/* Annual-leave calculation: joined this year → pro-rated by remaining months;
+   otherwise base + 1 day per additional full year of service. */
+function annualCalc(joinDate, base) {
+  const y = new Date().getFullYear();
+  const jy = Number(String(joinDate).slice(0, 4)) || y, jm = Number(String(joinDate).slice(5, 7)) || 1;
+  if (jy >= y) {
+    const monthsLeft = 12 - jm + 1;
+    const days = Math.ceil(base * monthsLeft / 12 * 2) / 2;
+    return { days, note: `pro-rated: ${monthsLeft}/12 months × ${base} = ${fmtD(days)} day(s) for this year` };
+  }
+  const extra = Math.max(0, y - jy - 1);
+  return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year(s) of service = ${fmtD(base + extra)} day(s)` };
+}
+function empMatches(e, q, deptF) {
+  if (deptF && deptF !== "all" && e.dept !== deptF) return false;
+  if (!q) return true;
+  const s = q.toLowerCase();
+  return [e.name, e.email, e.title || "", e.dept].some(v => String(v).toLowerCase().includes(s));
+}
+function hrEmployees() {
+  const former = db.employees.filter(e => e.active === false);
+  const q = vp.empSearch || "", deptF = vp.empDept || "all";
+  const shown = activeEmps().filter(e => empMatches(e, q, deptF));
+  const deptCount = d => db.employees.filter(e => e.active !== false && e.dept === d).length;
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px"><b>Approval routing is set per employee</b> (one level by default; tick “2-level” for a second approver — in-flight applications keep their original route). Annual leave: joined this year = pro-rated by month; +1 day per additional year of service on each annual grant.</div>
+    <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
+      <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
+      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th><th></th></tr></thead><tbody>
+        ${db.departments.map(d => `<tr>
+          <td><input type="text" value="${esc(d)}" data-act="deptname" data-old="${esc(d)}" style="width:100%"></td>
+          <td class="num">${deptCount(d)}</td>
+          <td>${deptCount(d) === 0 ? `<button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button>` : `<span class="meta">in use</span>`}</td>
+        </tr>`).join("")}</tbody></table></div>
+      <div class="actions" style="margin-top:8px">
+        <input type="text" id="newteam" placeholder="New team name" style="max-width:220px">
+        <button class="btn sec" data-act="deptadd">+ Add team</button>
+      </div>
+    </details>
+    <div class="frow" style="align-items:flex-end;margin-bottom:14px">
+      <div class="field" style="max-width:260px"><label>Search</label><input type="search" id="empsearch" data-f="empSearch" value="${esc(q)}" placeholder="Name, email, title…"></div>
+      <div class="field" style="max-width:220px"><label>Team</label><select data-f="empDept">
+        <option value="all" ${deptF === "all" ? "selected" : ""}>All teams</option>
+        ${db.departments.map(d => `<option value="${esc(d)}" ${deptF === d ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></div>
+      <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
+    </div>
+    <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team / Role</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th>Actions</th></tr></thead><tbody>
+    ${shown.length ? shown.map(e => `<tr data-emp="${e.id}">
+      <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
+      <td>${esc(e.dept)} · ${roleName(e.role)}</td>
+      <td class="num">${esc(e.joinDate)}</td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver1">${apprOpts(e.id, e.approver1, e.approver2)}</select></td>
+      <td><input type="checkbox" data-act="empf" data-id="${e.id}" data-f="twoLevel" ${e.twoLevel ? "checked" : ""}></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${e.annualBase ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase"></td>
+      <td><div class="actions" style="margin:0">
+        <button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button>
+        <button class="btn ghost" style="padding:5px 10px" data-act="oilopen" data-id="${e.id}">+ OIL</button>
+        <button class="btn bad" style="padding:5px 10px" data-act="offopen" data-id="${e.id}">Offboard</button>
+      </div></td>
+    </tr>`).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
+    ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
+      <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Joined</th><th>Last working day</th></tr></thead><tbody>
+      ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${esc(e.joinDate)}</td><td class="num">${esc(e.lastDay || "—")}</td></tr>`).join("")}
+      </tbody></table></div></details>` : ""}
+    </div>`;
+}
+function empModal() {
+  const m = vp.empModal, f = m.form;
+  const isAdd = m.mode === "add";
+  const calc = annualCalc(f.joinDate, Number(f.annualBase) || 14);
+  return `<div class="modalback" data-act="closemodal"><div class="modal">
+    <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
+      <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <div class="frow">
+      <div class="field"><label>Name</label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
+      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Team / department</label><select data-f="em.dept">
+        ${db.departments.map(d => `<option value="${esc(d)}" ${f.dept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}
+        <option value="__new" ${f.dept === "__new" ? "selected" : ""}>＋ New team…</option></select></div>
+      ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
+      <div class="field"><label>Position / job title</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Sales Executive"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Gender</label><select data-f="em.gender">
+        <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
+        <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
+      <div class="field"><label>Role</label><select data-f="em.role">
+        ${["employee", "approver", "hr", "admin"].map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select></div>
+      <div class="field"><label>Join date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Level 1 approver</label><select data-f="em.approver1">${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
+      <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" data-f="em.twoLevel" ${f.twoLevel ? "checked" : ""}> 2-level</label></div>
+      <div class="field"><label>Level 2 approver</label><select data-f="em.approver2" ${f.twoLevel ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select></div>
+    </div>
+    <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}"></div>
+    ${isAdd ? `<div class="callout acc">This year's annual leave will be credited automatically: <b>${fmtD(calc.days)} day(s)</b> — ${esc(calc.note)}.<br>Sick 14 / Hospitalisation 60 / Childcare 6 / Compassionate 3 / Marriage 3 are credited at standard entitlements.</div>` : `<div class="callout acc">Changing the base affects future annual grants only; use Ledger & adjustments for corrections this year.</div>`}
+    <div class="actions">
+      <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+function oilModal() {
+  const m = vp.oilModal, e = emp(m.empId);
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:460px">
+    <div class="hd"><h3>Credit off-in-lieu — ${esc(e.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <p class="meta" style="margin:0 0 12px">Current OIL balance: <b>${fmtD(bal(m.empId, "oil").avail)}</b> day(s)</p>
+    <div class="field" style="max-width:160px"><label>Days to credit</label><input type="number" step="0.5" min="0.5" data-f="oil.days" value="${m.days}"></div>
+    <div class="field"><label>Reason</label><input type="text" data-f="oil.reason" value="${esc(m.reason)}" placeholder="e.g. Worked on Sunday 12 Jul stocktake"></div>
+    <div class="actions">
+      <button class="btn" data-act="oilsave">Credit OIL</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+function offModal() {
+  const m = vp.offModal, e = emp(m.empId);
+  const bals = db.leaveTypes.filter(t => !t.noDeduct && eligible(t, e)).map(t => ({ t, avail: bal(m.empId, t.code).avail })).filter(x => x.avail !== 0);
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:520px">
+    <div class="hd"><h3>Offboard — ${esc(e.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <div class="field" style="max-width:200px"><label>Last working day</label><input type="date" data-f="off.lastDay" value="${m.lastDay}"></div>
+    <div class="callout warn" style="margin:0 0 12px"><b>Remaining balances to settle:</b>
+      ${bals.length ? `<ul class="conflictlist">${bals.map(x => `<li>${esc(x.t.en)}: <b>${fmtD(x.avail)}</b> day(s)</li>`).join("")}</ul>` : " none — all balances are zero."}
+    </div>
+    <div class="field"><label>How to settle the remaining balance</label>
+      <label class="check"><input type="radio" name="offmode" data-f="off.mode" value="encash" ${m.mode === "encash" ? "checked" : ""}> Encash — pay out the days (recorded in the ledger for payroll)</label>
+      <label class="check"><input type="radio" name="offmode" data-f="off.mode" value="clear" ${m.mode === "clear" ? "checked" : ""}> Clear — forfeit the remaining days</label>
+    </div>
+    <p class="meta">Pending applications will be withdrawn automatically. The account is removed from sign-in and rosters; all history stays in the records.</p>
+    <div class="actions">
+      <button class="btn bad" data-act="offsave">Confirm offboarding</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+function hrTypes() {
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px">Leave types are <b>configuration, not code</b>: when policy changes (e.g. Shared Parental Leave increases to 10 weeks from Apr 2026), update it here. Default days only affect future annual grants.</div>
+    <div class="tablebox"><table><thead><tr><th>Type</th><th>中文</th><th class="num">Default days / year</th><th>MC required</th><th>Eligibility</th><th>Notes</th></tr></thead><tbody>
+    ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
+      <td><b>${esc(t.en)}</b></td><td class="meta">${esc(t.zh)}</td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
+      <td>${t.mc ? "✅" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}${t.noDeduct ? " · no deduction" : ""}</td>
+      <td class="meta">${esc(t.note || "")}</td></tr>`).join("")}</tbody></table></div>
+    <p class="meta" style="margin-top:14px">Public holidays are managed in the <b>Company settings</b> tab.</p>
+  </div>`;
+}
+function hrSettings() {
+  const o = db.org || {};
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px"><b>Nothing about your company is hard-coded.</b> Any small company can use this system: set your name and email domain here, manage teams in the Employees tab, adjust leave types and their quotas in the Leave types tab, and maintain the public-holiday list below.</div>
+    <div class="frow">
+      <div class="field" style="max-width:280px"><label>Company name (shown everywhere)</label><input type="text" data-act="orgf" data-k="company" value="${esc(o.company || "")}"></div>
+      <div class="field" style="max-width:280px"><label>Email domain (new-employee hint)</label><input type="text" data-act="orgf" data-k="emailDomain" value="${esc(o.emailDomain || "")}" placeholder="company.com"></div>
+    </div>
+    <h3 style="margin-top:18px">Public holidays — excluded automatically when counting leave days</h3>
+    <div class="phchips">${db.publicHolidays.slice().sort().map(p => `<span>${p} <a data-act="phdel" data-d="${p}" style="cursor:pointer;font-weight:700" title="Remove">✕</a></span>`).join("")}</div>
+    <div class="actions" style="margin-top:10px">
+      <input type="date" id="newph" style="max-width:180px">
+      <button class="btn sec" data-act="phadd">+ Add holiday</button>
+    </div>
+  </div>`;
+}
+function hrLedger() {
+  const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
+  vp.ledForm = f;
+  const led = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
+  return `<div class="stack"><div class="card"><h3>Manual entry (off-in-lieu credit / adjustment / expiry)</h3>
+    <div class="frow">
+      <div class="field"><label>Employee</label><select data-f="led.empId">${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Leave type</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
+      <div class="field"><label>Days (+ credit / − deduct)</label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
+    </div>
+    <div class="field"><label>Reason</label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
+    <button class="btn" data-act="ledadd">Add to ledger</button>
+  </div>
+  <div class="card"><h3>Ledger (last 30 entries) — balances always equal the sum of entries</h3>
+    <div class="tablebox"><table><thead><tr><th>Time</th><th>Employee</th><th>Type</th><th class="num">±Days</th><th>Reason</th><th>By</th></tr></thead><tbody>
+    ${led.map(l => `<tr><td class="num meta">${fmtTs(l.ts)}</td><td>${esc((emp(l.empId) || {}).name || "—")}</td><td>${esc((lt(l.type) || {}).en || l.type)}</td>
+      <td class="num" style="color:${l.delta >= 0 ? "var(--good)" : "var(--bad)"};font-weight:600">${l.delta > 0 ? "+" : ""}${fmtD(l.delta)}</td>
+      <td>${esc(l.reason)}</td><td>${esc((emp(l.by) || {}).name || "system")}</td></tr>`).join("")}
+    </tbody></table></div></div></div>`;
+}
+
+/* ============ Login (email + password) ============ */
+async function doLogin() {
+  const email = (document.getElementById("li-email")?.value || "").trim();
+  const password = document.getElementById("li-pass")?.value || "";
+  if (!email || !password) return toast("Please enter your email and password");
+  toast("Signing in…");
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) return toast(error.message || "Sign-in failed");
+  await afterAuth();
+}
+async function afterAuth() {
+  const linked = await loadMe();
+  if (!linked) { render(); return; } // unlinked account message
+  await loadAll();
+  view = "dashboard"; vp = {}; render();
+}
+document.addEventListener("submit", ev => {
+  if (ev.target && ev.target.id === "loginform") { ev.preventDefault(); doLogin(); }
+});
+
+/* ============ Event delegation ============ */
+document.addEventListener("click", async ev => {
+  const el = ev.target.closest("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (act === "closemodal" && ev.target !== el && el.classList.contains("modalback")) return;
+  if (act === "dologin") { ev.preventDefault(); return doLogin(); }
+  switch (act) {
+    case "logout": signOut(); break;
+    case "nav": view = el.dataset.v; vp = {}; render(); break;
+    case "hrtab": hrTab = el.dataset.t; vp = {}; render(); break;
+    case "calmove": {
+      const dir = Number(el.dataset.dir);
+      if (!dir) vp.calMonth = todayStr().slice(0, 7);
+      else { const [Y, M] = (vp.calMonth || todayStr().slice(0, 7)).split("-").map(Number); const d = new Date(Y, M - 1 + dir, 1); vp.calMonth = d.getFullYear() + "-" + pad(d.getMonth() + 1); }
+      render(); break;
+    }
+    case "detail": vp.detail = id; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; render(); break;
+    case "empadd": vp.empModal = { mode: "add", id: null, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: 14 } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "deptadd": {
+      const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
+      if (!name) return toast("Please type the team name first");
+      if (db.departments.some(d => d.toLowerCase() === name.toLowerCase())) return toast("This team already exists");
+      const { error } = await sb.from("departments").insert({ name });
+      if (error) return rpcErr(error);
+      vp.teamsOpen = true; await reload(); toast("Team \"" + name + "\" added");
+      break;
+    }
+    case "deptdel": {
+      const name = el.dataset.name;
+      if (db.employees.some(e => e.active !== false && e.dept === name)) return toast("This team still has members");
+      const { error } = await sb.from("departments").delete().eq("name", name);
+      if (error) return rpcErr(error);
+      vp.teamsOpen = true; await reload(); toast("Team \"" + name + "\" deleted");
+      break;
+    }
+    case "empsave": {
+      const m = vp.empModal, f = m.form;
+      if (!f.name.trim()) return toast("Please fill in the name");
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
+      if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
+      if (f.twoLevel && (!f.approver2 || f.approver2 === f.approver1)) return toast("2-level routing needs a different Level 2 approver");
+      let dept = f.dept;
+      if (dept === "__new") {
+        dept = (f.newDept || "").trim();
+        if (!dept) return toast("Please type the new team's name");
+        const existing = db.departments.find(d => d.toLowerCase() === dept.toLowerCase());
+        if (existing) dept = existing;
+        else { const { error } = await sb.from("departments").insert({ name: dept }); if (error) return rpcErr(error); }
+      }
+      if (!dept) return toast("Please choose a team");
+      const base = Number(f.annualBase) || 14;
+      const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
+        role: f.role, join_date: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null,
+        two_level: !!f.twoLevel, annual_base: base };
+      if (m.mode === "add") {
+        const { data: ins, error } = await sb.from("employees").insert(row).select("id").single();
+        if (error) return rpcErr(error);
+        const calc = annualCalc(f.joinDate, base);
+        // Credit joining entitlements (annual pro-rated; other types at their default)
+        const rows = [];
+        for (const t of db.leaveTypes) {
+          if (t.noDeduct || (t.gender && t.gender !== f.gender)) continue;
+          const amt = t.code === "annual" ? calc.days : t.days;
+          if (amt > 0) rows.push({ emp_id: ins.id, leave_type: t.code, delta_days: amt,
+            reason: t.code === "annual" ? "Pro-rated entitlement (joined " + f.joinDate + ")" : "Entitlement on joining", created_by: me.id });
+        }
+        if (rows.length) { const { error: e2 } = await sb.from("leave_ledger").insert(rows); if (e2) return rpcErr(e2); }
+        delete vp.empModal; await reload(); toast(f.name.trim() + " added — " + fmtD(calc.days) + " day(s) annual leave credited. Now create their login account in Supabase (same email).");
+      } else {
+        const { error } = await sb.from("employees").update(row).eq("id", m.id);
+        if (error) return rpcErr(error);
+        delete vp.empModal; await reload(); toast("Saved " + f.name.trim() + "'s profile");
+      }
+      break;
+    }
+    case "oilopen": vp.oilModal = { empId: id, days: 1, reason: "" }; render(); break;
+    case "oilsave": {
+      const m = vp.oilModal;
+      if (!(Number(m.days) > 0)) return toast("Days must be more than 0");
+      if (!m.reason.trim()) return toast("Please fill in the reason");
+      const { error } = await sb.from("leave_ledger").insert({ emp_id: m.empId, leave_type: "oil",
+        delta_days: Number(m.days), reason: "Off-in-lieu credit: " + m.reason.trim(), created_by: me.id });
+      if (error) return rpcErr(error);
+      const nm = emp(m.empId).name; delete vp.oilModal; await reload(); toast("Credited " + fmtD(Number(m.days)) + " day(s) OIL to " + nm);
+      break;
+    }
+    case "offopen": vp.offModal = { empId: id, lastDay: todayStr(), mode: "encash" }; render(); break;
+    case "offsave": {
+      const m = vp.offModal, e = emp(m.empId);
+      if (e.id === me.id) return toast("You cannot offboard yourself");
+      const { error } = await sb.rpc("offboard_employee", { p_emp: m.empId, p_last_day: m.lastDay, p_mode: m.mode });
+      if (error) return rpcErr(error);
+      delete vp.offModal; await reload(); toast(e.name + " offboarded — balances settled, account deactivated");
+      break;
+    }
+    case "submit": doSubmit(); break;
+    case "withdraw": { if (await withdrawApp(id)) { delete vp.detail; render(); toast("Application withdrawn"); } break; }
+    case "edit": vp = { editId: id }; view = "apply"; render(); break;
+    case "cancelreq": {
+      if (await requestCancel(id)) {
+        delete vp.detail;
+        const a = db.applications.find(x => x.id === id);
+        render(); toast(a && a.status === "cancelled" ? "Leave cancelled — days refunded" : "Cancellation request sent to your approver");
+      }
+      break;
+    }
+    case "cancelok": { if (await confirmCancel(id, true, "")) toast("Cancellation confirmed — days refunded"); break; }
+    case "cancelno": { if (await confirmCancel(id, false, "")) toast("Cancellation declined"); break; }
+    case "ledadd": {
+      const f = vp.ledForm;
+      if (!f.reason.trim()) return toast("Please fill in the reason");
+      if (!f.delta) return toast("Days cannot be 0");
+      const { error } = await sb.from("leave_ledger").insert({ emp_id: f.empId, leave_type: f.type,
+        delta_days: Number(f.delta), reason: "Manual adjustment: " + f.reason.trim(), created_by: me.id });
+      if (error) return rpcErr(error);
+      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" }; await reload(); toast("Added to ledger");
+      break;
+    }
+    case "phadd": {
+      const inp = document.getElementById("newph"), d = inp?.value;
+      if (!d) return toast("Pick a date first");
+      if (db.publicHolidays.includes(d)) return toast("Already in the list");
+      const { error } = await sb.from("public_holidays").insert({ holiday: d });
+      if (error) return rpcErr(error);
+      await reload(); toast("Holiday added");
+      break;
+    }
+    case "phdel": { const { error } = await sb.from("public_holidays").delete().eq("holiday", el.dataset.d); if (error) return rpcErr(error); await reload(); toast("Holiday removed"); break; }
+    case "decide": {
+      const d = el.dataset.d;
+      const cm = (document.getElementById("cm-" + id) || {}).value || "";
+      if ((d === "reject" || d === "return") && !cm.trim()) return toast(d === "reject" ? "A reason is required when rejecting" : "Please say what needs to be added before returning");
+      const ackEl = document.getElementById("ack-" + id);
+      if (await actOnStep(id, d, cm.trim(), !!(ackEl && ackEl.checked)))
+        toast(d === "approve" ? "Approved" : d === "reject" ? "Rejected — employee notified" : "Returned — employee notified");
+      break;
+    }
+  }
+});
+
+document.addEventListener("change", async ev => {
+  const el = ev.target;
+  if (el.dataset.act === "ackbox") {
+    const btn = document.querySelector(`[data-act="decide"][data-d="approve"][data-id="${el.dataset.id}"]`);
+    if (btn) btn.disabled = !el.checked;
+    return;
+  }
+  if (el.dataset.act === "empf") {
+    const e = emp(el.dataset.id), f = el.dataset.f;
+    const patch = {};
+    if (f === "annualBase") patch.annual_base = Number(el.value) || 14;
+    else if (f === "twoLevel") { patch.two_level = el.checked; if (!el.checked) patch.approver2 = null; }
+    else if (f === "approver1") patch.approver1 = el.value || null;
+    else if (f === "approver2") patch.approver2 = el.value || null;
+    if ((patch.two_level ?? e.twoLevel) && (patch.approver1 ?? e.approver1) && (patch.approver1 ?? e.approver1) === (patch.approver2 ?? e.approver2)) {
+      return toast("Level 2 approver must differ from level 1");
+    }
+    const { error } = await sb.from("employees").update(patch).eq("id", e.id);
+    if (error) return rpcErr(error);
+    await reload(); toast("Saved " + e.name + "'s route (applies to new applications)");
+    return;
+  }
+  if (el.dataset.act === "typedays") {
+    const { error } = await sb.from("leave_types").update({ default_days: Number(el.value) || 0 }).eq("code", el.dataset.c);
+    if (error) return rpcErr(error);
+    await reload(); toast("Default days updated (affects future annual grants)");
+    return;
+  }
+  if (el.dataset.act === "orgf") {
+    const patch = {}; patch[el.dataset.k === "company" ? "company_name" : "email_domain"] = el.value.trim();
+    const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
+    if (error) return rpcErr(error);
+    await reload(); toast("Company settings saved");
+    return;
+  }
+  if (el.dataset.act === "deptname") {
+    const oldName = el.dataset.old, newName = el.value.trim();
+    if (!newName) { el.value = oldName; return toast("Team name cannot be empty"); }
+    if (newName === oldName) return;
+    if (db.departments.some(d => d !== oldName && d.toLowerCase() === newName.toLowerCase())) { el.value = oldName; return toast("Another team already has this name"); }
+    // FK on update cascade updates every member's dept automatically
+    const { error } = await sb.from("departments").update({ name: newName }).eq("name", oldName);
+    if (error) { el.value = oldName; return rpcErr(error); }
+    vp.teamsOpen = true; await reload(); toast(`Team renamed to "${newName}" — members updated`);
+    return;
+  }
+  const f = el.dataset.f;
+  if (!f) return;
+  if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
+  if (f === "empDept") { vp.empDept = el.value; render(); return; }
+  if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("em.") && vp.empModal) {
+    const k = f.slice(3);
+    vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
+    if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) render(); // refresh pro-rate preview / dependent selects / new-team field
+    return;
+  }
+  if (f.startsWith("oil.") && vp.oilModal) { vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("off.") && vp.offModal) { vp.offModal[f.slice(4)] = el.value; return; }
+  if (view === "apply" && vp.form) {
+    if (f === "reason") { vp.form.reason = el.value; return; } // synced live via input; skipping re-render here keeps the submit click from being swallowed
+    if (f === "attfile") { vp.form.att = el.files && el.files[0] ? el.files[0].name : ""; render(); return; }
+    if (f === "sh" || f === "eh") vp.form[f] = el.checked; else vp.form[f] = el.value;
+    if (f === "start" && vp.form.end < vp.form.start) vp.form.end = vp.form.start;
+    render();
+  }
+});
+// <details> open state is lost on re-render; remember the Teams panel's state
+document.addEventListener("toggle", ev => {
+  if (ev.target.hasAttribute && ev.target.hasAttribute("data-teams")) vp.teamsOpen = ev.target.open;
+}, true);
+
+document.addEventListener("input", ev => {
+  const el = ev.target;
+  if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
+  const f = el.dataset.f || "";
+  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch" };
+  if (liveSearch[f]) {
+    // Live filter; re-render then restore focus/caret so typing isn't interrupted
+    vp[f] = el.value; render();
+    const s = document.getElementById(liveSearch[f]);
+    if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    return;
+  }
+  // Sync modal text fields live so the save click (which blurs the field) never loses input
+  if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") vp.empModal.form[f.slice(3)] = el.value;
+  if (vp.oilModal && f.startsWith("oil.")) vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+  if (vp.offModal && f.startsWith("off.") && el.type !== "radio") vp.offModal[f.slice(4)] = el.value;
+});
+
+/* ============ Boot ============ */
+function bootScreen() {
+  $app().innerHTML = `<div class="login"><div class="loginbox"><h1>LeaveDesk</h1><p class="tag">Loading…</p></div></div>`;
+}
+async function boot() {
+  bootScreen();
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) { await afterAuth(); return; }
+  } catch (e) { /* offline / first load — fall through to the sign-in page */ }
+  me = null; render();
+}
+if (typeof supabase === "undefined") {
+  document.getElementById("app").innerHTML = '<div class="login"><div class="loginbox"><h1>LeaveDesk</h1><p class="tag">Could not load a required library. Check your internet connection and refresh.</p></div></div>';
+} else {
+  boot();
+}
+</script>
+</body>
+</html>

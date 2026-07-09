@@ -16,6 +16,7 @@ create table if not exists employees (
   auth_user_id  uuid unique references auth.users (id) on delete set null,
   name          text not null,
   email         text unique not null,
+  title         text,                             -- 职位 / job title（可空）
   join_date     date not null,
   dept          text,
   gender        text check (gender in ('M','F')),
@@ -276,6 +277,22 @@ language sql stable security definer set search_path = public as $$
     and o.status in ('pending','approved','cancel_requested')
     and not (o.end_date < a.start_date or o.start_date > a.end_date);
 $$;
+
+-- 审批人看申请人余额：RLS 不让非 HR 审批人读别人的账本，这个 definer 函数
+-- 只返回一个"可用天数"数字，且仅在调用者是 HR 或该员工某申请的链上审批人时放行。
+create or replace function leave_available(p_emp uuid, p_code text)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+declare allowed boolean;
+begin
+  select is_hr() or exists (
+    select 1 from applications a join approval_steps s on s.application_id = a.id
+    where a.emp_id = p_emp and s.approver_id = current_emp_id()
+  ) into allowed;
+  if not allowed then raise exception '无权查看该员工余额'; end if;
+  return coalesce((select balance from leave_balances where emp_id = p_emp and leave_type = p_code), 0)
+       - coalesce((select sum(days) from applications
+                   where emp_id = p_emp and leave_type = p_code and status = 'pending'), 0);
+end $$;
 
 -- 审批动作：approve / reject / return（当前节点审批人才能调）
 -- p_ack：同团队同日请假时必须传 true（前端勾选 acknowledge），否则拒绝批准
