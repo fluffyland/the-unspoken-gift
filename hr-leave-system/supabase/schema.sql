@@ -422,20 +422,20 @@ create policy ledger_hr_insert on leave_ledger for insert to authenticated
   with check (is_hr());
 
 -- 申请：本人 / 链上审批人 / HR 可读；一切写操作走存储过程
-create policy app_read on applications for select to authenticated
-  using (emp_id = current_emp_id() or is_hr()
-         or exists (select 1 from approval_steps s
-                    where s.application_id = applications.id and s.approver_id = current_emp_id()));
-create policy steps_read on approval_steps for select to authenticated
-  using (exists (select 1 from applications a where a.id = application_id
-                 and (a.emp_id = current_emp_id() or is_hr()
-                      or exists (select 1 from approval_steps s2
-                                 where s2.application_id = a.id and s2.approver_id = current_emp_id()))));
-create policy events_read on application_events for select to authenticated
-  using (exists (select 1 from applications a where a.id = application_id
-                 and (a.emp_id = current_emp_id() or is_hr()
-                      or exists (select 1 from approval_steps s2
-                                 where s2.application_id = a.id and s2.approver_id = current_emp_id()))));
+-- 可见性判断封装进 security definer 函数：函数体内查 applications/approval_steps
+-- 时以属主身份运行、绕过 RLS，避免"policy 里查自己表"导致的无限递归。
+create or replace function can_view_application(p_app uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from applications a where a.id = p_app
+      and (a.emp_id = current_emp_id() or is_hr()
+           or exists (select 1 from approval_steps s
+                      where s.application_id = a.id and s.approver_id = current_emp_id())));
+$$;
+
+create policy app_read    on applications        for select to authenticated using (can_view_application(id));
+create policy steps_read  on approval_steps      for select to authenticated using (can_view_application(application_id));
+create policy events_read on application_events  for select to authenticated using (can_view_application(application_id));
 
 -- ---------- 13. 年度入账（HR 每年 1 月 1 日执行一次；也可做成 pg_cron 定时） ----------
 -- 年假 = 员工 annual_base + 每多一年服务 +1；入职当年按剩余月份 pro-rate（向上取 0.5）
