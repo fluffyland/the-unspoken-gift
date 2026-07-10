@@ -560,9 +560,12 @@ function vDashboard() {
   const rest = cards.filter(t => !main.includes(t));
   const mine = db.applications.filter(a => a.empId === me.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const ib = inbox(me);
+  const pwHidden = (() => { try { return localStorage.getItem("pwhint_" + me.id) === "1"; } catch (e) { return false; } })();
   return `
     <h2>Hello, ${esc(me.name)}</h2>
     <p class="sub">Today is ${todayStr()} · ${esc(me.dept)} · Approval route: ${chainText(me)}</p>
+    ${pwHidden ? "" : `<div class="callout acc" style="margin-bottom:16px">🔑 <b>Set your own password.</b> If you're still using the temporary password everyone was given, please change it: click the <b>🔑 key icon at the top-right</b> of this page → enter a new password (at least 8 characters) → Change password. It's not compulsory, but recommended.
+      <div class="actions" style="margin-top:8px"><button class="btn" data-act="pwopen">Change password now</button><button class="btn sec" data-act="pwhintdismiss">Got it, hide this</button></div></div>`}
     ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item(s) waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
     <div class="balgrid">${main.map(balCard).join("")}</div>
     <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">More leave types (Maternity / Paternity / Compassionate / Marriage …)</summary>
@@ -1153,12 +1156,14 @@ document.addEventListener("click", async ev => {
     case "detail": vp.detail = id; render(); break;
     case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; render(); break;
     case "pwopen": vp.pwModal = true; render(); break;
+    case "pwhintdismiss": try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} render(); break;
     case "pwsave": {
       const p1 = document.getElementById("pw1")?.value || "", p2 = document.getElementById("pw2")?.value || "";
       if (p1.length < 8) return toast("Password must be at least 8 characters");
       if (p1 !== p2) return toast("The two passwords don't match");
       const { error } = await sb.auth.updateUser({ password: p1 });
       if (error) return rpcErr(error);
+      try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} // they've set their own; stop reminding
       delete vp.pwModal; render(); toast("Password changed — use the new one next time you sign in");
       break;
     }
