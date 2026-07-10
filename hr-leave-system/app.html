@@ -55,6 +55,7 @@ input,select,textarea{
   font:inherit;color:var(--ink);background:var(--surface);
   border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-width:100%;
 }
+select{padding-right:28px;text-overflow:ellipsis} /* keep long option text clear of the dropdown arrow */
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{
   outline:2px solid var(--accent);outline-offset:2px;
 }
@@ -205,6 +206,10 @@ td.num{font-variant-numeric:tabular-nums}
 .cal .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .cal .dnum{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between}
 .cal .dnum .ph{color:var(--warn);font-weight:600;font-size:10.5px}
+.cal .phname{color:var(--warn);font-size:10px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dangerzone{border:1px solid var(--bad);border-radius:10px;padding:10px 12px;margin-top:14px;background:color-mix(in srgb,var(--bad) 6%,var(--surface))}
+.dangerzone h4{margin:0 0 4px;color:var(--bad);font-size:13px}
+.dangerzone p{margin:0 0 8px;font-size:12.5px;color:var(--muted)}
 .cal .chips{display:flex;flex-direction:column;gap:2px;margin-top:2px}
 .lvchip{border-radius:5px;padding:1px 5px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lvchip.ap{background:var(--accent);color:var(--accent-ink)}
@@ -284,7 +289,7 @@ async function loadAll() {
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
     sb.from("employees").select("*"),
     sb.from("leave_types").select("*"),
-    sb.from("public_holidays").select("holiday"),
+    sb.from("public_holidays").select("holiday,name"),
     sb.from("departments").select("name"),
     sb.from("org_settings").select("*").maybeSingle()
   ]);
@@ -293,10 +298,12 @@ async function loadAll() {
 
   const employees = (empR.data || []).map(mapEmp).sort((a, b) => a.name.localeCompare(b.name));
   const leaveTypes = (typeR.data || []).map(mapType).sort((a, b) => a.sort - b.sort);
-  const publicHolidays = (phR.data || []).map(x => x.holiday);
+  const publicHolidays = (phR.data || []).map(x => x.holiday).sort();
+  const phNames = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.name || "Public holiday"]));
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
   const o = orgR.data || {};
-  const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "" };
+  const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
+    defaultAnnualBase: Number(o.default_annual_base) || 14 };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -330,7 +337,7 @@ async function loadAll() {
   const calR = await sb.from("leave_calendar").select("*");
   const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status }));
 
-  db = { org, departments, employees, leaveTypes, publicHolidays, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  db = { org, departments, employees, leaveTypes, publicHolidays, phNames, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
 
   // Approvers (non-HR) can't read applicants' ledger under RLS; fetch just the
   // available-days number for each application in their inbox via a definer RPC.
@@ -466,6 +473,14 @@ function overlapConflicts(a) {
     !(x.end < a.start || x.start > a.end));
 }
 function isApprover(u) { return u.role !== "employee" || db.employees.some(e => e.approver1 === u.id || e.approver2 === u.id); }
+/* Attachment display: storage paths (contain "/") become View links; legacy names render as text */
+function attLink(att) {
+  if (!att) return "";
+  const base = att.split("/").pop().replace(/^\d+_/, "");
+  return att.includes("/")
+    ? `📎 <a data-act="viewatt" data-path="${esc(att)}" style="cursor:pointer">${esc(base)} — view</a>`
+    : `📎 ${esc(att)}`;
+}
 function myDecisions(u) {
   // Sourced from the immutable event log (not from steps, which are rebuilt on
   // resubmission) so history survives amend-and-resubmit cycles.
@@ -516,13 +531,26 @@ function shell() {
     <span class="logo">LeaveDesk <span style="color:var(--accent)">·</span> ${esc(db.org?.company || "")}</span>
     <span class="spacer"></span>
     <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleName(me.role)}</span>
+    <button class="iconbtn" data-act="pwopen" title="Change password">🔑</button>
     <button class="iconbtn" data-act="logout">Sign out</button>
   </div></div>
   <nav class="nav"><div class="wrap">
     ${navs.map(([v, label]) => `<button data-act="nav" data-v="${v}" class="${view === v ? "on" : ""}">${label}</button>`).join("")}
   </div></nav>
   <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}`;
+}
+
+function pwModal() {
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:420px">
+    <div class="hd"><h3>Change password</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <p class="meta" style="margin:0 0 12px">Signed in as <b>${esc(me.email)}</b>. Pick something only you know — at least 8 characters.</p>
+    <div class="field"><label>New password</label><input type="password" id="pw1" autocomplete="new-password"></div>
+    <div class="field"><label>Repeat new password</label><input type="password" id="pw2" autocomplete="new-password"></div>
+    <div class="actions">
+      <button class="btn" data-act="pwsave">Change password</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
 }
 
 /* ---- Overview ---- */
@@ -593,8 +621,8 @@ function vApply() {
       <div class="field"><label>Reason</label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
       <div class="field"><label>Attachment${t.mc ? " (photo or PDF of your MC — required)" : " (optional)"}</label>
-        <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att)}</span>` : ""}
-        <span class="hint">Demo stores the file name only; production uploads to secure storage</span></div>
+        <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop())}</span>` : ""}
+        <span class="hint">Uploads to secure storage — only you, your approver and HR can view it</span></div>
       <div class="actions">
         <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
         ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
@@ -613,7 +641,17 @@ async function doSubmit() {
     ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
   if (overlap) return toast("These dates overlap an existing application");
   const editId = vp.editId;
-  const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att: f.att, backdated: f.start < todayStr() }, editId);
+  // Upload the attachment to private storage first; the application stores its path.
+  let att = f.att || "";
+  if (f._file) {
+    toast("Uploading attachment…");
+    const safe = f._file.name.replace(/[^\w.\-]/g, "_");
+    const path = me.id + "/" + Date.now() + "_" + safe;
+    const { error: upErr } = await sb.storage.from("attachments").upload(path, f._file);
+    if (upErr) return rpcErr(upErr);
+    att = path;
+  }
+  const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
   if (!res) return; // error already shown
   const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
   vp = {}; view = "myapps"; render();
@@ -665,6 +703,7 @@ function vCalendar() {
     }).join("");
     cells.push(`<div class="day${off ? " off" : ""}${ds === todayStr() ? " today" : ""}">
       <div class="dnum"><span>${d}</span>${isPH ? `<span class="ph">PH</span>` : ""}</div>
+      ${isPH ? `<div class="phname" title="${esc(db.phNames[ds] || "Public holiday")}">${esc(db.phNames[ds] || "Public holiday")}</div>` : ""}
       <div class="chips">${chips}</div></div>`);
   }
   return `<h2>Company leave calendar</h2>
@@ -731,7 +770,7 @@ function approvalCard(a) {
     <div class="hd"><b>${esc(e.name)}</b><span class="typechip">${esc(t.en)}</span><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span></div>
     <div class="when">${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}${a.sh ? " (first day PM)" : ""}${a.eh ? " (last day AM)" : ""}</div>
     <div class="why">${esc(a.reason)}</div>
-    <div class="metarow">${t.noDeduct ? "Recorded only — no deduction" : `Balance after this: <b>${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"}`}${a.att ? ` · 📎 ${esc(a.att)}` : ""} · Submitted ${fmtDate(iso(new Date(a.createdAt)))}${a.backdated ? " · backdated" : ""}</div>
+    <div class="metarow">${t.noDeduct ? "Recorded only — no deduction" : `Balance after this: <b>${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"}`}${a.att ? ` · ${attLink(a.att)}` : ""} · Submitted ${fmtDate(iso(new Date(a.createdAt)))}${a.backdated ? " · backdated" : ""}</div>
     ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 Remind ${esc(e.name)}: the original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
     ${a.steps.length > 1 ? stepsView(a) : ""}
     ${conflicts.length ? `<div class="callout warn" style="margin:8px 0 0">
@@ -784,7 +823,7 @@ function detailModal(id) {
       <dl class="kv">
         <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day(s)${a.sh ? " · first day PM" : ""}${a.eh ? " · last day AM" : ""}</dd>
         <dt>Reason</dt><dd>${esc(a.reason)}</dd>
-        ${a.att ? `<dt>Attachment</dt><dd>📎 ${esc(a.att)}</dd>` : ""}
+        ${a.att ? `<dt>Attachment</dt><dd>${attLink(a.att)}</dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
       </dl>
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
@@ -802,11 +841,11 @@ function detailModal(id) {
 
 /* ---- HR Console ---- */
 function vHR() {
-  const tabs = [["records", "All records"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Ledger & adjustments"], ["settings", "Company settings"]];
+  const tabs = [["records", "All records"], ["balances", "Balances"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Ledger & adjustments"], ["settings", "Company settings"]];
   if (!tabs.some(t => t[0] === hrTab)) hrTab = "records";
-  return `<h2>HR Console</h2><p class="sub">Company-wide records, approval routing and the leave ledger</p>
+  return `<h2>HR Console</h2><p class="sub">Company-wide records, balances, approval routing and the leave ledger</p>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-act="hrtab" data-t="${k}" class="${hrTab === k ? "on" : ""}">${l}</button>`).join("")}</div>
-    ${{ records: hrRecords, employees: hrEmployees, types: hrTypes, ledger: hrLedger, settings: hrSettings }[hrTab]()}`;
+    ${{ records: hrRecords, balances: hrBalances, employees: hrEmployees, types: hrTypes, ledger: hrLedger, settings: hrSettings }[hrTab]()}`;
 }
 function hrRecords() {
   const f = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
@@ -820,12 +859,13 @@ function hrRecords() {
         <input type="search" id="recsearch" data-f="recSearch" value="${esc(vp.recSearch || "")}" placeholder="Type a name…"></div>
       <div class="field" style="max-width:220px"><label>Status</label>
         <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "All" : stName(s)}</option>`).join("")}</select></div>
+      <div class="field"><button class="btn sec" data-act="reccsv">⬇ Export CSV</button></div>
     </div>
     ${list.length ? appTable(list, true) : `<div class="empty">No records${q ? ` for “${esc(vp.recSearch)}”` : ""}</div>`}</div>`;
 }
 function activeEmps() { return db.employees.filter(e => e.active !== false); }
 function apprOpts(self, sel, excl) {
-  return `<option value="">(none — auto-approve)</option>` + activeEmps().filter(x => x.id !== self && x.id !== excl)
+  return `<option value="">(auto-approve)</option>` + activeEmps().filter(x => x.id !== self && x.id !== excl)
     .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
 }
 /* Annual-leave calculation: joined this year → pro-rated by remaining months;
@@ -863,8 +903,13 @@ function hrEmployees() {
           <td>${deptCount(d) === 0 ? `<button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button>` : `<span class="meta">in use</span>`}</td>
         </tr>`).join("")}</tbody></table></div>
       <div class="actions" style="margin-top:8px">
-        <input type="text" id="newteam" placeholder="New team name" style="max-width:220px">
-        <button class="btn sec" data-act="deptadd">+ Add team</button>
+        ${vp.teamConfirm ? `
+          <span style="align-self:center">Add team “<b>${esc(vp.teamConfirm)}</b>”?</span>
+          <button class="btn" data-act="deptconfirm">Confirm</button>
+          <button class="btn sec" data-act="deptcancel">Cancel</button>`
+        : `
+          <input type="text" id="newteam" placeholder="New team name" style="max-width:220px">
+          <button class="btn sec" data-act="deptadd">Add</button>`}
       </div>
     </details>
     <div class="frow" style="align-items:flex-end;margin-bottom:14px">
@@ -875,21 +920,18 @@ function hrEmployees() {
       <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
     </div>
     <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team / Role</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th>Actions</th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team / Account type</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th></th></tr></thead><tbody>
     ${shown.length ? shown.map(e => `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)} · ${roleName(e.role)}</td>
       <td class="num">${esc(e.joinDate)}</td>
       <td><select data-act="empf" data-id="${e.id}" data-f="approver1">${apprOpts(e.id, e.approver1, e.approver2)}</select></td>
-      <td><input type="checkbox" data-act="empf" data-id="${e.id}" data-f="twoLevel" ${e.twoLevel ? "checked" : ""}></td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
+      <td><input type="checkbox" data-act="empf" data-id="${e.id}" data-f="twoLevel" ${e.twoLevel ? "checked" : ""} ${e.approver1 ? "" : "disabled title=\"Needs a Level 1 approver first\""}></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel && e.approver1 ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
       <td class="num"><input type="number" step="0.5" min="0" value="${e.annualBase ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase"></td>
-      <td><div class="actions" style="margin:0">
-        <button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button>
-        <button class="btn ghost" style="padding:5px 10px" data-act="oilopen" data-id="${e.id}">+ OIL</button>
-        <button class="btn bad" style="padding:5px 10px" data-act="offopen" data-id="${e.id}">Offboard</button>
-      </div></td>
+      <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
     </tr>`).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
+    <p class="meta" style="margin-top:8px">Off-in-lieu credits and one-off corrections live in <b>Ledger & adjustments</b>. Offboarding is inside <b>Edit</b> (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Joined</th><th>Last working day</th></tr></thead><tbody>
       ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${esc(e.joinDate)}</td><td class="num">${esc(e.lastDay || "—")}</td></tr>`).join("")}
@@ -905,7 +947,8 @@ function empModal() {
       <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <div class="frow">
       <div class="field"><label>Name</label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
-      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}"></div>
+      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
+        ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>` : ""}</div>
     </div>
     <div class="frow">
       <div class="field"><label>Team / department</label><select data-f="em.dept">
@@ -918,21 +961,28 @@ function empModal() {
       <div class="field"><label>Gender</label><select data-f="em.gender">
         <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
         <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
-      <div class="field"><label>Role</label><select data-f="em.role">
-        ${["employee", "approver", "hr", "admin"].map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select></div>
+      <div class="field"><label>Account type</label><select data-f="em.role">
+        ${["employee", "approver", "hr", "admin"].map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
+        <span class="hint">System permissions only. Job titles like “Managing Director” go in Position.</span></div>
       <div class="field"><label>Join date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
     </div>
     <div class="frow">
       <div class="field"><label>Level 1 approver</label><select data-f="em.approver1">${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
-      <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" data-f="em.twoLevel" ${f.twoLevel ? "checked" : ""}> 2-level</label></div>
-      <div class="field"><label>Level 2 approver</label><select data-f="em.approver2" ${f.twoLevel ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select></div>
+      <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" data-f="em.twoLevel" ${f.twoLevel ? "checked" : ""} ${f.approver1 ? "" : "disabled"}> 2-level</label></div>
+      <div class="field"><label>Level 2 approver</label><select data-f="em.approver2" ${f.twoLevel && f.approver1 ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select></div>
     </div>
+    ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No Level 1 approver = leave is auto-approved (e.g. Managing Director), so 2-level routing is not applicable.</p>`}
     <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}"></div>
-    ${isAdd ? `<div class="callout acc">This year's annual leave will be credited automatically: <b>${fmtD(calc.days)} day(s)</b> — ${esc(calc.note)}.<br>Sick 14 / Hospitalisation 60 / Childcare 6 / Compassionate 3 / Marriage 3 are credited at standard entitlements.</div>` : `<div class="callout acc">Changing the base affects future annual grants only; use Ledger & adjustments for corrections this year.</div>`}
+    ${isAdd ? `<div class="callout acc">This year's annual leave will be credited automatically: <b>${fmtD(calc.days)} day(s)</b> — ${esc(calc.note)}.<br>Other leave types are credited at their standard entitlements (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base affects future annual grants only; use Ledger & adjustments for corrections this year.</div>`}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
-    </div></div></div>`;
+    </div>
+    ${!isAdd ? `<div class="dangerzone">
+      <h4>Offboarding</h4>
+      <p>Settle ${esc(f.name)}'s remaining leave (encash or clear), withdraw pending applications and deactivate the account. History is kept.</p>
+      <button class="btn bad" data-act="offopen" data-id="${m.id}">Offboard ${esc(f.name)}…</button>
+    </div>` : ""}</div></div>`;
 }
 function oilModal() {
   const m = vp.oilModal, e = emp(m.empId);
@@ -968,36 +1018,80 @@ function offModal() {
 function hrTypes() {
   return `<div class="card">
     <div class="callout acc" style="margin-bottom:14px">Leave types are <b>configuration, not code</b>: when policy changes (e.g. Shared Parental Leave increases to 10 weeks from Apr 2026), update it here. Default days only affect future annual grants.</div>
-    <div class="tablebox"><table><thead><tr><th>Type</th><th>中文</th><th class="num">Default days / year</th><th>MC required</th><th>Eligibility</th><th>Notes</th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Type</th><th>中文</th><th class="num">Default days / year</th><th>Doctor's cert (MC) needed?</th><th>Who is eligible</th><th>Notes</th></tr></thead><tbody>
     ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
       <td><b>${esc(t.en)}</b></td><td class="meta">${esc(t.zh)}</td>
       <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
-      <td>${t.mc ? "✅" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}${t.noDeduct ? " · no deduction" : ""}</td>
+      <td>${t.mc ? "<b>Required</b> when applying" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}${t.noDeduct ? " · record only, no deduction" : ""}</td>
       <td class="meta">${esc(t.note || "")}</td></tr>`).join("")}</tbody></table></div>
     <p class="meta" style="margin-top:14px">Public holidays are managed in the <b>Company settings</b> tab.</p>
   </div>`;
 }
 function hrSettings() {
   const o = db.org || {};
-  return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px"><b>Nothing about your company is hard-coded.</b> Any small company can use this system: set your name and email domain here, manage teams in the Employees tab, adjust leave types and their quotas in the Leave types tab, and maintain the public-holiday list below.</div>
+  const y = new Date().getFullYear();
+  const phSorted = db.publicHolidays.slice().sort();
+  const thisYear = phSorted.filter(p => p.startsWith(String(y)));
+  const dow = p => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p + "T00:00:00").getDay()];
+  return `<div class="stack">
+  <div class="card"><h3>Company defaults</h3>
+    <div class="callout acc" style="margin:10px 0 14px"><b>Nothing about your company is hard-coded.</b> Set your defaults here once; every form uses them. Teams are managed in the Employees tab, leave quotas in the Leave types tab.</div>
     <div class="frow">
-      <div class="field" style="max-width:280px"><label>Company name (shown everywhere)</label><input type="text" data-act="orgf" data-k="company" value="${esc(o.company || "")}"></div>
-      <div class="field" style="max-width:280px"><label>Email domain (new-employee hint)</label><input type="text" data-act="orgf" data-k="emailDomain" value="${esc(o.emailDomain || "")}" placeholder="company.com"></div>
+      <div class="field" style="max-width:260px"><label>Company name</label><input type="text" data-act="orgf" data-k="company" value="${esc(o.company || "")}">
+        <span class="hint">Shown in the top bar and everywhere else</span></div>
+      <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" data-act="orgf" data-k="emailDomain" value="${esc(o.emailDomain || "")}" placeholder="company.com">
+        <span class="hint">Add employee auto-fills name@this-domain</span></div>
+      <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" data-act="orgf" data-k="defaultAnnualBase" value="${o.defaultAnnualBase ?? 14}">
+        <span class="hint">Pre-filled when adding a new employee</span></div>
     </div>
-    <h3 style="margin-top:18px">Public holidays — excluded automatically when counting leave days</h3>
-    <div class="phchips">${db.publicHolidays.slice().sort().map(p => `<span>${p} <a data-act="phdel" data-d="${p}" style="cursor:pointer;font-weight:700" title="Remove">✕</a></span>`).join("")}</div>
+  </div>
+  <div class="card"><h3>Public holidays — ${thisYear.length} in ${y}</h3>
+    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar.</p>
+    <div class="tablebox" style="max-width:520px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
+      ${phSorted.map(p => `<tr>
+        <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td><td>${esc(db.phNames[p] || "—")}</td>
+        <td><button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}">✕</button></td></tr>`).join("")}
+    </tbody></table></div>
     <div class="actions" style="margin-top:10px">
-      <input type="date" id="newph" style="max-width:180px">
+      <input type="date" id="newph" style="max-width:170px">
+      <input type="text" id="newphname" placeholder="Holiday name, e.g. Vesak Day" style="max-width:240px">
       <button class="btn sec" data-act="phadd">+ Add holiday</button>
     </div>
-  </div>`;
+  </div>
+  <div class="card"><h3>Annual entitlements</h3>
+    <p class="meta" style="margin:4px 0 10px">Run once every 1 January: credits each employee's yearly quota for every leave type (annual leave uses each person's base + service years; new joiners are pro-rated when added).</p>
+    ${vp.grantConfirm ? `<div class="callout warn">This credits <b>${y + 1}</b> entitlements to all ${activeEmps().length} active employees — run it once only, on/after 1 Jan ${y + 1}. Are you sure?
+      <div class="actions"><button class="btn" data-act="grantgo">Yes, grant ${y + 1} entitlements</button><button class="btn sec" data-act="grantcancel">Cancel</button></div></div>`
+    : `<button class="btn sec" data-act="grantask">Grant ${y + 1} annual entitlements…</button>`}
+  </div></div>`;
+}
+/* CSV download helper (Excel-safe: BOM + quoted fields) */
+function csvDownload(filename, rows) {
+  const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+  a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+}
+function hrBalances() {
+  const types = db.leaveTypes.filter(t => !t.noDeduct).sort((a, b) => a.sort - b.sort);
+  const emps = activeEmps();
+  return `<div class="card">
+    <div class="frow" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+      <p class="meta" style="margin:0">Each cell shows <b>days left / entitled this year</b> (pending requests already reserved). Export for payroll or backup (e.g. to your NAS).</p>
+      <button class="btn sec" data-act="balcsv">⬇ Export CSV</button>
+    </div>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th>${types.map(t => `<th class="num" title="${esc(t.en)}">${esc(t.en.split(" ")[0])}</th>`).join("")}</tr></thead><tbody>
+    ${emps.map(e => `<tr>
+      <td><b>${esc(e.name)}</b></td><td class="meta">${esc(e.dept)}</td>
+      ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num">${fmtD(b.avail)} / ${fmtD(b.granted)}</td>`; }).join("")}
+    </tr>`).join("")}</tbody></table></div></div>`;
 }
 function hrLedger() {
   const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
   vp.ledForm = f;
   const led = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
   return `<div class="stack"><div class="card"><h3>Manual entry (off-in-lieu credit / adjustment / expiry)</h3>
+    <p class="meta" style="margin:4px 0 10px">Use this to <b>credit off-in-lieu (OIL)</b> when someone works a weekend or public holiday, or to make one-off corrections. Positive = credit days, negative = deduct.</p>
     <div class="frow">
       <div class="field"><label>Employee</label><select data-f="led.empId">${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
       <div class="field"><label>Leave type</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
@@ -1035,11 +1129,16 @@ document.addEventListener("submit", ev => {
 });
 
 /* ============ Event delegation ============ */
+// Text selection guard: dragging from an input and releasing over the backdrop
+// fires a click on .modalback. Only close when the press ALSO started there.
+let pressOnBackdrop = false;
+document.addEventListener("mousedown", ev => { pressOnBackdrop = ev.target.classList && ev.target.classList.contains("modalback"); });
+
 document.addEventListener("click", async ev => {
   const el = ev.target.closest("[data-act]");
   if (!el) return;
   const act = el.dataset.act, id = el.dataset.id;
-  if (act === "closemodal" && ev.target !== el && el.classList.contains("modalback")) return;
+  if (act === "closemodal" && el.classList.contains("modalback") && (ev.target !== el || !pressOnBackdrop)) return;
   if (act === "dologin") { ev.preventDefault(); return doLogin(); }
   switch (act) {
     case "logout": signOut(); break;
@@ -1052,18 +1151,41 @@ document.addEventListener("click", async ev => {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; render(); break;
-    case "empadd": vp.empModal = { mode: "add", id: null, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: 14 } }; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; render(); break;
+    case "pwopen": vp.pwModal = true; render(); break;
+    case "pwsave": {
+      const p1 = document.getElementById("pw1")?.value || "", p2 = document.getElementById("pw2")?.value || "";
+      if (p1.length < 8) return toast("Password must be at least 8 characters");
+      if (p1 !== p2) return toast("The two passwords don't match");
+      const { error } = await sb.auth.updateUser({ password: p1 });
+      if (error) return rpcErr(error);
+      delete vp.pwModal; render(); toast("Password changed — use the new one next time you sign in");
+      break;
+    }
+    case "viewatt": {
+      const { data, error } = await sb.storage.from("attachments").createSignedUrl(el.dataset.path, 60);
+      if (error || !data?.signedUrl) return rpcErr(error || { message: "Could not open the attachment" });
+      window.open(data.signedUrl, "_blank");
+      break;
+    }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase || 14 } }; render(); break;
     case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
       if (db.departments.some(d => d.toLowerCase() === name.toLowerCase())) return toast("This team already exists");
-      const { error } = await sb.from("departments").insert({ name });
-      if (error) return rpcErr(error);
-      vp.teamsOpen = true; await reload(); toast("Team \"" + name + "\" added");
+      vp.teamConfirm = name; vp.teamsOpen = true; render();
       break;
     }
+    case "deptconfirm": {
+      const name = vp.teamConfirm;
+      if (!name) break;
+      const { error } = await sb.from("departments").insert({ name });
+      if (error) return rpcErr(error);
+      delete vp.teamConfirm; vp.teamsOpen = true; await reload(); toast("Team \"" + name + "\" added successfully");
+      break;
+    }
+    case "deptcancel": delete vp.teamConfirm; vp.teamsOpen = true; render(); break;
     case "deptdel": {
       const name = el.dataset.name;
       if (db.employees.some(e => e.active !== false && e.dept === name)) return toast("This team still has members");
@@ -1123,7 +1245,7 @@ document.addEventListener("click", async ev => {
       const nm = emp(m.empId).name; delete vp.oilModal; await reload(); toast("Credited " + fmtD(Number(m.days)) + " day(s) OIL to " + nm);
       break;
     }
-    case "offopen": vp.offModal = { empId: id, lastDay: todayStr(), mode: "encash" }; render(); break;
+    case "offopen": delete vp.empModal; vp.offModal = { empId: id, lastDay: todayStr(), mode: "encash" }; render(); break;
     case "offsave": {
       const m = vp.offModal, e = emp(m.empId);
       if (e.id === me.id) return toast("You cannot offboard yourself");
@@ -1156,12 +1278,42 @@ document.addEventListener("click", async ev => {
       break;
     }
     case "phadd": {
-      const inp = document.getElementById("newph"), d = inp?.value;
+      const d = document.getElementById("newph")?.value;
+      const nm = (document.getElementById("newphname")?.value || "").trim();
       if (!d) return toast("Pick a date first");
+      if (!nm) return toast("Please type the holiday's name (e.g. Vesak Day)");
       if (db.publicHolidays.includes(d)) return toast("Already in the list");
-      const { error } = await sb.from("public_holidays").insert({ holiday: d });
+      const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm });
       if (error) return rpcErr(error);
       await reload(); toast("Holiday added");
+      break;
+    }
+    case "balcsv": {
+      const types = db.leaveTypes.filter(t => !t.noDeduct).sort((a, b) => a.sort - b.sort);
+      const rows = [["Employee", "Team", ...types.flatMap(t => [t.en + " left", t.en + " entitled"])]];
+      for (const e of activeEmps()) rows.push([e.name, e.dept, ...types.flatMap(t => { if (!eligible(t, e)) return ["n/a", "n/a"]; const b = bal(e.id, t.code); return [fmtD(b.avail), fmtD(b.granted)]; })]);
+      csvDownload("leave-balances-" + todayStr() + ".csv", rows);
+      toast("Balances exported"); break;
+    }
+    case "reccsv": {
+      const rows = [["Employee", "Team", "Leave type", "Start", "End", "Days", "Status", "Reason", "Submitted"]];
+      const fset = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
+      for (const a of db.applications) {
+        const e = emp(a.empId); if (!e) continue;
+        if (fset !== "all" && a.status !== fset) continue;
+        if (q && !e.name.toLowerCase().includes(q) && !e.email.toLowerCase().includes(q)) continue;
+        rows.push([e.name, e.dept, (lt(a.type) || {}).en || a.type, a.start, a.end, fmtD(a.days), stName(a.status), a.reason, fmtTs(a.createdAt)]);
+      }
+      csvDownload("leave-records-" + todayStr() + ".csv", rows);
+      toast("Records exported"); break;
+    }
+    case "grantask": vp.grantConfirm = true; render(); break;
+    case "grantcancel": delete vp.grantConfirm; render(); break;
+    case "grantgo": {
+      const yr = new Date().getFullYear() + 1;
+      const { data, error } = await sb.rpc("grant_annual_entitlements", { p_year: yr });
+      if (error) return rpcErr(error);
+      delete vp.grantConfirm; await reload(); toast(`Granted ${yr} entitlements — ${data} ledger entries created`);
       break;
     }
     case "phdel": { const { error } = await sb.from("public_holidays").delete().eq("holiday", el.dataset.d); if (error) return rpcErr(error); await reload(); toast("Holiday removed"); break; }
@@ -1189,7 +1341,7 @@ document.addEventListener("change", async ev => {
     const patch = {};
     if (f === "annualBase") patch.annual_base = Number(el.value) || 14;
     else if (f === "twoLevel") { patch.two_level = el.checked; if (!el.checked) patch.approver2 = null; }
-    else if (f === "approver1") patch.approver1 = el.value || null;
+    else if (f === "approver1") { patch.approver1 = el.value || null; if (!el.value) { patch.two_level = false; patch.approver2 = null; } }
     else if (f === "approver2") patch.approver2 = el.value || null;
     if ((patch.two_level ?? e.twoLevel) && (patch.approver1 ?? e.approver1) && (patch.approver1 ?? e.approver1) === (patch.approver2 ?? e.approver2)) {
       return toast("Level 2 approver must differ from level 1");
@@ -1206,7 +1358,8 @@ document.addEventListener("change", async ev => {
     return;
   }
   if (el.dataset.act === "orgf") {
-    const patch = {}; patch[el.dataset.k === "company" ? "company_name" : "email_domain"] = el.value.trim();
+    const col = { company: "company_name", emailDomain: "email_domain", defaultAnnualBase: "default_annual_base" }[el.dataset.k];
+    const patch = {}; patch[col] = col === "default_annual_base" ? (Number(el.value) || 14) : el.value.trim();
     const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
     if (error) return rpcErr(error);
     await reload(); toast("Company settings saved");
@@ -1231,6 +1384,7 @@ document.addEventListener("change", async ev => {
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
+    if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
     if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) render(); // refresh pro-rate preview / dependent selects / new-team field
     return;
   }
@@ -1238,7 +1392,12 @@ document.addEventListener("change", async ev => {
   if (f.startsWith("off.") && vp.offModal) { vp.offModal[f.slice(4)] = el.value; return; }
   if (view === "apply" && vp.form) {
     if (f === "reason") { vp.form.reason = el.value; return; } // synced live via input; skipping re-render here keeps the submit click from being swallowed
-    if (f === "attfile") { vp.form.att = el.files && el.files[0] ? el.files[0].name : ""; render(); return; }
+    if (f === "attfile") {
+      const file = el.files && el.files[0];
+      vp.form._file = file || null;               // real File object, uploaded on submit
+      vp.form.att = file ? file.name : "";
+      render(); return;
+    }
     if (f === "sh" || f === "eh") vp.form[f] = el.checked; else vp.form[f] = el.value;
     if (f === "start" && vp.form.end < vp.form.start) vp.form.end = vp.form.start;
     render();
@@ -1262,7 +1421,18 @@ document.addEventListener("input", ev => {
     return;
   }
   // Sync modal text fields live so the save click (which blurs the field) never loses input
-  if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") vp.empModal.form[f.slice(3)] = el.value;
+  if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") {
+    vp.empModal.form[f.slice(3)] = el.value;
+    if (f === "em.email") vp.empModal.emailTouched = true;
+    if (f === "em.name" && vp.empModal.mode === "add" && !vp.empModal.emailTouched) {
+      // Auto-suggest email from the name (ASCII only — Chinese names are typed manually)
+      const slug = el.value.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const auto = slug ? slug + "@" + (db.org?.emailDomain || "company.com") : "";
+      vp.empModal.form.email = auto;
+      const em = document.querySelector('input[data-f="em.email"]');
+      if (em) em.value = auto;
+    }
+  }
   if (vp.oilModal && f.startsWith("oil.")) vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
   if (vp.offModal && f.startsWith("off.") && el.type !== "radio") vp.offModal[f.slice(4)] = el.value;
 });

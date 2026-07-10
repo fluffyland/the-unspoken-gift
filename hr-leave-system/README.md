@@ -9,7 +9,8 @@
 
 | 文件 | 用途 |
 |---|---|
-| `index.html` | **演示版应用**（单文件、免安装）。浏览器直接打开即可用，数据存在本浏览器，邮件为模拟记录。 |
+| `app.html` | **生产版应用**（部署在 https://fluffyland.github.io/hrleavesystem/ ）。真实登录 + Supabase 数据库,持续维护更新。 |
+| `index.html` | 演示版（单文件、免安装,数据存浏览器）。**已冻结**,新功能只进 app.html。 |
 | `supabase/schema.sql` | 正式版数据库底座：7 张表、余额视图、状态机存储过程、RLS 权限、年度入账函数。在 Supabase SQL Editor 执行一次即可。 |
 | `supabase/functions/send-notification/index.ts` | 邮件 Edge Function：监听状态转移事件，用 Resend 发真实邮件。 |
 | `SETUP.md` | 正式版部署指南（一步步照做）。 |

@@ -47,21 +47,22 @@ create table if not exists leave_types (
   note                text
 );
 
+-- 天数按 MOM 现行政策(mom.gov.sg,2026-07 核对);注释英文(界面直接展示)
 insert into leave_types (code,name_zh,name_en,requires_attachment,gender_eligibility,no_deduct,default_days,carry_over_cap,sort,note) values
- ('annual','年假','Annual Leave',false,null,false,14,7,1,'法定最低第1年7天逐年+1至14；公司可配更高'),
- ('sick','病假（门诊）','Sick Leave',true,null,false,14,null,2,'服务满3个月才有资格'),
- ('hosp','住院假','Hospitalisation Leave',true,null,false,60,null,3,'MOM 规定与门诊合计60天'),
- ('childcare','育儿假','Childcare Leave',false,null,false,6,null,4,'子女<7岁且为公民'),
- ('oil','补休','Off-in-Lieu',false,null,false,0,null,5,'由加班入账获得'),
- ('maternity','产假','Maternity Leave',false,'F',false,112,null,6,'16周 GPML'),
- ('paternity','陪产假','Paternity Leave',false,'M',false,28,null,7,'4周 GPPL'),
- ('shared_parental','共享育儿假','Shared Parental Leave',false,null,false,42,null,8,'2026-04 起增至10周，届时改 default_days'),
- ('infant','无薪婴儿照顾假','Unpaid Infant Care',false,null,false,6,null,9,null),
- ('adoption','领养假','Adoption Leave',false,'F',false,84,null,10,'12周'),
- ('compassionate','恩恤假','Compassionate Leave',false,null,false,3,null,11,'公司福利'),
- ('marriage','婚假','Marriage Leave',false,null,false,3,null,12,'公司福利'),
- ('ns','战备军人假','NS / Reservist',false,'M',true,0,null,13,'不扣配额，仅记录'),
- ('unpaid','无薪假','Unpaid Leave',false,null,true,0,null,14,null)
+ ('annual','年假','Annual Leave',false,null,false,14,7,1,'Statutory minimum: 7 days in year 1, +1 per year up to 14. Company base is configurable per employee.'),
+ ('sick','病假（门诊）','Sick Leave',true,null,false,14,null,2,'Outpatient. Eligible after 3 months of service (MOM).'),
+ ('hosp','住院假','Hospitalisation Leave',true,null,false,60,null,3,'MOM: 60 days per year, inclusive of the 14 outpatient sick-leave days.'),
+ ('childcare','育儿假','Childcare Leave',false,null,false,6,null,4,'Child under 7 and a SG citizen: 6 days/parent/year. Extended childcare: +2 days if the child is 7-12.'),
+ ('oil','补休','Off-in-Lieu',false,null,false,0,null,5,'Credited via Ledger & adjustments when someone works overtime or on a public holiday.'),
+ ('maternity','产假','Maternity Leave',false,'F',false,112,null,6,'16 weeks (Government-Paid Maternity Leave).'),
+ ('paternity','陪产假','Paternity Leave',false,'M',false,28,null,7,'4 weeks (Government-Paid Paternity Leave), mandatory for children born on/after 1 Apr 2025.'),
+ ('shared_parental','共享育儿假','Shared Parental Leave',false,null,false,70,null,8,'10-week shared pool for child born on/after 1 Apr 2026 (6 weeks if born 1 Apr 2025 - 31 Mar 2026)'),
+ ('infant','无薪婴儿照顾假','Unpaid Infant Care',false,null,false,6,null,9,'Unpaid. Child under 2: 6 days per parent per year.'),
+ ('adoption','领养假','Adoption Leave',false,'F',false,84,null,10,'12 weeks (Government-Paid Adoption Leave).'),
+ ('compassionate','恩恤假','Compassionate Leave',false,null,false,3,null,11,'Company benefit - not required by law.'),
+ ('marriage','婚假','Marriage Leave',false,null,false,3,null,12,'Company benefit - not required by law.'),
+ ('ns','战备军人假','NS / Reservist',false,'M',true,0,null,13,'Statutory for NSmen. Recorded only - no quota deduction.'),
+ ('unpaid','无薪假','Unpaid Leave',false,null,true,0,null,14,'Recorded only - no quota deduction.')
 on conflict (code) do nothing;
 
 -- ---------- 3. 公共假期（请假折算工作日时排除） ----------
@@ -568,7 +569,8 @@ create table if not exists org_settings (
   id           int primary key default 1 check (id = 1),  -- 单行表
   company_name text not null default 'My Company',
   email_domain text,
-  country      text not null default 'Singapore'
+  country      text not null default 'Singapore',
+  default_annual_base numeric(5,1) not null default 14    -- Add employee 表单的年假基数默认值
 );
 insert into org_settings (id, company_name, email_domain)
 values (1, 'Shanghai Uniforms', 'shanghai-uniforms.com')
