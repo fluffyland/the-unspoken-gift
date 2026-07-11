@@ -375,7 +375,8 @@ async function loadMe() {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) { me = null; return false; }
   const { data, error } = await sb.from("employees").select("*").eq("auth_user_id", user.id).maybeSingle();
-  if (error || !data) { me = { unlinked: true, email: user.email }; return false; }
+  // No row = never linked OR deactivated (v3 RLS hides inactive rows); treat the same
+  if (error || !data || data.active === false) { me = { unlinked: true, email: user.email }; return false; }
   me = mapEmp(data);
   return true;
 }
@@ -508,7 +509,9 @@ function loginPage() {
   return `<div class="login"><div class="loginbox">
     <h1>LeaveDesk</h1>
     <p class="tag">Leave management · sign in with your work email</p>
-    ${unlinked ? `<div class="callout warn" style="margin-bottom:14px">You're signed in as <b>${esc(me.email)}</b>, but this email isn't linked to any employee record yet. Ask HR to add you (same email) in the system, then sign in again.
+    ${unlinked ? `<div class="callout warn" style="margin-bottom:14px">You're signed in as <b>${esc(me.email)}</b>, but this account isn't linked to an <b>active</b> employee record.
+      New joiner? Ask HR to add you (same email), then sign in again.
+      Former employee? This account has been deactivated.
       <div class="actions"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
     <form class="acclist" id="loginform" autocomplete="on">
       <div class="field"><label>Work email</label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
@@ -951,7 +954,8 @@ function empModal() {
     <div class="frow">
       <div class="field"><label>Name</label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
       <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
-        ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>` : ""}</div>
+        ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>`
+                : `<span class="hint">⚠ Changing this does NOT change their sign-in email — that stays as created in Supabase Auth.</span>`}</div>
     </div>
     <div class="frow">
       <div class="field"><label>Team / department</label><select data-f="em.dept">
@@ -1256,7 +1260,8 @@ document.addEventListener("click", async ev => {
       if (e.id === me.id) return toast("You cannot offboard yourself");
       const { error } = await sb.rpc("offboard_employee", { p_emp: m.empId, p_last_day: m.lastDay, p_mode: m.mode });
       if (error) return rpcErr(error);
-      delete vp.offModal; await reload(); toast(e.name + " offboarded — balances settled, account deactivated");
+      delete vp.offModal; delete vp.empModal; await reload();
+      toast(e.name + " offboarded — balances settled. Also delete their login: Supabase → Authentication → Users");
       break;
     }
     case "submit": doSubmit(); break;

@@ -152,16 +152,27 @@ select l.emp_id, l.leave_type,
                    and a.status = 'pending'), 0)          as available
 from leave_ledger l
 group by l.emp_id, l.leave_type;
+-- 以调用者身份执行:底层账本的 RLS(本人/HR)自动生效;
+-- security definer 存储过程内部查询以属主执行,不受影响
+alter view leave_balances set (security_invoker = true);
+revoke select on leave_balances from anon;
 
 -- ---------- 9. 身份辅助函数 ----------
+-- 信任锚点:调用者作为【在职】员工的身份(加 active → 离职即服务器层登出)
 create or replace function current_emp_id() returns uuid
 language sql stable security definer set search_path = public as
-$$ select id from employees where auth_user_id = auth.uid() $$;
+$$ select id from employees where auth_user_id = auth.uid() and active $$;
 
 create or replace function is_hr() returns boolean
 language sql stable security definer set search_path = public as
 $$ select exists (select 1 from employees
-                  where auth_user_id = auth.uid() and role in ('hr','admin')) $$;
+                  where auth_user_id = auth.uid() and role in ('hr','admin') and active) $$;
+
+-- "是本公司在职员工吗?"——所有全员可读数据的统一门禁
+-- ("已登录"不是信任边界:anon key 公开,任何人都可能持有登录态)
+create or replace function is_staff() returns boolean
+language sql stable security definer set search_path = public as
+$$ select current_emp_id() is not null $$;
 
 -- ---------- 10. 工作日折算（排除周末 + 公共假期，支持首尾半天） ----------
 create or replace function working_days(p_start date, p_end date, p_sh boolean, p_eh boolean)
@@ -404,10 +415,10 @@ alter table applications       enable row level security;
 alter table approval_steps     enable row level security;
 alter table application_events enable row level security;
 
--- 员工名录/假期类型/公共假期：登录即可读（显示姓名、下拉选项需要）
-create policy emp_read   on employees          for select to authenticated using (true);
-create policy lt_read    on leave_types        for select to authenticated using (true);
-create policy ph_read    on public_holidays    for select to authenticated using (true);
+-- 员工名录/假期类型/公共假期：仅在职员工可读（"登录"不构成信任边界）
+create policy emp_read   on employees          for select to authenticated using (is_staff());
+create policy lt_read    on leave_types        for select to authenticated using (is_staff());
+create policy ph_read    on public_holidays    for select to authenticated using (is_staff());
 -- 员工档案与配置：只有 HR 能改
 create policy emp_write  on employees for all to authenticated
   using (is_hr()) with check (is_hr());
@@ -475,13 +486,15 @@ begin
   return n;
 end $$;
 
--- ---------- 14. 全员请假日历（只暴露 姓名/部门/日期/状态，全公司可读） ----------
+-- ---------- 14. 全员请假日历（只暴露 姓名/部门/日期/状态，在职员工可读） ----------
 create or replace view leave_calendar as
 select e.name, e.dept, a.start_date, a.end_date,
        case when a.status = 'pending' then 'pending' else 'approved' end as status
 from applications a join employees e on e.id = a.emp_id
-where a.status in ('pending','approved','cancel_requested') and e.active;
+where a.status in ('pending','approved','cancel_requested') and e.active
+  and is_staff();  -- 属主执行(要展示全员),但只对在职员工放行
 grant select on leave_calendar to authenticated;
+revoke select on leave_calendar from anon;
 
 -- ---------- 15. 注册自动关联员工档案（按邮箱匹配，无需手工填 UUID） ----------
 create or replace function link_employee_on_signup()
@@ -560,7 +573,7 @@ end $$;
 alter table departments enable row level security;
 drop policy if exists dept_read  on departments;
 drop policy if exists dept_write on departments;
-create policy dept_read  on departments for select to authenticated using (true);
+create policy dept_read  on departments for select to authenticated using (is_staff());
 create policy dept_write on departments for all    to authenticated
   using (is_hr()) with check (is_hr());
 
@@ -579,6 +592,6 @@ on conflict (id) do nothing;
 alter table org_settings enable row level security;
 drop policy if exists org_read  on org_settings;
 drop policy if exists org_write on org_settings;
-create policy org_read  on org_settings for select to authenticated using (true);
+create policy org_read  on org_settings for select to authenticated using (is_staff());
 create policy org_write on org_settings for update to authenticated
   using (is_hr()) with check (is_hr());

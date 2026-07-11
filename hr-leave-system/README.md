@@ -55,6 +55,31 @@
   下拉选择，也可当场 "＋ New team…"；职位（job title）自由填写
 - **Leave types**：假期种类和天数全部可配置
 
+## Security & operations（2026-07 审计后）
+
+**第一性原理:信任锚点 = 登录账号 ↔ 在职员工档案。**"已登录"不构成边界
+（anon key 是公开的），所以一切权限判断都建立在 `current_emp_id()`
+（=调用者作为在职员工的身份）之上，由数据库强制。
+
+已落实：
+- Dashboard 关闭自助注册（第一道门）+ 全部只读策略要求 `is_staff()`（第二道门）
+- `leave_balances` 视图 `security_invoker`（修复视图绕过 RLS 的余额泄漏）
+- 离职员工：`current_emp_id()` 要求 `active` → 服务器层自动登出；前端同步提示
+- 防休眠：`keepalive.yml`（GitHub Actions 每 2 天探活一次数据库）
+
+HR 日常手册：
+- **员工忘记密码**：Supabase Dashboard → Authentication → Users → 该员工 →
+  Generate link（recovery）→ 把链接用 WhatsApp 发给员工，点开即可设新密码
+- **办离职**：系统里 Edit → Offboard 结清假期后，再到 Authentication → Users
+  把该员工的登录 **Delete**
+- **新员工**：系统里 Add employee（自动入账年假）→ Authentication → Users →
+  Add user（同一邮箱 + 临时密码 + 勾 Auto Confirm）
+
+待办（按时间）：
+- **2026 年 12 月前**：年末结转/清零策略（`carry_over_cap` 字段已备好未启用）
+- 病假 3 个月等待期（MOM 规定，系统暂不强制）
+- 审批人休假时的代理审批
+
 ## 核心设计（详见 DESIGN.md）
 
 1. **假期是账本**：不存可变余额，余额 = 交易之和，天然可审计

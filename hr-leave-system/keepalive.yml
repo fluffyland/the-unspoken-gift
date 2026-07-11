@@ -1,0 +1,18 @@
+# Keeps the free-tier Supabase database awake (it pauses after 7 idle days).
+# Put this file in the hrleavesystem repo at: .github/workflows/keepalive.yml
+# Runs every 2 days + can be run manually from the Actions tab.
+# The key below is the PUBLIC anon key (already in the website source) — safe here.
+name: Keep database awake
+on:
+  schedule:
+    - cron: "0 1 */2 * *"   # every 2 days at 01:00 UTC (09:00 SGT)
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read one row (harmless, keeps the project active)
+        run: |
+          curl -sSf "https://aypyolzkdupkpefpxius.supabase.co/rest/v1/leave_types?select=code&limit=1" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5cHlvbHprZHVwa3BlZnB4aXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDM0MTMsImV4cCI6MjA5OTA3OTQxM30.hoRS_j8yBTJkcQBG_IZRuVgDD06ZGCRam8lqz923f6s" \
+            > /dev/null && echo "Database pinged OK"
