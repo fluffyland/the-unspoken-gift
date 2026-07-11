@@ -113,6 +113,10 @@ create table if not exists applications (
   updated_at  timestamptz not null default now()
 );
 create index if not exists idx_app_emp on applications (emp_id, status);
+-- 同一员工同类型同起止日期在活跃状态下唯一：堵住并发/双击的重复提交（前端另有防抖）
+create unique index if not exists uniq_active_application
+  on applications (emp_id, leave_type, start_date, end_date)
+  where status in ('pending','approved','cancel_requested');
 
 -- ---------- 6. 审批链步骤（两级审批的载体；一级 = 只有一行） ----------
 create table if not exists approval_steps (
@@ -287,8 +291,13 @@ language sql stable security definer set search_path = public as $$
   join employees e on e.id = o.emp_id, app a
   where o.id <> a.id and o.emp_id in (select id from grp)
     and o.status in ('pending','approved','cancel_requested')
-    and not (o.end_date < a.start_date or o.start_date > a.end_date);
+    and not (o.end_date < a.start_date or o.start_date > a.end_date)
+    -- 鉴权：只有 HR 或该申请链上的审批人能看到结果；其余调用者得到空集（不泄露）
+    and (is_hr() or exists (select 1 from approval_steps s
+                            where s.application_id = p_app and s.approver_id = current_emp_id()));
 $$;
+revoke execute on function overlapping_team_leave(uuid) from anon, public;
+grant  execute on function overlapping_team_leave(uuid) to authenticated;
 
 -- 审批人看申请人余额：RLS 不让非 HR 审批人读别人的账本，这个 definer 函数
 -- 只返回一个"可用天数"数字，且仅在调用者是 HR 或该员工某申请的链上审批人时放行。
@@ -313,11 +322,13 @@ returns void language plpgsql security definer set search_path = public as $$
 declare me_id uuid := current_emp_id(); a applications%rowtype; s approval_steps%rowtype;
         t leave_types%rowtype; nxt approval_steps%rowtype; has_overlap boolean;
 begin
+  if me_id is null then raise exception '未找到员工档案'; end if;
   select * into a from applications where id = p_app for update;
   if a.id is null or a.status <> 'pending' then raise exception '申请不在待审批状态'; end if;
   select * into s from approval_steps
     where application_id = p_app and step_order = a.current_step;
-  if s.approver_id <> me_id then raise exception '你不是当前节点的审批人'; end if;
+  -- is distinct from：me_id/approver_id 任一为 NULL 时仍能正确判否（裸 <> 会得 NULL 而跳过）
+  if s.approver_id is distinct from me_id then raise exception '你不是当前节点的审批人'; end if;
   if p_action in ('reject','return') and coalesce(trim(p_comment),'') = '' then
     raise exception '拒绝/退回必须填写原因'; end if;
 
@@ -415,8 +426,10 @@ alter table applications       enable row level security;
 alter table approval_steps     enable row level security;
 alter table application_events enable row level security;
 
--- 员工名录/假期类型/公共假期：仅在职员工可读（"登录"不构成信任边界）
-create policy emp_read   on employees          for select to authenticated using (is_staff());
+-- 假期类型/公共假期：仅在职员工可读（"登录"不构成信任边界）
+-- 员工表按需知：HR 看全部；每人可读自己的整行（loadMe 需要）；其余全员走下方目录视图。
+create policy emp_read   on employees          for select to authenticated
+  using (is_hr() or auth_user_id = auth.uid());
 create policy lt_read    on leave_types        for select to authenticated using (is_staff());
 create policy ph_read    on public_holidays    for select to authenticated using (is_staff());
 -- 员工档案与配置：只有 HR 能改
@@ -426,6 +439,16 @@ create policy lt_write   on leave_types for all to authenticated
   using (is_hr()) with check (is_hr());
 create policy ph_write   on public_holidays for all to authenticated
   using (is_hr()) with check (is_hr());
+
+-- 员工目录视图：全员可读，但只暴露渲染必需的非敏感列
+-- （不含 auth_user_id / annual_base / join_date / last_working_day / gender）。
+-- 属主执行 + is_staff() 门；含离职者以便历史审批人姓名可解析。前端非 HR 读这里。
+create or replace view employees_directory as
+select id, name, email, title, dept, role, approver1, approver2, two_level, active
+from employees
+where is_staff();
+grant  select on employees_directory to authenticated;
+revoke select on employees_directory from anon;
 
 -- 账本：本人可读自己的，HR 可读可写（手工调整）；扣减/返还走 security definer 过程
 create policy ledger_read on leave_ledger for select to authenticated
@@ -466,7 +489,9 @@ create or replace function grant_annual_entitlements(p_year int)
 returns int language plpgsql security definer set search_path = public as $$
 declare n int := 0; r record; amt numeric;
 begin
-  if auth.uid() is not null and not is_hr() then raise exception '只有 HR 能执行年度入账'; end if;
+  -- 白名单门禁：只有在职 HR（经 API）或 SQL Editor 超级用户可执行。
+  -- （旧版 `if auth.uid() is not null and not is_hr()` 会被 anon(auth.uid()=NULL) 绕过。）
+  if not is_hr() and session_user <> 'postgres' then raise exception '只有 HR 能执行年度入账'; end if;
   for r in
     select e.id as emp_id, t.code, t.default_days
     from employees e cross join leave_types t
@@ -485,6 +510,8 @@ begin
   end loop;
   return n;
 end $$;
+revoke execute on function grant_annual_entitlements(int) from anon, public;
+grant  execute on function grant_annual_entitlements(int) to authenticated;
 
 -- ---------- 14. 全员请假日历（只暴露 姓名/部门/日期/状态，在职员工可读） ----------
 create or replace view leave_calendar as

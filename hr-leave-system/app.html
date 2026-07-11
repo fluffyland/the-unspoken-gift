@@ -276,6 +276,8 @@ const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dep
   twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
   gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days), sort: r.sort, note: r.note || "" });
+// Numeric-with-default that keeps a real 0 (unlike `Number(x) || d`); blank/invalid → default.
+const numOr = (v, d) => { const n = Number(v); return (v === "" || v == null || !Number.isFinite(n)) ? d : n; };
 /* DB action codes → display strings the history/timeline renderers expect */
 const mapAction = c => ({
   submitted: "Submitted", resubmitted: "Resubmitted",
@@ -286,8 +288,11 @@ const mapAction = c => ({
 }[c] || c);
 
 async function loadAll() {
+  // 按需知：HR 读整表（含 annual_base/join_date 等敏感列供 Console 编辑）；
+  // 其余人只读目录视图（姓名/部门/职位/审批链等非敏感列）。
+  const isHR = me && (me.role === "hr" || me.role === "admin");
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
-    sb.from("employees").select("*"),
+    (isHR ? sb.from("employees").select("*") : sb.from("employees_directory").select("*")),
     sb.from("leave_types").select("*"),
     sb.from("public_holidays").select("holiday,name"),
     sb.from("departments").select("name"),
@@ -303,7 +308,7 @@ async function loadAll() {
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
-    defaultAnnualBase: Number(o.default_annual_base) || 14 };
+    defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14 };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -627,7 +632,7 @@ function vApply() {
       <div class="field"><label>Reason</label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
       <div class="field"><label>Attachment${t.mc ? " (photo or PDF of your MC — required)" : " (optional)"}</label>
-        <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop())}</span>` : ""}
+        <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
         <span class="hint">Uploads to secure storage — only you, your approver and HR can view it</span></div>
       <div class="actions">
         <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
@@ -637,6 +642,7 @@ function vApply() {
 }
 function lastReturnComment(a) { const s = [...a.steps].reverse().find(x => x.status === "returned"); return s ? s.comment : ""; }
 
+let submitting = false; // guards against double-click / slow-network duplicate submits
 async function doSubmit() {
   const f = vp.form, t = lt(f.type);
   const days = wdCount(f.start, f.end, f.sh, f.eh);
@@ -646,22 +652,30 @@ async function doSubmit() {
   const overlap = db.applications.some(a => a.empId === me.id && a.id !== vp.editId &&
     ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
   if (overlap) return toast("These dates overlap an existing application");
-  const editId = vp.editId;
-  // Upload the attachment to private storage first; the application stores its path.
-  let att = f.att || "";
-  if (f._file) {
-    toast("Uploading attachment…");
-    const safe = f._file.name.replace(/[^\w.\-]/g, "_");
-    const path = me.id + "/" + Date.now() + "_" + safe;
-    const { error: upErr } = await sb.storage.from("attachments").upload(path, f._file);
-    if (upErr) return rpcErr(upErr);
-    att = path;
+  if (submitting) return;               // a submit is already in flight — ignore the extra click
+  submitting = true;
+  const btn = document.querySelector('[data-act="submit"]'), label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
+  try {
+    const editId = vp.editId;
+    // Upload the attachment to private storage first; the application stores its path.
+    let att = f.att || "";
+    if (f._file) {
+      const safe = f._file.name.replace(/[^\w.\-]/g, "_");
+      const path = me.id + "/" + Date.now() + "_" + safe;
+      const { error: upErr } = await sb.storage.from("attachments").upload(path, f._file);
+      if (upErr) return rpcErr(upErr);
+      att = path;
+    }
+    const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
+    if (!res) return; // error already shown
+    const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
+    vp = {}; view = "myapps"; render();
+    toast(res.auto ? "Recorded & auto-approved — HR notified" : "Submitted — sent to " + approverName);
+  } finally {
+    submitting = false;
+    if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = label; }
   }
-  const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
-  if (!res) return; // error already shown
-  const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
-  vp = {}; view = "myapps"; render();
-  toast(res.auto ? "Recorded & auto-approved — HR notified" : "Submitted — sent to " + approverName);
 }
 
 /* ---- My applications ---- */
@@ -947,7 +961,7 @@ function hrEmployees() {
 function empModal() {
   const m = vp.empModal, f = m.form;
   const isAdd = m.mode === "add";
-  const calc = annualCalc(f.joinDate, Number(f.annualBase) || 14);
+  const calc = annualCalc(f.joinDate, numOr(f.annualBase, 14));
   return `<div class="modalback" data-act="closemodal"><div class="modal">
     <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
       <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
@@ -1037,6 +1051,7 @@ function hrTypes() {
 function hrSettings() {
   const o = db.org || {};
   const y = new Date().getFullYear();
+  const gy = numOr(vp.grantYear, y); // HR-selected target year for entitlements (default: current year)
   const phSorted = db.publicHolidays.slice().sort();
   const thisYear = phSorted.filter(p => p.startsWith(String(y)));
   const dow = p => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p + "T00:00:00").getDay()];
@@ -1066,10 +1081,12 @@ function hrSettings() {
     </div>
   </div>
   <div class="card"><h3>Annual entitlements</h3>
-    <p class="meta" style="margin:4px 0 10px">Run once every 1 January: credits each employee's yearly quota for every leave type (annual leave uses each person's base + service years; new joiners are pro-rated when added).</p>
-    ${vp.grantConfirm ? `<div class="callout warn">This credits <b>${y + 1}</b> entitlements to all ${activeEmps().length} active employees — run it once only, on/after 1 Jan ${y + 1}. Are you sure?
-      <div class="actions"><button class="btn" data-act="grantgo">Yes, grant ${y + 1} entitlements</button><button class="btn sec" data-act="grantcancel">Cancel</button></div></div>`
-    : `<button class="btn sec" data-act="grantask">Grant ${y + 1} annual entitlements…</button>`}
+    <p class="meta" style="margin:4px 0 10px">Run once per year: credits each employee's yearly quota for every leave type (annual leave uses each person's base + service years; new joiners are pro-rated when added). Re-running the same year is safe — already-credited quotas are skipped.</p>
+    <div class="field" style="max-width:150px"><label>Target year</label>
+      <select data-act="grantyear">${[y - 1, y, y + 1].map(yy => `<option value="${yy}" ${yy === gy ? "selected" : ""}>${yy}</option>`).join("")}</select></div>
+    ${vp.grantConfirm ? `<div class="callout warn">This credits <b>${gy}</b> entitlements to all ${activeEmps().length} active employees. Are you sure?
+      <div class="actions"><button class="btn" data-act="grantgo">Yes, grant ${gy} entitlements</button><button class="btn sec" data-act="grantcancel">Cancel</button></div></div>`
+    : `<button class="btn sec" data-act="grantask">Grant ${gy} annual entitlements…</button>`}
   </div></div>`;
 }
 /* CSV download helper (Excel-safe: BOM + quoted fields) */
@@ -1172,12 +1189,15 @@ document.addEventListener("click", async ev => {
       break;
     }
     case "viewatt": {
+      // Open the tab *inside* the click gesture (iOS Safari blocks window.open after an await),
+      // then redirect it once the signed URL is ready. Fall back to same-tab if it was blocked.
+      const w = window.open("", "_blank");
       const { data, error } = await sb.storage.from("attachments").createSignedUrl(el.dataset.path, 60);
-      if (error || !data?.signedUrl) return rpcErr(error || { message: "Could not open the attachment" });
-      window.open(data.signedUrl, "_blank");
+      if (error || !data?.signedUrl) { if (w) w.close(); return rpcErr(error || { message: "Could not open the attachment" }); }
+      if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase || 14 } }; render(); break;
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
     case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
@@ -1218,7 +1238,7 @@ document.addEventListener("click", async ev => {
         else { const { error } = await sb.from("departments").insert({ name: dept }); if (error) return rpcErr(error); }
       }
       if (!dept) return toast("Please choose a team");
-      const base = Number(f.annualBase) || 14;
+      const base = numOr(f.annualBase, 14);
       const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
         role: f.role, join_date: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null,
         two_level: !!f.twoLevel, annual_base: base };
@@ -1320,7 +1340,7 @@ document.addEventListener("click", async ev => {
     case "grantask": vp.grantConfirm = true; render(); break;
     case "grantcancel": delete vp.grantConfirm; render(); break;
     case "grantgo": {
-      const yr = new Date().getFullYear() + 1;
+      const yr = numOr(vp.grantYear, new Date().getFullYear());
       const { data, error } = await sb.rpc("grant_annual_entitlements", { p_year: yr });
       if (error) return rpcErr(error);
       delete vp.grantConfirm; await reload(); toast(`Granted ${yr} entitlements — ${data} ledger entries created`);
@@ -1346,10 +1366,11 @@ document.addEventListener("change", async ev => {
     if (btn) btn.disabled = !el.checked;
     return;
   }
+  if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); render(); return; }
   if (el.dataset.act === "empf") {
     const e = emp(el.dataset.id), f = el.dataset.f;
     const patch = {};
-    if (f === "annualBase") patch.annual_base = Number(el.value) || 14;
+    if (f === "annualBase") patch.annual_base = numOr(el.value, 14);
     else if (f === "twoLevel") { patch.two_level = el.checked; if (!el.checked) patch.approver2 = null; }
     else if (f === "approver1") { patch.approver1 = el.value || null; if (!el.value) { patch.two_level = false; patch.approver2 = null; } }
     else if (f === "approver2") patch.approver2 = el.value || null;
@@ -1369,7 +1390,7 @@ document.addEventListener("change", async ev => {
   }
   if (el.dataset.act === "orgf") {
     const col = { company: "company_name", emailDomain: "email_domain", defaultAnnualBase: "default_annual_base" }[el.dataset.k];
-    const patch = {}; patch[col] = col === "default_annual_base" ? (Number(el.value) || 14) : el.value.trim();
+    const patch = {}; patch[col] = col === "default_annual_base" ? numOr(el.value, 14) : el.value.trim();
     const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
     if (error) return rpcErr(error);
     await reload(); toast("Company settings saved");
