@@ -290,9 +290,15 @@ const mapAction = c => ({
 async function loadAll() {
   // 按需知：HR 读整表（含 annual_base/join_date 等敏感列供 Console 编辑）；
   // 其余人只读目录视图（姓名/部门/职位/审批链等非敏感列）。
+  // 目录视图未部署时（migration 尚未执行）自动回退到整表，令前后端部署顺序无关。
   const isHR = me && (me.role === "hr" || me.role === "admin");
+  const rosterP = (async () => {
+    if (isHR) return sb.from("employees").select("*");
+    const r = await sb.from("employees_directory").select("*");
+    return r.error ? sb.from("employees").select("*") : r;
+  })();
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
-    (isHR ? sb.from("employees").select("*") : sb.from("employees_directory").select("*")),
+    rosterP,
     sb.from("leave_types").select("*"),
     sb.from("public_holidays").select("holiday,name"),
     sb.from("departments").select("name"),
