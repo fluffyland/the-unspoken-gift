@@ -665,16 +665,17 @@ async function doSubmit() {
   try {
     const editId = vp.editId;
     // Upload the attachment to private storage first; the application stores its path.
-    let att = f.att || "";
+    let att = f.att || "", uploadedPath = "";
     if (f._file) {
       const safe = f._file.name.replace(/[^\w.\-]/g, "_");
       const path = me.id + "/" + Date.now() + "_" + safe;
       const { error: upErr } = await sb.storage.from("attachments").upload(path, f._file);
       if (upErr) return rpcErr(upErr);
-      att = path;
+      att = path; uploadedPath = path;
     }
     const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
-    if (!res) return; // error already shown
+    // On failure, delete the just-uploaded file so a rejected submit doesn't orphan storage.
+    if (!res) { if (uploadedPath) await sb.storage.from("attachments").remove([uploadedPath]); return; }
     const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
     vp = {}; view = "myapps"; render();
     toast(res.auto ? "Recorded & auto-approved — HR notified" : "Submitted — sent to " + approverName);

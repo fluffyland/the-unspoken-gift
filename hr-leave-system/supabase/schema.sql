@@ -210,12 +210,17 @@ declare me employees%rowtype; t leave_types%rowtype; d numeric; app_id uuid; ava
 begin
   select * into me from employees where auth_user_id = auth.uid() and active;
   if me.id is null then raise exception '未找到员工档案'; end if;
+  -- 串行化同一员工的并发提交：消除余额/重叠「查后写」竞态（锁在事务提交时自动释放）
+  perform pg_advisory_xact_lock(hashtext(me.id::text));
   select * into t from leave_types where code = p_type;
   if t.code is null then raise exception '假期类型不存在'; end if;
   if t.gender_eligibility is not null and t.gender_eligibility <> me.gender then
     raise exception '不符合该假期的资格条件'; end if;
   if t.requires_attachment and p_attachment is null then
     raise exception '该假期类型必须上传证明（MC）'; end if;
+  -- 范围夹取：进逐日循环前拦掉超大区间，防 CPU DoS
+  if p_end < p_start or p_end - p_start > 366 then
+    raise exception '请假区间无效或过长（最多约一年）'; end if;
   d := working_days(p_start, p_end, p_sh, p_eh);
   if d <= 0 then raise exception '所选日期不含工作日'; end if;
   if not t.no_deduct then
@@ -327,8 +332,11 @@ begin
   if a.id is null or a.status <> 'pending' then raise exception '申请不在待审批状态'; end if;
   select * into s from approval_steps
     where application_id = p_app and step_order = a.current_step;
+  -- 当前节点指名审批人，或 HR 代批他人（HR 不能借此自批）。
   -- is distinct from：me_id/approver_id 任一为 NULL 时仍能正确判否（裸 <> 会得 NULL 而跳过）
-  if s.approver_id is distinct from me_id then raise exception '你不是当前节点的审批人'; end if;
+  if s.approver_id is distinct from me_id
+     and not (is_hr() and a.emp_id is distinct from me_id) then
+    raise exception '你不是当前节点的审批人（HR 可代批他人）'; end if;
   if p_action in ('reject','return') and coalesce(trim(p_comment),'') = '' then
     raise exception '拒绝/退回必须填写原因'; end if;
 
@@ -351,6 +359,11 @@ begin
     else
       update applications set status='approved', updated_at=now() where id=p_app;
       if not t.no_deduct then
+        -- 落账前复核：防提交与批准之间余额变化把余额扣成负数
+        if coalesce((select balance from leave_balances
+                     where emp_id=a.emp_id and leave_type=a.leave_type),0) < a.days then
+          raise exception '批准失败：该员工 % 余额不足，无法扣减 % 天', a.leave_type, a.days;
+        end if;
         insert into leave_ledger (emp_id, leave_type, delta_days, reason, ref_application, created_by)
         values (a.emp_id, a.leave_type, -a.days, '请假扣减', p_app, me_id);
       end if;
