@@ -704,10 +704,13 @@ create table if not exists announcements (
   body       text not null,
   active     boolean not null default true
 );
+-- 受众：'all' 全员可见；'hr' 只给 HR/admin（假期变更时额外发一条可操作提醒）
+alter table announcements add column if not exists audience text not null default 'all';
 alter table announcements enable row level security;
 drop policy if exists ann_read  on announcements;
 drop policy if exists ann_write on announcements;
-create policy ann_read  on announcements for select to authenticated using (is_staff() and active);
+create policy ann_read  on announcements for select to authenticated
+  using (is_staff() and active and (audience = 'all' or is_hr()));
 create policy ann_write on announcements for all    to authenticated using (is_hr()) with check (is_hr());
 
 create table if not exists announcement_reads (
@@ -722,12 +725,12 @@ create policy ar_rw on announcement_reads for all to authenticated
   using (emp_id = current_emp_id()) with check (emp_id = current_emp_id());
 
 create or replace view my_announcements as
-select a.id, a.created_at, a.kind, a.title, a.body,
+select a.id, a.created_at, a.kind, a.title, a.body, a.audience,
        (r.emp_id is not null) as read
 from announcements a
 left join announcement_reads r
   on r.announcement_id = a.id and r.emp_id = current_emp_id()
-where a.active and is_staff();
+where a.active and is_staff() and (a.audience = 'all' or is_hr());
 alter view my_announcements set (security_invoker = true);
 grant select on my_announcements to authenticated;
 revoke select on my_announcements from anon;
@@ -786,8 +789,12 @@ begin
     ann_body := 'The public-holiday calendar was updated from the official MOM source (data.gov.sg). 系统已按 MOM 官方数据更新公共假期。';
     if add_txt is not null then ann_body := ann_body || E'\n\n➕ Added / updated 新增或更新:\n' || add_txt; end if;
     if rem_txt is not null then ann_body := ann_body || E'\n\n➖ Removed 移除:\n' || rem_txt; end if;
-    insert into announcements (kind, title, body)
-    values ('holiday', '📅 Public holidays updated 公共假期已更新', ann_body);
+    insert into announcements (kind, title, body, audience)
+    values ('holiday', '📅 Public holidays updated 公共假期已更新', ann_body, 'all');
+    insert into announcements (kind, title, body, audience)
+    values ('holiday', '🛠️ HR: public holidays changed — please review 公共假期已变更（请复核）',
+            'The automatic sync updated the public-holiday calendar. Review or adjust it in HR Console → Company settings — you can add, edit or remove any date.'
+            || E'\n\n' || ann_body, 'hr');
   end if;
   return jsonb_build_object('changed', changed, 'added', v_added, 'removed', v_removed, 'renamed', v_renamed);
 end $$;

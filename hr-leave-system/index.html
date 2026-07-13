@@ -298,7 +298,7 @@ async function loadAll() {
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
     rosterP,
     sb.from("leave_types").select("*"),
-    sb.from("public_holidays").select("holiday,name"),
+    sb.from("public_holidays").select("holiday,name,source"),
     sb.from("departments").select("name"),
     sb.from("org_settings").select("*").maybeSingle()
   ]);
@@ -309,6 +309,7 @@ async function loadAll() {
   const leaveTypes = (typeR.data || []).map(mapType).sort((a, b) => a.sort - b.sort);
   const publicHolidays = (phR.data || []).map(x => x.holiday).sort();
   const phNames = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.name || "Public holiday"]));
+  const phSource = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.source || "manual"]));
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
@@ -346,7 +347,7 @@ async function loadAll() {
   const calR = await sb.from("leave_calendar").select("*");
   const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status }));
 
-  db = { org, departments, employees, leaveTypes, publicHolidays, phNames, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  db = { org, departments, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -598,7 +599,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -606,7 +607,7 @@ function noticeBanner() {
   const list = db.announcements || [];
   if (!list.length) return "";
   return `<div class="wrap" style="padding-top:14px">${list.map(a => `
-    <div class="callout acc" style="margin-bottom:10px">
+    <div class="callout ${a.audience === "hr" ? "warn" : "acc"}" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
         <b>${esc(a.title)}</b>
         <button class="iconbtn" data-act="annread" data-id="${a.id}" title="Dismiss">✕</button>
@@ -625,6 +626,19 @@ function pwModal() {
     <div class="field"><label>Repeat new password<span class="req">*</span></label><input type="password" id="pw2" autocomplete="new-password"></div>
     <div class="actions">
       <button class="btn" data-act="pwsave">Change password</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+
+// HR: add or edit a public holiday
+function phModal() {
+  const m = vp.phModal || {};
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:420px">
+    <div class="hd"><h3>${m.orig ? "Edit public holiday" : "Add public holiday"}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <div class="field"><label>Date<span class="req">*</span></label><input type="date" id="ph-date" value="${esc(m.date || "")}"></div>
+    <div class="field"><label>Holiday name<span class="req">*</span></label><input type="text" id="ph-name" value="${esc(m.name || "")}" placeholder="e.g. Vesak Day"></div>
+    <div class="actions">
+      <button class="btn" data-act="phsave">Save</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
     </div></div></div>`;
 }
@@ -1153,11 +1167,14 @@ function hrSettings() {
     <div class="actions"><button class="btn" data-act="orgsave">Save changes</button></div>
   </div>
   <div class="card"><h3>Public holidays — ${thisYear.length} in ${y}</h3>
-    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar.</p>
-    <div class="tablebox" style="max-width:520px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
+    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> (rows marked <span class="meta">· auto</span>); you can still <b>add, edit (✎) or remove (✕)</b> any date by hand.</p>
+    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
       ${phSorted.map(p => `<tr>
-        <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td><td>${esc(db.phNames[p] || "—")}</td>
-        <td><button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}">✕</button></td></tr>`).join("")}
+        <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td>
+        <td>${esc(db.phNames[p] || "—")}${db.phSource && db.phSource[p] === "data.gov.sg" ? ` <span class="meta" style="font-size:11px">· auto</span>` : ""}</td>
+        <td style="white-space:nowrap">
+          <button class="btn ghost" style="padding:3px 9px" data-act="phedit" data-d="${p}" data-n="${esc(db.phNames[p] || "")}" title="Edit">✎</button>
+          <button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}" title="Remove">✕</button></td></tr>`).join("")}
     </tbody></table></div>
     <div class="actions" style="margin-top:10px">
       <input type="date" id="newph" style="max-width:170px">
@@ -1260,7 +1277,7 @@ document.addEventListener("click", async ev => {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; render(); break;
     case "pwopen": vp.pwModal = true; render(); break;
     case "annread": { await sb.rpc("mark_announcement_read", { p_id: Number(id) }); db.announcements = (db.announcements || []).filter(a => String(a.id) !== id); render(); break; }
     case "pwhintdismiss": try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} render(); break;
@@ -1416,9 +1433,28 @@ document.addEventListener("click", async ev => {
       if (!d) return toast("Pick a date first");
       if (!nm) return toast("Please type the holiday's name (e.g. Vesak Day)");
       if (db.publicHolidays.includes(d)) return toast("Already in the list");
-      const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm });
+      const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm, source: "manual" });
       if (error) return rpcErr(error);
       await reload(); toast("Holiday added");
+      break;
+    }
+    case "phedit": { vp.phModal = { orig: el.dataset.d, date: el.dataset.d, name: el.dataset.n || "" }; render(); break; }
+    case "phsave": {
+      const m = vp.phModal || {};
+      const d = document.getElementById("ph-date")?.value;
+      const nm = (document.getElementById("ph-name")?.value || "").trim();
+      if (!d) return toast("Pick a date first");
+      if (!nm) return toast("Please type the holiday's name");
+      if (d !== m.orig && db.publicHolidays.includes(d)) return toast("That date is already in the list");
+      if (m.orig && d === m.orig) {
+        const { error } = await sb.from("public_holidays").update({ name: nm, source: "manual", synced_at: null }).eq("holiday", m.orig);
+        if (error) return rpcErr(error);
+      } else {
+        if (m.orig) { const { error: de } = await sb.from("public_holidays").delete().eq("holiday", m.orig); if (de) return rpcErr(de); }
+        const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm, source: "manual" });
+        if (error) return rpcErr(error);
+      }
+      delete vp.phModal; await reload(); toast(m.orig ? "Holiday updated" : "Holiday added");
       break;
     }
     case "balcsv": {
