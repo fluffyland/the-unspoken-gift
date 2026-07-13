@@ -128,6 +128,9 @@ td.num{font-variant-numeric:tabular-nums}
 .frow .field{flex:1;min-width:160px}
 .check{display:flex;align-items:center;gap:8px;font-size:13.5px}
 .check input{width:16px;height:16px}
+.hdlist{display:flex;flex-direction:column;gap:6px}
+.hdrow{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--gray-soft);border-radius:8px;padding:6px 10px;font-size:13.5px}
+.hdrow select{max-width:190px;padding:5px 8px}
 
 .callout{border-radius:var(--r);padding:12px 16px;font-size:13.5px;border:1px solid}
 .callout.acc{background:var(--accent-soft);border-color:var(--accent-line);color:var(--ink)}
@@ -170,15 +173,9 @@ td.num{font-variant-numeric:tabular-nums}
 .tabs button.on{background:var(--accent);color:var(--accent-ink)}
 
 .login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:30px 16px}
-.loginbox{max-width:760px;width:100%}
+.loginbox{max-width:390px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:28px 26px}
 .loginbox h1{font-size:26px;margin:0 0 4px;letter-spacing:.2px}
-.loginbox .tag{color:var(--muted);margin:0 0 20px;font-size:14px}
-.acclist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
-.acc{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:11px 13px;text-align:left;width:100%}
-.acc:hover{border-color:var(--accent);}
-.acc .who{flex:1;min-width:0}
-.acc .who b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.acc .who span{font-size:12px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.loginbox .tag{color:var(--muted);margin:0 0 22px;font-size:14px}
 .rolechip{font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 7px;letter-spacing:.05em;flex:none}
 .rl-employee{background:var(--gray-soft);color:var(--muted)}
 .rl-approver{background:var(--accent-soft);color:var(--accent)}
@@ -332,7 +329,7 @@ async function loadAll() {
   }
   const applications = apps.map(a => ({
     id: a.id, empId: a.emp_id, type: a.leave_type, start: a.start_date, end: a.end_date,
-    sh: a.start_half, eh: a.end_half, days: Number(a.days), reason: a.reason, att: a.attachment_path || "",
+    sh: a.start_half, eh: a.end_half, halfDays: Array.isArray(a.half_days) ? a.half_days : [], days: Number(a.days), reason: a.reason, att: a.attachment_path || "",
     status: a.status, cur: Math.max(0, (a.current_step || 1) - 1), backdated: a.backdated,
     createdAt: Date.parse(a.created_at),
     steps: steps.filter(s => s.application_id === a.id).sort((x, y) => x.step_order - y.step_order)
@@ -378,6 +375,33 @@ function wdCount(start, end, sh, eh, phList) {
   if (n <= 0 && list.length) n = 0.5;
   return n;
 }
+/* Working days (ISO strings) in a range, excluding weekends + SG public holidays */
+function workingDaysList(start, end) {
+  const ph = db.publicHolidays;
+  const s = new Date(start + "T00:00:00"), e = new Date(end + "T00:00:00");
+  const list = [];
+  if (!(s <= e)) return list;
+  for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const wd = d.getDay();
+    if (wd !== 0 && wd !== 6 && !ph.includes(iso(d))) list.push(iso(d));
+  }
+  return list;
+}
+/* Day count honouring a per-day half map { "YYYY-MM-DD": "am"|"pm" } */
+function wdCountHalf(start, end, half) {
+  const list = workingDaysList(start, end);
+  let n = list.length;
+  for (const ds of list) if (half && (half[ds] === "am" || half[ds] === "pm")) n -= 0.5;
+  if (n <= 0 && list.length) n = 0.5;
+  return n;
+}
+/* Human-readable half-day summary for an application (handles legacy sh/eh records) */
+function halfSummary(a) {
+  const hd = a.halfDays || [];
+  if (hd.length) return " · half: " + hd.map(x => fmtDate(x.d) + " " + String(x.part).toUpperCase()).join(", ");
+  if (a.sh || a.eh) return (a.sh ? " · first day ½" : "") + (a.eh ? " · last day ½" : "");
+  return "";
+}
 
 /* Refresh the cache from Supabase and re-render (called after every mutation) */
 async function reload() { await loadAll(); render(); }
@@ -422,8 +446,9 @@ function rpcErr(error) {
 
 async function submitApp(data, editId) {
   const { data: id, error } = await sb.rpc("submit_application", {
-    p_type: data.type, p_start: data.start, p_end: data.end, p_sh: data.sh, p_eh: data.eh,
-    p_reason: data.reason, p_attachment: data.att || null, p_resubmit_id: editId || null
+    p_type: data.type, p_start: data.start, p_end: data.end,
+    p_reason: data.reason, p_attachment: data.att || null, p_resubmit_id: editId || null,
+    p_half_days: data.halfDays || []
   });
   if (error) { rpcErr(error); return null; }
   await loadAll();
@@ -513,6 +538,18 @@ function toast(msg) { const t = document.getElementById("toast"); t.textContent 
 function render() {
   $app().innerHTML = (me && !me.unlinked) ? shell() : loginPage();
   window.scrollTo(0, 0);
+  if (document.getElementById("attprev")) hydrateAttPreview();
+}
+// Fetch a short-lived signed URL and show the attachment inline (image → preview, else a link).
+async function hydrateAttPreview() {
+  const el = document.getElementById("attprev");
+  if (!el) return;
+  const path = el.dataset.path, name = el.dataset.name || "attachment";
+  const isImg = /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(name);
+  const { data, error } = await sb.storage.from("attachments").createSignedUrl(path, 120);
+  if (error || !data?.signedUrl) { el.innerHTML = `📎 ${esc(name)} — <span class="meta">unable to load (no access or file missing)</span>`; return; }
+  el.innerHTML = `<a data-act="viewatt" data-path="${esc(path)}" style="cursor:pointer">📎 ${esc(name)} — open${isImg ? " full size" : ""}</a>`
+    + (isImg ? `<img src="${esc(data.signedUrl)}" alt="${esc(name)}" style="display:block;max-width:100%;max-height:340px;border-radius:8px;margin-top:8px;border:1px solid var(--line)">` : "");
 }
 
 function loginPage() {
@@ -523,15 +560,13 @@ function loginPage() {
     ${unlinked ? `<div class="callout warn" style="margin-bottom:14px">You're signed in as <b>${esc(me.email)}</b>, but this account isn't linked to an <b>active</b> employee record.
       New joiner? Ask HR to add you (same email), then sign in again.
       Former employee? This account has been deactivated.
-      <div class="actions"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
-    <form class="acclist" id="loginform" autocomplete="on">
+      <div class="actions" style="justify-content:center"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
+    <form id="loginform" autocomplete="on">
       <div class="field"><label>Work email</label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
       <div class="field"><label>Password</label><input type="password" id="li-pass" autocomplete="current-password" required></div>
-      <div class="actions" style="margin-top:6px"><button class="btn" type="submit" data-act="dologin" style="width:100%">Sign in</button></div>
+      <button class="btn" type="submit" data-act="dologin" style="width:100%;margin-top:6px">Sign in</button>
     </form>`}
-    <p class="footnote"><b>One account per person.</b> Database-level permissions (row-level security)
-    ensure each person only sees their own data — staff see their own leave, approvers see their
-    team's applications, and only HR sees everything. Forgot your password? Ask HR to reset it.</p>
+    <p class="footnote" style="text-align:center">Each person signs in with their own work email. Forgot your password? Ask HR to reset it.</p>
   </div></div>`;
 }
 
@@ -545,7 +580,7 @@ function shell() {
     <span class="logo">LeaveDesk <span style="color:var(--accent)">·</span> ${esc(db.org?.company || "")}</span>
     <span class="spacer"></span>
     <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleName(me.role)}</span>
-    <button class="iconbtn" data-act="pwopen" title="Change password">🔑</button>
+    <button class="iconbtn" data-act="pwopen" title="Change your password">🔑 Password</button>
     <button class="iconbtn" data-act="logout">Sign out</button>
   </div></div>
   <nav class="nav"><div class="wrap">
@@ -558,8 +593,10 @@ function shell() {
 function pwModal() {
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:420px">
     <div class="hd"><h3>Change password</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
-    <p class="meta" style="margin:0 0 12px">Signed in as <b>${esc(me.email)}</b>. Pick something only you know — at least 8 characters.</p>
-    <div class="field"><label>New password</label><input type="password" id="pw1" autocomplete="new-password"></div>
+    <p class="meta" style="margin:0 0 12px">Signed in as <b>${esc(me.email)}</b>. Enter your current password, then choose a new one.</p>
+    <div class="field"><label>Current password</label><input type="password" id="pw0" autocomplete="current-password"></div>
+    <div class="field"><label>New password</label><input type="password" id="pw1" autocomplete="new-password">
+      <span class="hint">At least 8 characters, and different from your current one. A mix of letters and numbers is stronger.</span></div>
     <div class="field"><label>Repeat new password</label><input type="password" id="pw2" autocomplete="new-password"></div>
     <div class="actions">
       <button class="btn" data-act="pwsave">Change password</button>
@@ -570,7 +607,7 @@ function pwModal() {
 /* ---- Overview ---- */
 function vDashboard() {
   const cards = db.leaveTypes.filter(t => eligible(t, me) && !t.noDeduct).sort((a, b) => a.sort - b.sort);
-  const main = cards.filter(t => ["annual", "sick", "hosp", "childcare", "oil"].includes(t.code));
+  const main = ["annual", "sick", "oil", "hosp"].map(c => cards.find(t => t.code === c)).filter(Boolean);
   const rest = cards.filter(t => !main.includes(t));
   const mine = db.applications.filter(a => a.empId === me.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const ib = inbox(me);
@@ -578,8 +615,10 @@ function vDashboard() {
   return `
     <h2>Hello, ${esc(me.name)}</h2>
     <p class="sub">Today is ${todayStr()} · ${esc(me.dept)} · Approval route: ${chainText(me)}</p>
-    ${pwHidden ? "" : `<div class="callout acc" style="margin-bottom:16px">🔑 <b>Set your own password.</b> If you're still using the temporary password everyone was given, please change it: click the <b>🔑 key icon at the top-right</b> of this page → enter a new password (at least 8 characters) → Change password. It's not compulsory, but recommended.
-      <div class="actions" style="margin-top:8px"><button class="btn" data-act="pwopen">Change password now</button><button class="btn sec" data-act="pwhintdismiss">Got it, hide this</button></div></div>`}
+    ${pwHidden ? "" : `<div class="callout acc" style="margin-bottom:16px;text-align:center">
+      <div style="font-size:15px;font-weight:700;margin-bottom:4px">🔑 Set your own password</div>
+      <div style="color:var(--muted);font-size:13px;max-width:520px;margin:0 auto">If you're still using the temporary password, tap <b>🔑 Password</b> at the top-right to pick your own (at least 8 characters). Recommended, not required.</div>
+      <div class="actions" style="justify-content:center;margin-top:12px"><button class="btn" data-act="pwopen">Change password now</button><button class="btn sec" data-act="pwhintdismiss">Change it later</button></div></div>`}
     ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item(s) waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
     <div class="balgrid">${main.map(balCard).join("")}</div>
     <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">More leave types (Maternity / Paternity / Compassionate / Marriage …)</summary>
@@ -606,18 +645,20 @@ function vApply() {
   const editing = vp.editId ? db.applications.find(a => a.id === vp.editId) : null;
   const types = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);
   const f = vp.form || (editing
-    ? { type: editing.type, start: editing.start, end: editing.end, sh: editing.sh, eh: editing.eh, reason: editing.reason, att: editing.att }
-    : { type: "annual", start: dstr(1), end: dstr(1), sh: false, eh: false, reason: "", att: "" });
+    ? { type: editing.type, start: editing.start, end: editing.end, half: Object.fromEntries((editing.halfDays || []).map(x => [x.d, x.part])), reason: editing.reason, att: editing.att }
+    : { type: "annual", start: dstr(1), end: dstr(1), half: {}, reason: "", att: "" });
+  if (!f.half) f.half = {};
   vp.form = f;
   const t = lt(f.type), b = bal(me.id, f.type);
-  const days = wdCount(f.start, f.end, f.sh, f.eh);
+  const wdays = workingDaysList(f.start, f.end);
+  const days = wdCountHalf(f.start, f.end, f.half);
   const over = !t.noDeduct && days > b.avail;
   const backdated = f.start < todayStr();
   return `
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
     <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
     ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
-    <div class="card" style="max-width:640px">
+    <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
         <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}（${esc(x.zh)}）</option>`).join("")}</select>
         <span class="hint">${t.noDeduct ? "This type is recorded only — no balance deduction" : `Available: <b>${fmtD(b.avail)}</b> days (entitled ${fmtD(b.granted)}, used ${fmtD(b.used)}, pending ${fmtD(b.pending)})`}${t.note ? " · " + esc(t.note) : ""}</span>
@@ -626,10 +667,14 @@ function vApply() {
         <div class="field"><label>Start date</label><input type="date" data-f="start" value="${f.start}"></div>
         <div class="field"><label>End date</label><input type="date" data-f="end" value="${f.end}"></div>
       </div>
-      <div class="frow">
-        <label class="check"><input type="checkbox" data-f="sh" ${f.sh ? "checked" : ""}> First day: PM only (half day)</label>
-        <label class="check"><input type="checkbox" data-f="eh" ${f.eh ? "checked" : ""}> Last day: AM only (half day)</label>
-      </div>
+      ${wdays.length ? `<div class="field"><label>Half days <span style="font-weight:400;color:var(--muted)">— optional</span></label>
+        <div class="hint" style="margin:-2px 0 8px">Every day counts as a full day. Set any single day to morning- or afternoon-only if you're taking just half that day.</div>
+        <div class="hdlist">${wdays.map(ds => `<div class="hdrow"><span>${fmtDate(ds)} · ${new Date(ds + "T00:00:00").toLocaleDateString("en-SG", { weekday: "short" })}</span>
+          <select data-f="half" data-d="${ds}">
+            <option value="" ${!f.half[ds] ? "selected" : ""}>Full day</option>
+            <option value="am" ${f.half[ds] === "am" ? "selected" : ""}>Morning only (AM)</option>
+            <option value="pm" ${f.half[ds] === "pm" ? "selected" : ""}>Afternoon only (PM)</option>
+          </select></div>`).join("")}</div></div>` : ""}
       <div class="callout acc" style="margin:12px 0">
         <b style="font-size:17px">${fmtD(days)}</b> working day(s) — weekends & Singapore public holidays excluded automatically
         ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
@@ -639,7 +684,7 @@ function vApply() {
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
       <div class="field"><label>Attachment${t.mc ? " (photo or PDF of your MC — required)" : " (optional)"}</label>
         <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
-        <span class="hint">Uploads to secure storage — only you, your approver and HR can view it</span></div>
+        <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "Optional — attaching proof (e.g. a flight ticket or booking) can help your approver approve faster. Only you, your approver and HR can open it."}</span></div>
       <div class="actions">
         <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
         ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
@@ -651,7 +696,9 @@ function lastReturnComment(a) { const s = [...a.steps].reverse().find(x => x.sta
 let submitting = false; // guards against double-click / slow-network duplicate submits
 async function doSubmit() {
   const f = vp.form, t = lt(f.type);
-  const days = wdCount(f.start, f.end, f.sh, f.eh);
+  const wdays = workingDaysList(f.start, f.end);
+  const halfDays = wdays.filter(ds => f.half && f.half[ds]).map(ds => ({ d: ds, part: f.half[ds] }));
+  const days = wdCountHalf(f.start, f.end, f.half);
   if (!f.reason.trim()) return toast("Please fill in the reason");
   if (t.mc && !f.att) return toast("This leave type requires a photo or PDF of your MC");
   if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("The MC attachment must be a photo or PDF");
@@ -673,7 +720,7 @@ async function doSubmit() {
       if (upErr) return rpcErr(upErr);
       att = path; uploadedPath = path;
     }
-    const res = await submitApp({ type: f.type, start: f.start, end: f.end, sh: f.sh, eh: f.eh, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
+    const res = await submitApp({ type: f.type, start: f.start, end: f.end, halfDays, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
     // On failure, delete the just-uploaded file so a rejected submit doesn't orphan storage.
     if (!res) { if (uploadedPath) await sb.storage.from("attachments").remove([uploadedPath]); return; }
     const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
@@ -699,7 +746,7 @@ function appTable(list, showWho) {
       const node = a.status === "pending" && a.steps.length ? emp(a.steps[a.cur].approverId).name + (a.steps.length > 1 ? ` (level ${a.cur + 1}/${a.steps.length})` : "") : "—";
       return `<tr class="rowlink" data-act="detail" data-id="${a.id}">
         ${showWho ? `<td>${esc(emp(a.empId).name)}</td>` : ""}
-        <td>${esc(t.en)}</td><td class="num">${fmtRange(a.start, a.end)}</td>
+        <td>${esc(t.en)}${a.att ? ` <span title="Has an attachment">📎</span>` : ""}</td><td class="num">${fmtRange(a.start, a.end)}</td>
         <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stName(a.status)}</span></td><td>${node}</td></tr>`;
     }).join("")}</tbody></table></div>`;
 }
@@ -795,7 +842,7 @@ function approvalCard(a) {
   const conflicts = overlapConflicts(a);
   return `<div class="card appcard">
     <div class="hd"><b>${esc(e.name)}</b><span class="typechip">${esc(t.en)}</span><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span></div>
-    <div class="when">${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}${a.sh ? " (first day PM)" : ""}${a.eh ? " (last day AM)" : ""}</div>
+    <div class="when">${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}${halfSummary(a)}</div>
     <div class="why">${esc(a.reason)}</div>
     <div class="metarow">${t.noDeduct ? "Recorded only — no deduction" : `Balance after this: <b>${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"}`}${a.att ? ` · ${attLink(a.att)}` : ""} · Submitted ${fmtDate(iso(new Date(a.createdAt)))}${a.backdated ? " · backdated" : ""}</div>
     ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 Remind ${esc(e.name)}: the original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
@@ -848,9 +895,9 @@ function detailModal(id) {
       <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
         <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
       <dl class="kv">
-        <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day(s)${a.sh ? " · first day PM" : ""}${a.eh ? " · last day AM" : ""}</dd>
+        <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day(s)${halfSummary(a)}</dd>
         <dt>Reason</dt><dd>${esc(a.reason)}</dd>
-        ${a.att ? `<dt>Attachment</dt><dd>${attLink(a.att)}</dd>` : ""}
+        ${a.att ? `<dt>Attachment</dt><dd><div id="attprev" data-path="${esc(a.att)}" data-name="${esc(a.att.split("/").pop().replace(/^\d+_/, ""))}">${attLink(a.att)}</div></dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
       </dl>
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
@@ -1066,13 +1113,14 @@ function hrSettings() {
   <div class="card"><h3>Company defaults</h3>
     <div class="callout acc" style="margin:10px 0 14px"><b>Nothing about your company is hard-coded.</b> Set your defaults here once; every form uses them. Teams are managed in the Employees tab, leave quotas in the Leave types tab.</div>
     <div class="frow">
-      <div class="field" style="max-width:260px"><label>Company name</label><input type="text" data-act="orgf" data-k="company" value="${esc(o.company || "")}">
+      <div class="field" style="max-width:260px"><label>Company name</label><input type="text" id="org-company" value="${esc(o.company || "")}">
         <span class="hint">Shown in the top bar and everywhere else</span></div>
-      <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" data-act="orgf" data-k="emailDomain" value="${esc(o.emailDomain || "")}" placeholder="company.com">
+      <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" id="org-domain" value="${esc(o.emailDomain || "")}" placeholder="company.com">
         <span class="hint">Add employee auto-fills name@this-domain</span></div>
-      <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" data-act="orgf" data-k="defaultAnnualBase" value="${o.defaultAnnualBase ?? 14}">
+      <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" value="${o.defaultAnnualBase ?? 14}">
         <span class="hint">Pre-filled when adding a new employee</span></div>
     </div>
+    <div class="actions"><button class="btn" data-act="orgsave">Save changes</button></div>
   </div>
   <div class="card"><h3>Public holidays — ${thisYear.length} in ${y}</h3>
     <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar.</p>
@@ -1186,9 +1234,14 @@ document.addEventListener("click", async ev => {
     case "pwopen": vp.pwModal = true; render(); break;
     case "pwhintdismiss": try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} render(); break;
     case "pwsave": {
-      const p1 = document.getElementById("pw1")?.value || "", p2 = document.getElementById("pw2")?.value || "";
-      if (p1.length < 8) return toast("Password must be at least 8 characters");
-      if (p1 !== p2) return toast("The two passwords don't match");
+      const p0 = document.getElementById("pw0")?.value || "", p1 = document.getElementById("pw1")?.value || "", p2 = document.getElementById("pw2")?.value || "";
+      if (!p0) return toast("Please enter your current password");
+      if (p1.length < 8) return toast("New password must be at least 8 characters");
+      if (p1 === p0) return toast("New password must be different from your current one");
+      if (p1 !== p2) return toast("The two new passwords don't match");
+      // Verify the current password by re-authenticating (also blocks someone changing it on an unlocked session).
+      const { error: reauth } = await sb.auth.signInWithPassword({ email: me.email, password: p0 });
+      if (reauth) return toast("Current password is incorrect");
       const { error } = await sb.auth.updateUser({ password: p1 });
       if (error) return rpcErr(error);
       try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} // they've set their own; stop reminding
@@ -1292,6 +1345,18 @@ document.addEventListener("click", async ev => {
       break;
     }
     case "submit": doSubmit(); break;
+    case "orgsave": {
+      const patch = {
+        company_name: (document.getElementById("org-company")?.value || "").trim(),
+        email_domain: (document.getElementById("org-domain")?.value || "").trim(),
+        default_annual_base: numOr(document.getElementById("org-base")?.value, 14)
+      };
+      if (!patch.company_name) return toast("Company name can't be empty");
+      const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
+      if (error) return rpcErr(error);
+      await reload(); toast("Company settings saved ✓");
+      break;
+    }
     case "withdraw": { if (await withdrawApp(id)) { delete vp.detail; render(); toast("Application withdrawn"); } break; }
     case "edit": vp = { editId: id }; view = "apply"; render(); break;
     case "cancelreq": {
@@ -1395,14 +1460,7 @@ document.addEventListener("change", async ev => {
     await reload(); toast("Default days updated (affects future annual grants)");
     return;
   }
-  if (el.dataset.act === "orgf") {
-    const col = { company: "company_name", emailDomain: "email_domain", defaultAnnualBase: "default_annual_base" }[el.dataset.k];
-    const patch = {}; patch[col] = col === "default_annual_base" ? numOr(el.value, 14) : el.value.trim();
-    const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
-    if (error) return rpcErr(error);
-    await reload(); toast("Company settings saved");
-    return;
-  }
+  // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
   if (el.dataset.act === "deptname") {
     const oldName = el.dataset.old, newName = el.value.trim();
     if (!newName) { el.value = oldName; return toast("Team name cannot be empty"); }
@@ -1436,7 +1494,13 @@ document.addEventListener("change", async ev => {
       vp.form.att = file ? file.name : "";
       render(); return;
     }
-    if (f === "sh" || f === "eh") vp.form[f] = el.checked; else vp.form[f] = el.value;
+    if (f === "half") {
+      const ds = el.dataset.d;
+      if (!vp.form.half) vp.form.half = {};
+      if (el.value) vp.form.half[ds] = el.value; else delete vp.form.half[ds];
+      render(); return;
+    }
+    vp.form[f] = el.value;
     if (f === "start" && vp.form.end < vp.form.start) vp.form.end = vp.form.start;
     render();
   }

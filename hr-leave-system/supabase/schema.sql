@@ -100,6 +100,7 @@ create table if not exists applications (
   end_date    date not null check (end_date >= start_date),
   start_half  boolean not null default false,
   end_half    boolean not null default false,
+  half_days   jsonb not null default '[]'::jsonb,  -- 逐日半天明细：[{"d":"2026-07-15","part":"am"}]
   days        numeric(5,1) not null check (days > 0),
   reason      text not null,
   attachment_path text,           -- Supabase Storage 路径
@@ -199,14 +200,39 @@ begin
   return n;
 end $$;
 
+-- 逐日半天折算：整工作日数 − 0.5 ×（落在工作日内、标为 am/pm 的日期数）；下限 0.5
+create or replace function working_days_hd(p_start date, p_end date, p_half jsonb)
+returns numeric language plpgsql stable as $$
+declare d date; n numeric := 0;
+begin
+  if p_end < p_start then return 0; end if;
+  d := p_start;
+  while d <= p_end loop
+    if extract(isodow from d) < 6 and not exists (select 1 from public_holidays where holiday = d) then
+      n := n + 1;
+      if exists (select 1 from jsonb_array_elements(coalesce(p_half,'[]'::jsonb)) e
+                 where (e->>'d')::date = d and lower(e->>'part') in ('am','pm')) then
+        n := n - 0.5;
+      end if;
+    end if;
+    d := d + 1;
+  end loop;
+  if n <= 0 then n := 0.5; end if;
+  return n;
+end $$;
+
 -- ---------- 11. 状态机存储过程（前端只能调这些，不能直写表） ----------
 
 -- 提交申请（也用于退回后的重新提交：传 p_resubmit_id）
+-- p_half_days：逐日半天明细 [{"d":date,"part":"am|pm"}]；p_sh/p_eh 为旧前端兼容的可选尾参
+drop function if exists submit_application(text,date,date,boolean,boolean,text,text,uuid);
 create or replace function submit_application(
-  p_type text, p_start date, p_end date, p_sh boolean, p_eh boolean,
-  p_reason text, p_attachment text default null, p_resubmit_id uuid default null
+  p_type text, p_start date, p_end date, p_reason text,
+  p_attachment text default null, p_resubmit_id uuid default null,
+  p_half_days jsonb default '[]'::jsonb, p_sh boolean default false, p_eh boolean default false
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare me employees%rowtype; t leave_types%rowtype; d numeric; app_id uuid; avail numeric;
+        hd jsonb := coalesce(p_half_days, '[]'::jsonb);
 begin
   select * into me from employees where auth_user_id = auth.uid() and active;
   if me.id is null then raise exception '未找到员工档案'; end if;
@@ -221,7 +247,9 @@ begin
   -- 范围夹取：进逐日循环前拦掉超大区间，防 CPU DoS
   if p_end < p_start or p_end - p_start > 366 then
     raise exception '请假区间无效或过长（最多约一年）'; end if;
-  d := working_days(p_start, p_end, p_sh, p_eh);
+  d := case when jsonb_array_length(hd) > 0
+            then working_days_hd(p_start, p_end, hd)
+            else working_days(p_start, p_end, p_sh, p_eh) end;
   if d <= 0 then raise exception '所选日期不含工作日'; end if;
   if not t.no_deduct then
     select available into avail from leave_balances
@@ -237,7 +265,7 @@ begin
 
   if p_resubmit_id is not null then
     update applications set leave_type=p_type, start_date=p_start, end_date=p_end,
-      start_half=p_sh, end_half=p_eh, days=d, reason=p_reason,
+      start_half=p_sh, end_half=p_eh, half_days=hd, days=d, reason=p_reason,
       attachment_path=coalesce(p_attachment, attachment_path),
       status='pending', current_step=1, backdated=(p_start<current_date), updated_at=now()
       where id=p_resubmit_id and emp_id=me.id and status='returned'
@@ -245,8 +273,8 @@ begin
     if app_id is null then raise exception '只能重新提交被退回的申请'; end if;
     delete from approval_steps where application_id = app_id;
   else
-    insert into applications (emp_id,leave_type,start_date,end_date,start_half,end_half,days,reason,attachment_path,backdated)
-    values (me.id,p_type,p_start,p_end,p_sh,p_eh,d,p_reason,p_attachment,p_start<current_date)
+    insert into applications (emp_id,leave_type,start_date,end_date,start_half,end_half,half_days,days,reason,attachment_path,backdated)
+    values (me.id,p_type,p_start,p_end,p_sh,p_eh,hd,d,p_reason,p_attachment,p_start<current_date)
     returning id into app_id;
   end if;
 
