@@ -302,10 +302,16 @@ async function loadAll() {
     const r = await sb.from("employees_directory").select("*");
     return r.error ? sb.from("employees").select("*") : r;
   })();
+  // `source` column only exists after the v7 migration — fall back to holiday,name
+  // when it isn't there yet, so login/loadAll never breaks pre-migration.
+  const phP = (async () => {
+    const r = await sb.from("public_holidays").select("holiday,name,source");
+    return r.error ? sb.from("public_holidays").select("holiday,name") : r;
+  })();
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
     rosterP,
     sb.from("leave_types").select("*"),
-    sb.from("public_holidays").select("holiday,name,source"),
+    phP,
     sb.from("departments").select("name"),
     sb.from("org_settings").select("*").maybeSingle()
   ]);
