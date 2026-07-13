@@ -225,6 +225,13 @@ td.num{font-variant-numeric:tabular-nums}
 /* Phone layout: tighter cards, full-width tap targets */
 @media (max-width:560px){
   .wrap{padding:0 10px}
+  /* Header: let it wrap to two tidy rows instead of a fixed row that overflows */
+  .topbar .wrap{height:auto;min-height:56px;flex-wrap:wrap;gap:6px 8px;padding-top:8px;padding-bottom:8px}
+  .logo{flex:1 1 100%;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15.5px}
+  .spacer{display:none}
+  .userchip{flex:1;min-width:0;font-size:12px}
+  .iconbtn{padding:6px 8px}
+  .iconbtn .lbl{display:none}   /* 🔑 Password → just 🔑 on phones */
   .appcard{padding:12px}
   .appcard .actions .btn{flex:1;padding:10px 6px;text-align:center}
   .callout{padding:10px}
@@ -591,7 +598,7 @@ function shell() {
     <span class="logo">LeaveDesk <span style="color:var(--accent)">·</span> ${esc(db.org?.company || "")}</span>
     <span class="spacer"></span>
     <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleName(me.role)}</span>
-    <button class="iconbtn" data-act="pwopen" title="Change your password">🔑 Password</button>
+    <button class="iconbtn" data-act="pwopen" title="Change your password">🔑<span class="lbl"> Password</span></button>
     <button class="iconbtn" data-act="logout">Sign out</button>
   </div></div>
   <nav class="nav"><div class="wrap">
