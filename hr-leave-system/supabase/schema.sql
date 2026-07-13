@@ -43,6 +43,7 @@ create table if not exists leave_types (
   no_deduct           boolean not null default false,  -- 无薪假/NS 不扣配额
   default_days        numeric(5,1) not null default 0, -- 年度默认入账
   carry_over_cap      numeric(5,1),                    -- 年末最多结转（null=不结转）
+  allow_half_day      boolean not null default false,  -- 是否允许请半天（默认仅年假/补休；HR 可改）
   sort                int not null default 99,
   note                text
 );
@@ -64,6 +65,8 @@ insert into leave_types (code,name_zh,name_en,requires_attachment,gender_eligibi
  ('ns','战备军人假','NS / Reservist',false,'M',true,0,null,13,'Statutory for NSmen. Recorded only - no quota deduction.'),
  ('unpaid','无薪假','Unpaid Leave',false,null,true,0,null,14,'Recorded only - no quota deduction.')
 on conflict (code) do nothing;
+-- 半天假默认仅年假 / 补休可请；其余整天（HR 可在控制台按类型开关）
+update leave_types set allow_half_day = (code in ('annual','oil'));
 
 -- ---------- 3. 公共假期（请假折算工作日时排除） ----------
 create table if not exists public_holidays (
@@ -252,6 +255,8 @@ begin
      or extract(year from p_end)::int > extract(year from current_date)::int then
     raise exception '次年假期要到 1 月 1 日才开放申请（次年日历现在仅供查看） / Next year''s leave opens on 1 Jan';
   end if;
+  -- 半天假仅对允许的假期类型生效；其余类型忽略半天明细，一律按整天计
+  if not coalesce(t.allow_half_day, false) then hd := '[]'::jsonb; end if;
   d := case when jsonb_array_length(hd) > 0
             then working_days_hd(p_start, p_end, hd)
             else working_days(p_start, p_end, p_sh, p_eh) end;

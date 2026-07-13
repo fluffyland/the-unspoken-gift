@@ -186,9 +186,13 @@ grant  execute on function apply_holiday_sync(jsonb, int[], text) to service_rol
 
 
 -- =============================================================
--- 5. 次年日历「只读」：次年/跨年日期在 1 月 1 日前不可申请
---    （重建 submit_application；签名与 v6 完全一致，仅新增一处校验，前端无需改调用）
+-- 5. 次年日历「只读」 + 半天假仅对适用假期开放
+--    （重建 submit_application；签名与 v6 完全一致，仅新增两处校验，前端无需改调用）
 -- =============================================================
+-- 5.0 半天假开关：默认仅年假 / 补休可请半天；其余（病假/住院假等）整天。HR 可在控制台改。
+alter table leave_types add column if not exists allow_half_day boolean not null default false;
+update leave_types set allow_half_day = (code in ('annual','oil'));
+
 create or replace function submit_application(
   p_type text, p_start date, p_end date, p_reason text,
   p_attachment text default null, p_resubmit_id uuid default null,
@@ -213,6 +217,8 @@ begin
      or extract(year from p_end)::int > extract(year from current_date)::int then
     raise exception '次年假期要到 1 月 1 日才开放申请（次年日历现在仅供查看） / Next year''s leave opens on 1 Jan';
   end if;
+  -- 半天假仅对允许的假期类型生效；其余类型忽略半天明细，一律按整天计
+  if not coalesce(t.allow_half_day, false) then hd := '[]'::jsonb; end if;
   d := case when jsonb_array_length(hd) > 0
             then working_days_hd(p_start, p_end, hd)
             else working_days(p_start, p_end, p_sh, p_eh) end;

@@ -281,7 +281,8 @@ const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dep
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
   twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
-  gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days), sort: r.sort, note: r.note || "" });
+  gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days),
+  allowHalf: r.allow_half_day, sort: r.sort, note: r.note || "" });
 // Numeric-with-default that keeps a real 0 (unlike `Number(x) || d`); blank/invalid → default.
 const numOr = (v, d) => { const n = Number(v); return (v === "" || v == null || !Number.isFinite(n)) ? d : n; };
 /* DB action codes → display strings the history/timeline renderers expect */
@@ -704,10 +705,18 @@ function vApply() {
   if (!f.half) f.half = {};
   vp.form = f;
   const t = lt(f.type), b = bal(me.id, f.type);
+  // Half-day is only offered for types HR allows (fallback: annual + off-in-lieu pre-migration)
+  const allowHalf = typeof t.allowHalf === "boolean" ? t.allowHalf : ["annual", "oil"].includes(t.code);
+  const half = allowHalf ? f.half : {};
   const wdays = workingDaysList(f.start, f.end);
-  const days = wdCountHalf(f.start, f.end, f.half);
+  const days = wdCountHalf(f.start, f.end, half);
   const over = !t.noDeduct && days > b.avail;
   const backdated = f.start < todayStr();
+  // Per-year balance breakdown (the ledger is cumulative across years → filter to this year)
+  const cyNum = new Date().getFullYear();
+  const grantedCY = db.ledger.filter(l => l.empId === me.id && l.type === f.type && l.delta > 0 && new Date(l.ts).getFullYear() === cyNum).reduce((s, l) => s + l.delta, 0);
+  const usedCY = db.applications.filter(a => a.empId === me.id && a.type === f.type && a.status === "approved" && String(a.start).slice(0, 4) === String(cyNum)).reduce((s, a) => s + a.days, 0);
+  const carried = f.type === "annual" && db.annualCarry ? Number(db.annualCarry.carry_in) : 0;
   const curYear = todayStr().slice(0, 4);
   const yearEnd = curYear + "-12-31";
   const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
@@ -718,13 +727,17 @@ function vApply() {
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
         <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}（${esc(x.zh)}）</option>`).join("")}</select>
-        <span class="hint">${t.noDeduct ? "This type is recorded only — no balance deduction" : `Available balance: <b>${fmtD(b.avail)}</b> days (entitled ${fmtD(b.granted)}, used ${fmtD(b.used)}, pending ${fmtD(b.pending)})`}</span>
+        <span class="hint">${t.noDeduct
+          ? (t.code === "unpaid"
+              ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
+              : "Recorded for HR's records only — it doesn't use any leave balance.")
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (Current Year: ${fmtD(grantedCY)}${carried > 0 ? " · Carried Forward: " + fmtD(carried) : ""} · Used: ${fmtD(usedCY)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
         <div class="field"><label>End date<span class="req">*</span></label><input type="date" data-f="end" value="${f.end}" max="${yearEnd}"></div>
       </div>
-      ${wdays.length ? `<div class="field"><label>Half days <span style="font-weight:400;color:var(--muted)">— optional</span></label>
+      ${wdays.length && allowHalf ? `<div class="field"><label>Half days <span style="font-weight:400;color:var(--muted)">— optional</span></label>
         <div class="hint" style="margin:-2px 0 8px">By default, each selected day is counted as a full day. Change any day to Morning or Afternoon if you're taking only half a day.</div>
         <div class="hdlist">${wdays.map(ds => `<div class="hdrow"><span>${fmtDate(ds)} · ${new Date(ds + "T00:00:00").toLocaleDateString("en-SG", { weekday: "short" })}</span>
           <select data-f="half" data-d="${ds}">
@@ -754,9 +767,11 @@ function lastReturnComment(a) { const s = [...a.steps].reverse().find(x => x.sta
 let submitting = false; // guards against double-click / slow-network duplicate submits
 async function doSubmit() {
   const f = vp.form, t = lt(f.type);
+  const allowHalf = typeof t.allowHalf === "boolean" ? t.allowHalf : ["annual", "oil"].includes(t.code);
   const wdays = workingDaysList(f.start, f.end);
-  const halfDays = wdays.filter(ds => f.half && f.half[ds]).map(ds => ({ d: ds, part: f.half[ds] }));
-  const days = wdCountHalf(f.start, f.end, f.half);
+  const half = allowHalf ? (f.half || {}) : {};
+  const halfDays = wdays.filter(ds => half[ds]).map(ds => ({ d: ds, part: half[ds] }));
+  const days = wdCountHalf(f.start, f.end, half);
   if (!f.reason.trim()) return toast("Please fill in the reason");
   if (t.mc && !f.att) return toast("This leave type requires a photo or PDF of your MC");
   if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("The MC attachment must be a photo or PDF");
@@ -1151,10 +1166,11 @@ function offModal() {
 function hrTypes() {
   return `<div class="card">
     <div class="callout acc" style="margin-bottom:14px">Leave types are <b>configuration, not code</b>: when policy changes (e.g. Shared Parental Leave increases to 10 weeks from Apr 2026), update it here. Default days only affect future annual grants.</div>
-    <div class="tablebox"><table><thead><tr><th>Type</th><th>中文</th><th class="num">Default days / year</th><th>Doctor's cert (MC) needed?</th><th>Who is eligible</th><th>Notes</th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Type</th><th>中文</th><th class="num">Default days / year</th><th>Half-day allowed?</th><th>Doctor's cert (MC) needed?</th><th>Who is eligible</th><th>Notes</th></tr></thead><tbody>
     ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
       <td><b>${esc(t.en)}</b></td><td class="meta">${esc(t.zh)}</td>
       <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
+      <td style="text-align:center"><input type="checkbox" data-act="typehalf" data-c="${t.code}" ${t.allowHalf ? "checked" : ""}></td>
       <td>${t.mc ? "<b>Required</b> when applying" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}${t.noDeduct ? " · record only, no deduction" : ""}</td>
       <td class="meta">${esc(t.note || "")}</td></tr>`).join("")}</tbody></table></div>
     <p class="meta" style="margin-top:14px">Public holidays are managed in the <b>Company settings</b> tab.</p>
@@ -1539,6 +1555,13 @@ document.addEventListener("change", async ev => {
     const { error } = await sb.from("leave_types").update({ default_days: Number(el.value) || 0 }).eq("code", el.dataset.c);
     if (error) return rpcErr(error);
     await reload(); toast("Default days updated (affects future annual grants)");
+    return;
+  }
+  if (el.dataset.act === "typehalf") {
+    const { error } = await sb.from("leave_types").update({ allow_half_day: el.checked }).eq("code", el.dataset.c);
+    if (error) return rpcErr(error);
+    const lty = lt(el.dataset.c); if (lty) lty.allowHalf = el.checked;
+    toast(el.checked ? "Half-day enabled for this leave type" : "Half-day disabled for this leave type");
     return;
   }
   // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
