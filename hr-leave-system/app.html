@@ -225,6 +225,7 @@ td.num{font-variant-numeric:tabular-nums}
 /* Phone layout: tighter cards, full-width tap targets */
 @media (max-width:560px){
   .wrap{padding:0 10px}
+  input,select,textarea{font-size:16px}  /* iOS Safari: fields <16px auto-zoom on focus; 16px stops the login-page zoom */
   /* Header: let it wrap to two tidy rows instead of a fixed row that overflows */
   .topbar .wrap{height:auto;min-height:56px;flex-wrap:wrap;gap:6px 8px;padding-top:8px;padding-bottom:8px}
   .logo{flex:1 1 100%;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15.5px}
@@ -671,8 +672,8 @@ function vDashboard() {
       <div style="font-size:15px;font-weight:700;margin-bottom:4px">🔑 Set your own password</div>
       <div style="color:var(--muted);font-size:13px;max-width:520px;margin:0 auto">If you're still using the temporary password, tap <b>🔑 Password</b> at the top-right to pick your own (at least 8 characters). Recommended, not required.</div>
       <div class="actions" style="justify-content:center;margin-top:12px"><button class="btn" data-act="pwopen">Change password now</button><button class="btn sec" data-act="pwhintdismiss">Change it later</button></div></div>`}
-    ${db.annualCarry && db.annualCarry.remaining > 0 ? `<div class="callout acc" style="margin-bottom:16px">🔄 <b>${fmtD(db.annualCarry.remaining)}</b> day(s) of annual leave carried over from ${db.annualCarry.year - 1}. Use them by <b>${fmtDate(db.annualCarry.expires_on)}</b> — carried days are used first and expire after that. (Included in your Annual Leave balance below.)</div>` : ""}
-    ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item(s) waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
+    ${db.annualCarry && db.annualCarry.remaining > 0 ? `<div class="callout acc" style="margin-bottom:16px">🔄 <b>${fmtD(db.annualCarry.remaining)}</b> day${db.annualCarry.remaining === 1 ? "" : "s"} of annual leave carried over from ${db.annualCarry.year - 1}. Use them by <b>${fmtDate(db.annualCarry.expires_on)}</b> — carried days are used first and expire after that. (Included in your Annual Leave balance below.)</div>` : ""}
+    ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item${ib.count === 1 ? "" : "s"} waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
     <div class="balgrid">${main.map(balCard).join("")}</div>
     <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">More leave types (Maternity / Paternity / Compassionate / Marriage …)</summary>
       <div class="balgrid" style="margin-top:12px">${rest.map(balCard).join("")}</div></details>
@@ -717,14 +718,14 @@ function vApply() {
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
         <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}（${esc(x.zh)}）</option>`).join("")}</select>
-        <span class="hint">${t.noDeduct ? "This type is recorded only — no balance deduction" : `Available: <b>${fmtD(b.avail)}</b> days (entitled ${fmtD(b.granted)}, used ${fmtD(b.used)}, pending ${fmtD(b.pending)})`}${t.note ? " · " + esc(t.note) : ""}</span>
+        <span class="hint">${t.noDeduct ? "This type is recorded only — no balance deduction" : `Available balance: <b>${fmtD(b.avail)}</b> days (entitled ${fmtD(b.granted)}, used ${fmtD(b.used)}, pending ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
         <div class="field"><label>End date<span class="req">*</span></label><input type="date" data-f="end" value="${f.end}" max="${yearEnd}"></div>
       </div>
       ${wdays.length ? `<div class="field"><label>Half days <span style="font-weight:400;color:var(--muted)">— optional</span></label>
-        <div class="hint" style="margin:-2px 0 8px">Every day counts as a full day. Set any single day to morning- or afternoon-only if you're taking just half that day.</div>
+        <div class="hint" style="margin:-2px 0 8px">By default, each selected day is counted as a full day. Change any day to Morning or Afternoon if you're taking only half a day.</div>
         <div class="hdlist">${wdays.map(ds => `<div class="hdrow"><span>${fmtDate(ds)} · ${new Date(ds + "T00:00:00").toLocaleDateString("en-SG", { weekday: "short" })}</span>
           <select data-f="half" data-d="${ds}">
             <option value="" ${!f.half[ds] ? "selected" : ""}>Full day</option>
@@ -732,16 +733,16 @@ function vApply() {
             <option value="pm" ${f.half[ds] === "pm" ? "selected" : ""}>Afternoon only (PM)</option>
           </select></div>`).join("")}</div></div>` : ""}
       <div class="callout acc" style="margin:12px 0">
-        <b style="font-size:17px">${fmtD(days)}</b> working day(s) — weekends & Singapore public holidays excluded automatically
+        <b style="font-size:17px">${fmtD(days)}</b> working day${days === 1 ? "" : "s"} — weekends & Singapore public holidays excluded automatically
         ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
       </div>
-      ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day(s) but only ${fmtD(b.avail)} available</div>` : ""}
+      ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day${days === 1 ? "" : "s"} but only ${fmtD(b.avail)} available</div>` : ""}
       ${nextYearBlocked ? `<div class="callout warn" style="margin:0 0 12px">📅 <b>Next year is view-only for now.</b> Leave dated in ${Number(curYear) + 1} opens for applications on 1 Jan ${Number(curYear) + 1} (that's when next year's balance is granted). You can already preview ${Number(curYear) + 1} public holidays in the <b>Calendar</b> tab.</div>` : ""}
-      <div class="field"><label>Reason<span class="req">*</span></label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
+      <div class="field"><label>Remarks<span class="req">*</span></label><textarea data-f="reason" rows="2" placeholder="Provide a brief reason for your leave request.">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
-      <div class="field"><label>Attachment${t.mc ? ` (photo or PDF of your MC)<span class="req">*</span>` : " (optional)"}</label>
+      <div class="field"><label>Attachment${t.mc ? ` (photo or PDF of your MC)<span class="req">*</span>` : "s — Optional"}</label>
         <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
-        <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "Optional — attaching proof (e.g. a flight ticket or booking) can help your approver approve faster. Only you, your approver and HR can open it."}</span></div>
+        <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "You may attach supporting documents (e.g., a flight itinerary or booking confirmation) if they help provide additional context for your request. Only you, your approver, and HR can view the attachment."}</span></div>
       <div class="actions">
         <button class="btn" data-act="submit" ${days <= 0 || over || nextYearBlocked ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
         ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
@@ -921,7 +922,7 @@ function cancelCard(a) {
   const e = emp(a.empId), t = lt(a.type);
   return `<div class="card appcard">
     <div class="hd"><b>${esc(e.name)} · cancellation request</b><span class="pill st-cancel_requested">Cancellation requested</span></div>
-    <dl class="kv"><dt>Approved leave</dt><dd>${esc(t.en)} · ${fmtRange(a.start, a.end)} — confirming refunds <b>${fmtD(a.days)}</b> day(s)</dd></dl>
+    <dl class="kv"><dt>Approved leave</dt><dd>${esc(t.en)} · ${fmtRange(a.start, a.end)} — confirming refunds <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}</dd></dl>
     <div class="actions">
       <button class="btn good" data-act="cancelok" data-id="${a.id}">Confirm cancellation (refund days)</button>
       <button class="btn sec" data-act="cancelno" data-id="${a.id}">Decline</button>
@@ -952,7 +953,7 @@ function detailModal(id) {
       <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
         <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
       <dl class="kv">
-        <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day(s)${halfSummary(a)}</dd>
+        <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day${a.days === 1 ? "" : "s"}${halfSummary(a)}</dd>
         <dt>Reason</dt><dd>${esc(a.reason)}</dd>
         ${a.att ? `<dt>Attachment</dt><dd><div id="attprev" data-path="${esc(a.att)}" data-name="${esc(a.att.split("/").pop().replace(/^\d+_/, ""))}">${attLink(a.att)}</div></dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
