@@ -75,8 +75,49 @@
 前端托管任选：Netlify / Vercel / GitHub Pages（纯静态即可，密钥只用 anon key，
 安全由数据库端 RLS + 存储过程保证——前端即使被改，也做不了越权的事）。
 
-## 每年例行维护（HR）
+## 第 7 步：公共假期自动同步 + 站内公告 + 年假结转（v7）
 
-- 1 月 1 日：SQL 执行 `select grant_annual_entitlements(<年份>);` 完成全员入账
-- 更新 `public_holidays` 表为当年 MOM 公布的公共假期
-- 政策变化（如 2026-04 Shared Parental Leave 增至 10 周）：改 `leave_types.default_days` 即可
+本步让系统**自动**去新加坡官方开放数据（data.gov.sg，MOM 维护的公共假期数据集）
+核对假期：每月检查本年是否有改动/临时假日（如大选日），并在次年假期公布后自动载入
+「次年日历」（只可查看，1 月 1 日前不能申请）。有任何变更会**给全员发站内公告**
+（下次登录即见）。同时把年假结转做成**上限 5 天、先用结转、次年 12/31 未用作废**。
+
+1. **跑数据库迁移**：SQL Editor 粘贴执行 `supabase/migration_app_v7.sql`（幂等，可重复）。
+2. **部署同步函数**（在 `hr-leave-system/` 目录，已登录/link 过项目）：
+   ```bash
+   supabase functions deploy sync-holidays --no-verify-jwt
+   ```
+   > 无需任何用户密钥：函数运行时由 Supabase 平台自动注入 service_role，
+   > **不是**被吊销的那把 secret。可先手动跑一次验证：
+   > `curl -X POST https://<项目ref>.functions.supabase.co/sync-holidays`
+   > 返回 `{"ok":true,...}` 即成功；随后在 `holiday_sync_log` 表能看到一条记录。
+3. **定时**（SQL Editor 执行一次，用 pg_cron 每月自动调用同步函数）：
+   ```sql
+   create extension if not exists pg_cron;
+   create extension if not exists pg_net;
+   -- 每月 1 号自动同步一次（想更勤可改成每周 0 19 * * 0）
+   select cron.schedule('sync-holidays-monthly', '0 19 1 * *', $$
+     select net.http_post(url := 'https://<项目ref>.functions.supabase.co/sync-holidays');
+   $$);
+   ```
+4. **上传新前端**：把更新后的 `app.html` 复制成 `index.html` 部署（本仓库脚本已自动做，
+   见 auto-deploy）。前端会在登录后展示未读公告、仪表盘显示「本年结转 X 天，X 前用完」，
+   申请页对次年日期只读、必填项标红 `*`。
+
+## 每年例行维护（HR）—— v7 后已自动化
+
+- **公共假期**：无需再手工维护——系统每月自动核对、次年公布后自动载入并公告全员。
+  （HR 仍可在「Company settings」手工增删临时假日；自动同步只动 `source='data.gov.sg'` 的行，
+   不会覆盖手工录入。出问题时看 `holiday_sync_log` 表。）
+- **年度切换（每年 1 月 1 日，结转 + 入账）**：可 SQL 手动跑，或用 pg_cron 自动：
+  ```sql
+  -- 先结转（上限 5、先用结转、上一年未用作废），再发放新年度额度；两者幂等
+  select cron.schedule('annual-rollover', '0 17 31 12 *', $$
+    select rollover_annual_leave(extract(year from (now() at time zone 'Asia/Singapore'))::int);
+  $$);
+  select cron.schedule('annual-grant', '30 17 31 12 *', $$
+    select grant_annual_entitlements(extract(year from (now() at time zone 'Asia/Singapore'))::int);
+  $$);
+  ```
+  > 手动等价写法（任意时间，幂等）：`select rollover_annual_leave(2027); select grant_annual_entitlements(2027);`
+- 政策变化（如 Shared Parental Leave 增至 10 周）：改 `leave_types.default_days` 即可。

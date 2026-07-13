@@ -49,7 +49,7 @@ create table if not exists leave_types (
 
 -- 天数按 MOM 现行政策(mom.gov.sg,2026-07 核对);注释英文(界面直接展示)
 insert into leave_types (code,name_zh,name_en,requires_attachment,gender_eligibility,no_deduct,default_days,carry_over_cap,sort,note) values
- ('annual','年假','Annual Leave',false,null,false,14,7,1,'Statutory minimum: 7 days in year 1, +1 per year up to 14. Company base is configurable per employee.'),
+ ('annual','年假','Annual Leave',false,null,false,14,5,1,'Statutory minimum: 7 days in year 1, +1 per year up to 14. Company base is configurable per employee. Carry-over cap 5 days (expire end of next year).'),
  ('sick','病假（门诊）','Sick Leave',true,null,false,14,null,2,'Outpatient. Eligible after 3 months of service (MOM).'),
  ('hosp','住院假','Hospitalisation Leave',true,null,false,60,null,3,'MOM: 60 days per year, inclusive of the 14 outpatient sick-leave days.'),
  ('childcare','育儿假','Childcare Leave',false,null,false,6,null,4,'Child under 7 and a SG citizen: 6 days/parent/year. Extended childcare: +2 days if the child is 7-12.'),
@@ -247,6 +247,11 @@ begin
   -- 范围夹取：进逐日循环前拦掉超大区间，防 CPU DoS
   if p_end < p_start or p_end - p_start > 366 then
     raise exception '请假区间无效或过长（最多约一年）'; end if;
+  -- 次年日历只读：次年额度要到 1 月 1 日才发放，此前不能申请落在次年的假
+  if extract(year from p_start)::int > extract(year from current_date)::int
+     or extract(year from p_end)::int > extract(year from current_date)::int then
+    raise exception '次年假期要到 1 月 1 日才开放申请（次年日历现在仅供查看） / Next year''s leave opens on 1 Jan';
+  end if;
   d := case when jsonb_array_length(hd) > 0
             then working_days_hd(p_start, p_end, hd)
             else working_days(p_start, p_end, p_sh, p_eh) end;
@@ -663,3 +668,203 @@ drop policy if exists org_write on org_settings;
 create policy org_read  on org_settings for select to authenticated using (is_staff());
 create policy org_write on org_settings for update to authenticated
   using (is_hr()) with check (is_hr());
+
+-- =============================================================
+-- 20. v7 公共假期自动同步 + 站内公告 + 年假结转（详见 migration_app_v7.sql）
+-- =============================================================
+
+-- 20.1 公共假期来源标记（区分手工录入 vs data.gov.sg 自动同步）
+alter table public_holidays add column if not exists source   text not null default 'manual';
+alter table public_holidays add column if not exists synced_at timestamptz;
+
+-- 20.2 同步审计日志（HR 可读，供监控/排错）
+create table if not exists holiday_sync_log (
+  id         bigint generated always as identity primary key,
+  ran_at     timestamptz not null default now(),
+  source     text not null,
+  years      int[]  not null default '{}',
+  added      jsonb  not null default '[]'::jsonb,
+  removed    jsonb  not null default '[]'::jsonb,
+  renamed    jsonb  not null default '[]'::jsonb,
+  total_seen int    not null default 0,
+  status     text   not null default 'ok',
+  message    text
+);
+create index if not exists idx_hsl_ran on holiday_sync_log (ran_at desc);
+alter table holiday_sync_log enable row level security;
+drop policy if exists hsl_read on holiday_sync_log;
+create policy hsl_read on holiday_sync_log for select to authenticated using (is_hr());
+
+-- 20.3 站内公告 + 已读记录（假期变更 → 全员登录即见）
+create table if not exists announcements (
+  id         bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  kind       text not null default 'system',
+  title      text not null,
+  body       text not null,
+  active     boolean not null default true
+);
+alter table announcements enable row level security;
+drop policy if exists ann_read  on announcements;
+drop policy if exists ann_write on announcements;
+create policy ann_read  on announcements for select to authenticated using (is_staff() and active);
+create policy ann_write on announcements for all    to authenticated using (is_hr()) with check (is_hr());
+
+create table if not exists announcement_reads (
+  announcement_id bigint not null references announcements (id) on delete cascade,
+  emp_id          uuid   not null references employees (id),
+  read_at         timestamptz not null default now(),
+  primary key (announcement_id, emp_id)
+);
+alter table announcement_reads enable row level security;
+drop policy if exists ar_rw on announcement_reads;
+create policy ar_rw on announcement_reads for all to authenticated
+  using (emp_id = current_emp_id()) with check (emp_id = current_emp_id());
+
+create or replace view my_announcements as
+select a.id, a.created_at, a.kind, a.title, a.body,
+       (r.emp_id is not null) as read
+from announcements a
+left join announcement_reads r
+  on r.announcement_id = a.id and r.emp_id = current_emp_id()
+where a.active and is_staff();
+alter view my_announcements set (security_invoker = true);
+grant select on my_announcements to authenticated;
+revoke select on my_announcements from anon;
+
+create or replace function mark_announcement_read(p_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+declare me uuid := current_emp_id();
+begin
+  if me is null then return; end if;
+  insert into announcement_reads (announcement_id, emp_id) values (p_id, me) on conflict do nothing;
+end $$;
+revoke execute on function mark_announcement_read(bigint) from anon, public;
+grant  execute on function mark_announcement_read(bigint) to authenticated;
+
+-- 20.4 假期对账 RPC（Edge Function 以 service_role 调用；仅系统任务可执行）
+create or replace function apply_holiday_sync(
+  p_holidays jsonb, p_years int[], p_source text default 'data.gov.sg'
+) returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_added jsonb := '[]'::jsonb; v_removed jsonb := '[]'::jsonb; v_renamed jsonb := '[]'::jsonb;
+  r record; changed boolean := false; add_txt text; rem_txt text; ann_body text;
+begin
+  if current_user <> 'service_role' and session_user <> 'postgres' then
+    raise exception 'apply_holiday_sync 仅限系统同步任务调用'; end if;
+  if p_years is null or array_length(p_years, 1) is null then
+    raise exception 'p_years 不能为空'; end if;
+  for r in select (e->>'holiday')::date as d, e->>'name' as nm
+           from jsonb_array_elements(coalesce(p_holidays, '[]'::jsonb)) e
+           where extract(year from (e->>'holiday')::date)::int = any(p_years)
+  loop
+    if not exists (select 1 from public_holidays where holiday = r.d) then
+      v_added := v_added || jsonb_build_object('holiday', r.d, 'name', r.nm); changed := true;
+    elsif (select name from public_holidays where holiday = r.d) is distinct from r.nm then
+      v_renamed := v_renamed || jsonb_build_object('holiday', r.d, 'name', r.nm); changed := true;
+    end if;
+    insert into public_holidays (holiday, name, source, synced_at)
+    values (r.d, r.nm, p_source, now())
+    on conflict (holiday) do update set name = excluded.name, source = excluded.source, synced_at = now();
+  end loop;
+  for r in select ph.holiday as d, ph.name as nm from public_holidays ph
+           where extract(year from ph.holiday)::int = any(p_years) and ph.source = p_source
+             and not exists (select 1 from jsonb_array_elements(coalesce(p_holidays, '[]'::jsonb)) e
+                             where (e->>'holiday')::date = ph.holiday)
+  loop
+    v_removed := v_removed || jsonb_build_object('holiday', r.d, 'name', r.nm);
+    delete from public_holidays where holiday = r.d; changed := true;
+  end loop;
+  insert into holiday_sync_log (source, years, added, removed, renamed, total_seen, status)
+  values (p_source, p_years, v_added, v_removed, v_renamed,
+          jsonb_array_length(coalesce(p_holidays, '[]'::jsonb)), 'ok');
+  if changed then
+    add_txt := (select string_agg(to_char((e->>'holiday')::date, 'YYYY-MM-DD (Dy)') || '  ' || (e->>'name'), E'\n')
+                from jsonb_array_elements(v_added || v_renamed) e);
+    rem_txt := (select string_agg(to_char((e->>'holiday')::date, 'YYYY-MM-DD (Dy)') || '  ' || (e->>'name'), E'\n')
+                from jsonb_array_elements(v_removed) e);
+    ann_body := 'The public-holiday calendar was updated from the official MOM source (data.gov.sg). 系统已按 MOM 官方数据更新公共假期。';
+    if add_txt is not null then ann_body := ann_body || E'\n\n➕ Added / updated 新增或更新:\n' || add_txt; end if;
+    if rem_txt is not null then ann_body := ann_body || E'\n\n➖ Removed 移除:\n' || rem_txt; end if;
+    insert into announcements (kind, title, body)
+    values ('holiday', '📅 Public holidays updated 公共假期已更新', ann_body);
+  end if;
+  return jsonb_build_object('changed', changed, 'added', v_added, 'removed', v_removed, 'renamed', v_renamed);
+end $$;
+revoke execute on function apply_holiday_sync(jsonb, int[], text) from anon, public, authenticated;
+grant  execute on function apply_holiday_sync(jsonb, int[], text) to service_role;
+
+-- 20.5 年假结转（上限 5 天、先用结转、次年 12/31 未用作废）
+update leave_types set carry_over_cap = 5 where code = 'annual';
+
+create table if not exists annual_carry (
+  emp_id       uuid    not null references employees (id),
+  year         int     not null,
+  carry_in     numeric(5,1) not null,
+  granted_at   timestamptz not null default now(),
+  expired_days numeric(5,1),
+  expired_at   timestamptz,
+  primary key (emp_id, year)
+);
+alter table annual_carry enable row level security;
+drop policy if exists acarry_read on annual_carry;
+create policy acarry_read on annual_carry for select to authenticated
+  using (emp_id = current_emp_id() or is_hr());
+
+create or replace function annual_used_in_year(p_emp uuid, p_year int)
+returns numeric language sql stable as $$
+  select coalesce(sum(a.days), 0) from applications a
+  where a.emp_id = p_emp and a.leave_type = 'annual' and a.status = 'approved'
+    and extract(year from a.start_date)::int = p_year;
+$$;
+
+create or replace function rollover_annual_leave(p_year int)
+returns int language plpgsql security definer set search_path = public as $$
+declare r record; cap numeric; used numeric; rem numeric; bal numeric; carry numeric; excess numeric; n int := 0;
+begin
+  if not is_hr() and session_user <> 'postgres' then raise exception '只有 HR 能执行年度结转'; end if;
+  cap := coalesce((select carry_over_cap from leave_types where code = 'annual'), 0);
+  for r in select id from employees where active loop
+    perform 1 from annual_carry where emp_id = r.id and year = p_year - 1 and expired_at is null;
+    if found then
+      select carry_in into carry from annual_carry where emp_id = r.id and year = p_year - 1;
+      used := annual_used_in_year(r.id, p_year - 1);
+      rem  := greatest(0, carry - used);
+      if rem > 0 then
+        insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
+        values (r.id, 'annual', -rem, (p_year - 1) || ' 结转年假到期作废 (expired carry-over)', null);
+      end if;
+      update annual_carry set expired_days = rem, expired_at = now()
+        where emp_id = r.id and year = p_year - 1;
+    end if;
+    if not exists (select 1 from annual_carry where emp_id = r.id and year = p_year) then
+      bal    := coalesce((select balance from leave_balances where emp_id = r.id and leave_type = 'annual'), 0);
+      -- 若本年度额度已发放，剔除它 → 只按「上一年遗留」算结转，避免 rollover/grant 执行顺序出错
+      bal    := bal - coalesce((select sum(delta_days) from leave_ledger
+                                where emp_id = r.id and leave_type = 'annual'
+                                  and reason = p_year || ' 年度配额'), 0);
+      carry  := least(cap, greatest(0, bal));
+      excess := greatest(0, bal - cap);
+      if excess > 0 then
+        insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
+        values (r.id, 'annual', -excess, (p_year - 1) || ' 年假超出结转上限(' || cap || ')作废 (excess forfeited)', null);
+      end if;
+      insert into annual_carry (emp_id, year, carry_in) values (r.id, p_year, carry);
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
+end $$;
+revoke execute on function rollover_annual_leave(int) from anon, public;
+grant  execute on function rollover_annual_leave(int) to authenticated;
+
+create or replace view my_annual_carry as
+select ac.year, ac.carry_in,
+       greatest(0, ac.carry_in - annual_used_in_year(ac.emp_id, ac.year)) as remaining,
+       (ac.year || '-12-31')::date as expires_on
+from annual_carry ac
+where ac.expired_at is null and ac.emp_id = current_emp_id()
+  and ac.year = extract(year from current_date)::int;
+alter view my_annual_carry set (security_invoker = true);
+grant select on my_annual_carry to authenticated;
+revoke select on my_annual_carry from anon;

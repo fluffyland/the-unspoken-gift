@@ -124,6 +124,7 @@ td.num{font-variant-numeric:tabular-nums}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
 .field label{font-size:13px;font-weight:600}
 .field .hint{font-size:12px;color:var(--muted)}
+.req{color:#e5484d;font-weight:700;margin-left:2px}
 .frow{display:flex;gap:14px;flex-wrap:wrap}
 .frow .field{flex:1;min-width:160px}
 .check{display:flex;align-items:center;gap:8px;font-size:13.5px}
@@ -347,6 +348,15 @@ async function loadAll() {
 
   db = { org, departments, employees, leaveTypes, publicHolidays, phNames, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
 
+  // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
+  // Views may not exist until the v7 migration runs — degrade gracefully to none.
+  const [annR2, carryR2] = await Promise.all([
+    sb.from("my_announcements").select("*").eq("read", false).order("created_at", { ascending: false }),
+    sb.from("my_annual_carry").select("*").maybeSingle()
+  ]);
+  db.announcements = annR2.error ? [] : (annR2.data || []);
+  db.annualCarry = (carryR2 && !carryR2.error) ? carryR2.data : null;
+
   // Approvers (non-HR) can't read applicants' ledger under RLS; fetch just the
   // available-days number for each application in their inbox via a definer RPC.
   if (me && me.role !== "hr" && me.role !== "admin") {
@@ -562,8 +572,8 @@ function loginPage() {
       Former employee? This account has been deactivated.
       <div class="actions" style="justify-content:center"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
     <form id="loginform" autocomplete="on">
-      <div class="field"><label>Work email</label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
-      <div class="field"><label>Password</label><input type="password" id="li-pass" autocomplete="current-password" required></div>
+      <div class="field"><label>Work email<span class="req">*</span></label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
+      <div class="field"><label>Password<span class="req">*</span></label><input type="password" id="li-pass" autocomplete="current-password" required></div>
       <button class="btn" type="submit" data-act="dologin" style="width:100%;margin-top:6px">Sign in</button>
     </form>`}
     <p class="footnote" style="text-align:center">Each person signs in with their own work email. Forgot your password? Ask HR to reset it.</p>
@@ -586,18 +596,33 @@ function shell() {
   <nav class="nav"><div class="wrap">
     ${navs.map(([v, label]) => `<button data-act="nav" data-v="${v}" class="${view === v ? "on" : ""}">${label}</button>`).join("")}
   </div></nav>
+  ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
   ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}`;
+}
+
+// Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
+function noticeBanner() {
+  const list = db.announcements || [];
+  if (!list.length) return "";
+  return `<div class="wrap" style="padding-top:14px">${list.map(a => `
+    <div class="callout acc" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+        <b>${esc(a.title)}</b>
+        <button class="iconbtn" data-act="annread" data-id="${a.id}" title="Dismiss">✕</button>
+      </div>
+      <div style="white-space:pre-wrap;margin-top:6px">${esc(a.body)}</div>
+    </div>`).join("")}</div>`;
 }
 
 function pwModal() {
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:420px">
     <div class="hd"><h3>Change password</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <p class="meta" style="margin:0 0 12px">Signed in as <b>${esc(me.email)}</b>. Enter your current password, then choose a new one.</p>
-    <div class="field"><label>Current password</label><input type="password" id="pw0" autocomplete="current-password"></div>
-    <div class="field"><label>New password</label><input type="password" id="pw1" autocomplete="new-password">
+    <div class="field"><label>Current password<span class="req">*</span></label><input type="password" id="pw0" autocomplete="current-password"></div>
+    <div class="field"><label>New password<span class="req">*</span></label><input type="password" id="pw1" autocomplete="new-password">
       <span class="hint">At least 8 characters, and different from your current one. A mix of letters and numbers is stronger.</span></div>
-    <div class="field"><label>Repeat new password</label><input type="password" id="pw2" autocomplete="new-password"></div>
+    <div class="field"><label>Repeat new password<span class="req">*</span></label><input type="password" id="pw2" autocomplete="new-password"></div>
     <div class="actions">
       <button class="btn" data-act="pwsave">Change password</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
@@ -619,6 +644,7 @@ function vDashboard() {
       <div style="font-size:15px;font-weight:700;margin-bottom:4px">🔑 Set your own password</div>
       <div style="color:var(--muted);font-size:13px;max-width:520px;margin:0 auto">If you're still using the temporary password, tap <b>🔑 Password</b> at the top-right to pick your own (at least 8 characters). Recommended, not required.</div>
       <div class="actions" style="justify-content:center;margin-top:12px"><button class="btn" data-act="pwopen">Change password now</button><button class="btn sec" data-act="pwhintdismiss">Change it later</button></div></div>`}
+    ${db.annualCarry && db.annualCarry.remaining > 0 ? `<div class="callout acc" style="margin-bottom:16px">🔄 <b>${fmtD(db.annualCarry.remaining)}</b> day(s) of annual leave carried over from ${db.annualCarry.year - 1}. Use them by <b>${fmtDate(db.annualCarry.expires_on)}</b> — carried days are used first and expire after that. (Included in your Annual Leave balance below.)</div>` : ""}
     ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item(s) waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
     <div class="balgrid">${main.map(balCard).join("")}</div>
     <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">More leave types (Maternity / Paternity / Compassionate / Marriage …)</summary>
@@ -654,6 +680,9 @@ function vApply() {
   const days = wdCountHalf(f.start, f.end, f.half);
   const over = !t.noDeduct && days > b.avail;
   const backdated = f.start < todayStr();
+  const curYear = todayStr().slice(0, 4);
+  const yearEnd = curYear + "-12-31";
+  const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
   return `
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
     <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
@@ -664,8 +693,8 @@ function vApply() {
         <span class="hint">${t.noDeduct ? "This type is recorded only — no balance deduction" : `Available: <b>${fmtD(b.avail)}</b> days (entitled ${fmtD(b.granted)}, used ${fmtD(b.used)}, pending ${fmtD(b.pending)})`}${t.note ? " · " + esc(t.note) : ""}</span>
       </div>
       <div class="frow">
-        <div class="field"><label>Start date</label><input type="date" data-f="start" value="${f.start}"></div>
-        <div class="field"><label>End date</label><input type="date" data-f="end" value="${f.end}"></div>
+        <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
+        <div class="field"><label>End date<span class="req">*</span></label><input type="date" data-f="end" value="${f.end}" max="${yearEnd}"></div>
       </div>
       ${wdays.length ? `<div class="field"><label>Half days <span style="font-weight:400;color:var(--muted)">— optional</span></label>
         <div class="hint" style="margin:-2px 0 8px">Every day counts as a full day. Set any single day to morning- or afternoon-only if you're taking just half that day.</div>
@@ -680,13 +709,14 @@ function vApply() {
         ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
       </div>
       ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day(s) but only ${fmtD(b.avail)} available</div>` : ""}
-      <div class="field"><label>Reason</label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
+      ${nextYearBlocked ? `<div class="callout warn" style="margin:0 0 12px">📅 <b>Next year is view-only for now.</b> Leave dated in ${Number(curYear) + 1} opens for applications on 1 Jan ${Number(curYear) + 1} (that's when next year's balance is granted). You can already preview ${Number(curYear) + 1} public holidays in the <b>Calendar</b> tab.</div>` : ""}
+      <div class="field"><label>Reason<span class="req">*</span></label><textarea data-f="reason" rows="2" placeholder="Brief reason">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
-      <div class="field"><label>Attachment${t.mc ? " (photo or PDF of your MC — required)" : " (optional)"}</label>
+      <div class="field"><label>Attachment${t.mc ? ` (photo or PDF of your MC)<span class="req">*</span>` : " (optional)"}</label>
         <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
         <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "Optional — attaching proof (e.g. a flight ticket or booking) can help your approver approve faster. Only you, your approver and HR can open it."}</span></div>
       <div class="actions">
-        <button class="btn" data-act="submit" ${days <= 0 || over ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
+        <button class="btn" data-act="submit" ${days <= 0 || over || nextYearBlocked ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
         ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
       </div>
     </div>`;
@@ -781,7 +811,7 @@ function vCalendar() {
       <div class="chips">${chips}</div></div>`);
   }
   return `<h2>Company leave calendar</h2>
-    <p class="sub">Everyone can see who is away. Approved leave shows in solid colour; leave still pending approval is faded.</p>
+    <p class="sub">Everyone can see who is away. Approved leave shows in solid colour; leave still pending approval is faded. Use <b>Next ›</b> to preview next year's public holidays (applications for next year open on 1 Jan).</p>
     <div class="card">
       <div class="calhead">
         <button class="btn sec" data-act="calmove" data-dir="-1">‹ Prev</button>
@@ -1020,8 +1050,8 @@ function empModal() {
     <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
       <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <div class="frow">
-      <div class="field"><label>Name</label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
-      <div class="field"><label>Email</label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
+      <div class="field"><label>Name<span class="req">*</span></label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
+      <div class="field"><label>Email<span class="req">*</span></label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
         ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>`
                 : `<span class="hint">⚠ Changing this does NOT change their sign-in email — that stays as created in Supabase Auth.</span>`}</div>
     </div>
@@ -1064,8 +1094,8 @@ function oilModal() {
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:460px">
     <div class="hd"><h3>Credit off-in-lieu — ${esc(e.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <p class="meta" style="margin:0 0 12px">Current OIL balance: <b>${fmtD(bal(m.empId, "oil").avail)}</b> day(s)</p>
-    <div class="field" style="max-width:160px"><label>Days to credit</label><input type="number" step="0.5" min="0.5" data-f="oil.days" value="${m.days}"></div>
-    <div class="field"><label>Reason</label><input type="text" data-f="oil.reason" value="${esc(m.reason)}" placeholder="e.g. Worked on Sunday 12 Jul stocktake"></div>
+    <div class="field" style="max-width:160px"><label>Days to credit<span class="req">*</span></label><input type="number" step="0.5" min="0.5" data-f="oil.days" value="${m.days}"></div>
+    <div class="field"><label>Reason<span class="req">*</span></label><input type="text" data-f="oil.reason" value="${esc(m.reason)}" placeholder="e.g. Worked on Sunday 12 Jul stocktake"></div>
     <div class="actions">
       <button class="btn" data-act="oilsave">Credit OIL</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
@@ -1076,7 +1106,7 @@ function offModal() {
   const bals = db.leaveTypes.filter(t => !t.noDeduct && eligible(t, e)).map(t => ({ t, avail: bal(m.empId, t.code).avail })).filter(x => x.avail !== 0);
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:520px">
     <div class="hd"><h3>Offboard — ${esc(e.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
-    <div class="field" style="max-width:200px"><label>Last working day</label><input type="date" data-f="off.lastDay" value="${m.lastDay}"></div>
+    <div class="field" style="max-width:200px"><label>Last working day<span class="req">*</span></label><input type="date" data-f="off.lastDay" value="${m.lastDay}"></div>
     <div class="callout warn" style="margin:0 0 12px"><b>Remaining balances to settle:</b>
       ${bals.length ? `<ul class="conflictlist">${bals.map(x => `<li>${esc(x.t.en)}: <b>${fmtD(x.avail)}</b> day(s)</li>`).join("")}</ul>` : " none — all balances are zero."}
     </div>
@@ -1113,7 +1143,7 @@ function hrSettings() {
   <div class="card"><h3>Company defaults</h3>
     <div class="callout acc" style="margin:10px 0 14px"><b>Nothing about your company is hard-coded.</b> Set your defaults here once; every form uses them. Teams are managed in the Employees tab, leave quotas in the Leave types tab.</div>
     <div class="frow">
-      <div class="field" style="max-width:260px"><label>Company name</label><input type="text" id="org-company" value="${esc(o.company || "")}">
+      <div class="field" style="max-width:260px"><label>Company name<span class="req">*</span></label><input type="text" id="org-company" value="${esc(o.company || "")}">
         <span class="hint">Shown in the top bar and everywhere else</span></div>
       <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" id="org-domain" value="${esc(o.emailDomain || "")}" placeholder="company.com">
         <span class="hint">Add employee auto-fills name@this-domain</span></div>
@@ -1174,9 +1204,9 @@ function hrLedger() {
     <div class="frow">
       <div class="field"><label>Employee</label><select data-f="led.empId">${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
       <div class="field"><label>Leave type</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
-      <div class="field"><label>Days (+ credit / − deduct)</label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
+      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
     </div>
-    <div class="field"><label>Reason</label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
+    <div class="field"><label>Reason<span class="req">*</span></label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
     <button class="btn" data-act="ledadd">Add to ledger</button>
   </div>
   <div class="card"><h3>Ledger (last 30 entries) — balances always equal the sum of entries</h3>
@@ -1232,6 +1262,7 @@ document.addEventListener("click", async ev => {
     case "detail": vp.detail = id; render(); break;
     case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; render(); break;
     case "pwopen": vp.pwModal = true; render(); break;
+    case "annread": { await sb.rpc("mark_announcement_read", { p_id: Number(id) }); db.announcements = (db.announcements || []).filter(a => String(a.id) !== id); render(); break; }
     case "pwhintdismiss": try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} render(); break;
     case "pwsave": {
       const p0 = document.getElementById("pw0")?.value || "", p1 = document.getElementById("pw1")?.value || "", p2 = document.getElementById("pw2")?.value || "";
