@@ -105,6 +105,7 @@ h3{font-size:15px;margin:0 0 10px}
 .st-cancelled{background:var(--gray-soft);color:var(--muted)}
 
 .tablebox{overflow-x:auto}
+.tablebox table.nowrap td,.tablebox table.nowrap th{white-space:nowrap}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
 th{color:var(--muted);font-weight:600;text-align:left;font-size:12px;letter-spacing:.03em}
 th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -279,6 +280,7 @@ const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
 /* ============ Supabase → in-memory cache (renderers read db.* unchanged) ============ */
 const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
+  empNo: r.emp_no || "", alias: r.alias || "", mobile: r.mobile || "",
   twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
   gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days),
@@ -445,7 +447,9 @@ async function signOut() { await sb.auth.signOut(); me = null; db = null; view =
 
 const emp = id => db.employees.find(e => e.id === id);
 const lt = c => db.leaveTypes.find(t => t.code === c);
-const roleName = r => ({ employee: "Employee", approver: "Approver", hr: "HR", admin: "Admin" }[r] || r);
+const roleName = r => ({ employee: "Employee", approver: "Manager / Supervisor", hr: "HR Admin", admin: "Owner / Super Admin" }[r] || r);
+// Only an Owner (admin) may change someone's own routing / leave base / account type; anyone can edit others.
+function canEditSensitive(e) { return me.role === "admin" || e.id !== me.id; }
 const stName = s => ({ pending: "Pending", approved: "Approved", rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", cancel_requested: "Cancellation requested", cancelled: "Cancelled" }[s] || s);
 
 function canSeeLedger(empId) { return empId === me.id || me.role === "hr" || me.role === "admin"; }
@@ -598,7 +602,7 @@ function loginPage() {
 
 function shell() {
   const ib = inbox(me);
-  const navs = [["dashboard", "Overview"], ["apply", "Apply"], ["myapps", "My applications"], ["calendar", "Calendar"]];
+  const navs = [["dashboard", "Overview"], ["profile", "My details"], ["apply", "Apply"], ["myapps", "My applications"], ["calendar", "Calendar"]];
   if (isApprover(me)) navs.push(["approvals", `Approvals${ib.count ? `<span class="cnt">${ib.count}</span>` : ""}`]);
   if (me.role === "hr" || me.role === "admin") navs.push(["hr", "HR Console"]);
   return `
@@ -613,8 +617,8 @@ function shell() {
     ${navs.map(([v, label]) => `<button data-act="nav" data-v="${v}" class="${view === v ? "on" : ""}">${label}</button>`).join("")}
   </div></nav>
   ${noticeBanner()}
-  <main><div class="wrap">${{ dashboard: vDashboard, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}`;
+  <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -690,9 +694,43 @@ function chainText(e) {
 }
 function balCard(t) {
   const b = bal(me.id, t.code);
-  return `<div class="bal"><div class="t">${esc(t.en)}</div><div class="en">${esc(t.zh)}</div>
+  return `<div class="bal"><div class="t">${esc(t.en)}</div>
     <div class="n">${fmtD(b.avail)}<small> days left</small></div>
     <div class="d">Allowance ${fmtD(b.granted)} · Used ${fmtD(b.used)}${b.pending ? " · Pending " + fmtD(b.pending) : ""}</div></div>`;
+}
+
+/* ---- My details (employee self-service) ---- */
+function vProfile() {
+  const cards = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);
+  const g = me.gender === "M" ? "Male" : me.gender === "F" ? "Female" : "—";
+  return `
+    <h2>My details</h2>
+    <p class="sub">Your profile and leave entitlement. To update your details, please contact HR.</p>
+    <div class="card">
+      <h3>Profile</h3>
+      <dl class="kv">
+        <dt>Employee No.</dt><dd>${esc(me.empNo || "—")}</dd>
+        <dt>Name</dt><dd>${esc(me.name)}</dd>
+        <dt>Alias</dt><dd>${esc(me.alias || "—")}</dd>
+        <dt>Gender</dt><dd>${g}</dd>
+        <dt>Email</dt><dd>${esc(me.email)}</dd>
+        <dt>Mobile</dt><dd>${esc(me.mobile || "—")}</dd>
+        <dt>Hire date</dt><dd>${esc(me.joinDate)}</dd>
+        <dt>Department</dt><dd>${esc(me.dept || "—")}</dd>
+        <dt>Occupation</dt><dd>${esc(me.title || "—")}</dd>
+        <dt>Account type</dt><dd>${roleName(me.role)}</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h3>My leave entitlement</h3>
+      <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Allowance</th><th class="num">Used</th><th class="num">Left</th></tr></thead><tbody>
+        ${cards.map(t => { const b = bal(me.id, t.code); return `<tr>
+          <td>${esc(t.en)}${t.noDeduct ? ` <span class="meta">· for records only</span>` : ""}</td>
+          <td class="num">${t.noDeduct ? "—" : fmtD(b.granted)}</td>
+          <td class="num">${fmtD(b.used)}</td>
+          <td class="num">${t.noDeduct ? "—" : fmtD(b.avail)}</td></tr>`; }).join("")}
+      </tbody></table></div>
+    </div>`;
 }
 
 /* ---- Apply ---- */
@@ -726,7 +764,7 @@ function vApply() {
     ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
-        <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}（${esc(x.zh)}）</option>`).join("")}</select>
+        <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}</option>`).join("")}</select>
         <span class="hint">${t.noDeduct
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
@@ -1040,7 +1078,7 @@ function hrEmployees() {
   const shown = activeEmps().filter(e => empMatches(e, q, deptF));
   const deptCount = d => db.employees.filter(e => e.active !== false && e.dept === d).length;
   return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px"><b>Approval routing is set per employee</b> (one level by default; tick “2-level” for a second approver — in-flight applications keep their original route). Annual leave: joined this year = pro-rated by month; +1 day per additional year of service on each annual grant.</div>
+    <div class="callout acc" style="margin-bottom:14px">This tab configures the approval workflow for each employee. By default, a request needs one approver. Add a 2nd level approver if a second approval is required. In-flight applications keep their original route.</div>
     <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
       <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
       <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th><th></th></tr></thead><tbody>
@@ -1067,20 +1105,20 @@ function hrEmployees() {
       <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
     </div>
     <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team / Account type</th><th>Joined</th><th>Level 1 approver</th><th>2-level</th><th>Level 2 approver</th><th class="num">AL base</th><th></th></tr></thead><tbody>
-    ${shown.length ? shown.map(e => `<tr data-emp="${e.id}">
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">AL base</th><th></th></tr></thead><tbody>
+    ${shown.length ? shown.map(e => { const lock = !canEditSensitive(e); const dis = lock ? "disabled" : ""; return `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
-      <td>${esc(e.dept)} · ${roleName(e.role)}</td>
+      <td>${esc(e.dept)}</td>
+      <td>${roleName(e.role)}${lock ? ` <span class="meta" title="Only an Owner/Admin can change your own routing and leave base">🔒</span>` : ""}</td>
       <td class="num">${esc(e.joinDate)}</td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver1">${apprOpts(e.id, e.approver1, e.approver2)}</select></td>
-      <td><input type="checkbox" data-act="empf" data-id="${e.id}" data-f="twoLevel" ${e.twoLevel ? "checked" : ""} ${e.approver1 ? "" : "disabled title=\"Needs a Level 1 approver first\""}></td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.twoLevel && e.approver1 ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
-      <td class="num"><input type="number" step="0.5" min="0" value="${e.annualBase ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase"></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver1" ${dis}>${apprOpts(e.id, e.approver1, e.approver2)}</select></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.approver1 && !lock ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${e.annualBase ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase" ${dis}></td>
       <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
-    </tr>`).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
+    </tr>`; }).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
     <p class="meta" style="margin-top:8px">Off-in-lieu credits and one-off corrections live in <b>Balance adjustments</b>. Offboarding is inside <b>Edit</b> (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
-      <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Joined</th><th>Last working day</th></tr></thead><tbody>
+      <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th></tr></thead><tbody>
       ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${esc(e.joinDate)}</td><td class="num">${esc(e.lastDay || "—")}</td></tr>`).join("")}
       </tbody></table></div></details>` : ""}
     </div>`;
@@ -1088,6 +1126,7 @@ function hrEmployees() {
 function empModal() {
   const m = vp.empModal, f = m.form;
   const isAdd = m.mode === "add";
+  const selfLock = !!m.id && m.id === me.id && me.role !== "admin";
   const calc = annualCalc(f.joinDate, numOr(f.annualBase, 14));
   return `<div class="modalback" data-act="closemodal"><div class="modal">
     <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
@@ -1103,24 +1142,30 @@ function empModal() {
         ${db.departments.map(d => `<option value="${esc(d)}" ${f.dept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}
         <option value="__new" ${f.dept === "__new" ? "selected" : ""}>＋ New team…</option></select></div>
       ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
-      <div class="field"><label>Position / job title</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Sales Executive"></div>
+      <div class="field"><label>Occupation</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Process Engineer"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Employee No.</label><input type="text" data-f="em.empNo" value="${esc(f.empNo || "")}" placeholder="e.g. 00816"></div>
+      <div class="field"><label>Alias</label><input type="text" data-f="em.alias" value="${esc(f.alias || "")}" placeholder="preferred name"></div>
+      <div class="field"><label>Mobile</label><input type="text" data-f="em.mobile" value="${esc(f.mobile || "")}" placeholder="e.g. 9885 7721"></div>
     </div>
     <div class="frow">
       <div class="field"><label>Gender</label><select data-f="em.gender">
         <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
         <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
-      <div class="field"><label>Account type</label><select data-f="em.role">
+      <div class="field"><label>Account type</label><select data-f="em.role" ${selfLock ? "disabled" : ""}>
         ${["employee", "approver", "hr", "admin"].map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
-        <span class="hint">System permissions only. Job titles like “Managing Director” go in Position.</span></div>
-      <div class="field"><label>Join date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
+        <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : "Sets system permissions. Job titles go in Occupation."}</span></div>
+      <div class="field"><label>Hire date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
     </div>
     <div class="frow">
-      <div class="field"><label>Level 1 approver</label><select data-f="em.approver1">${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
-      <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" data-f="em.twoLevel" ${f.twoLevel ? "checked" : ""} ${f.approver1 ? "" : "disabled"}> 2-level</label></div>
-      <div class="field"><label>Level 2 approver</label><select data-f="em.approver2" ${f.twoLevel && f.approver1 ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select></div>
+      <div class="field"><label>1st level approver</label><select data-f="em.approver1" ${selfLock ? "disabled" : ""}>${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
+      <div class="field"><label>2nd level approver</label><select data-f="em.approver2" ${f.approver1 && !selfLock ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select>
+        <span class="hint">Optional — adding one enables a second approval step.</span></div>
     </div>
-    ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No Level 1 approver = leave is auto-approved (e.g. Managing Director), so 2-level routing is not applicable.</p>`}
-    <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}"></div>
+    ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
+    ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
+    <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}></div>
     ${isAdd ? `<div class="callout acc">This year's annual leave is added automatically: <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> — ${esc(calc.note)}.<br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
@@ -1165,16 +1210,41 @@ function offModal() {
 }
 function hrTypes() {
   return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px">Leave types are <b>configuration, not code</b>: when policy changes (e.g. Shared Parental Leave increases to 10 weeks from Apr 2026), update it here. Default days only affect future annual grants.</div>
-    <div class="tablebox"><table><thead><tr><th>Type</th><th>中文</th><th class="num">Default days / year</th><th>Half-day allowed?</th><th>Doctor's cert (MC) needed?</th><th>Who is eligible</th><th>Notes</th></tr></thead><tbody>
+    <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible. Default days only affect next year's allowances.</div>
+    <div class="frow" style="margin-bottom:12px"><button class="btn" data-act="ltadd">+ Add leave type</button></div>
+    <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th><th>Half-day allowed?</th><th>Attachment required?</th><th>Who is eligible</th><th></th></tr></thead><tbody>
     ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
-      <td><b>${esc(t.en)}</b></td><td class="meta">${esc(t.zh)}</td>
+      <td><b>${esc(t.en)}</b>${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}</td>
       <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
+      <td style="text-align:center">${t.noDeduct ? "No" : "Yes"}</td>
       <td style="text-align:center"><input type="checkbox" data-act="typehalf" data-c="${t.code}" ${t.allowHalf ? "checked" : ""}></td>
-      <td>${t.mc ? "<b>Required</b> when applying" : "—"}</td><td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}${t.noDeduct ? " · for records only" : ""}</td>
-      <td class="meta">${esc(t.note || "")}</td></tr>`).join("")}</tbody></table></div>
+      <td style="text-align:center"><input type="checkbox" data-act="typeattach" data-c="${t.code}" ${t.mc ? "checked" : ""}></td>
+      <td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}</td>
+      <td><button class="btn sec" style="padding:4px 10px" data-act="ltedit" data-c="${t.code}">Edit</button></td></tr>`).join("")}</tbody></table></div>
     <p class="meta" style="margin-top:14px">Public holidays are managed in the <b>Company settings</b> tab.</p>
   </div>`;
+}
+// Add / edit a leave type
+function ltModal() {
+  const m = vp.ltModal, isAdd = !m.code;
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:480px">
+    <div class="hd"><h3>${isAdd ? "Add leave type" : "Edit leave type"}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <div class="field"><label>Name<span class="req">*</span></label><input type="text" id="lt-name" value="${esc(m.name || "")}" placeholder="e.g. Work Pass Matters"></div>
+    <div class="frow">
+      <div class="field"><label>Default days / year</label><input type="number" step="0.5" min="0" id="lt-days" value="${m.days ?? 0}"></div>
+      <div class="field"><label>Eligibility</label><select id="lt-gender">
+        <option value="" ${!m.gender ? "selected" : ""}>Everyone</option>
+        <option value="F" ${m.gender === "F" ? "selected" : ""}>Female only</option>
+        <option value="M" ${m.gender === "M" ? "selected" : ""}>Male only</option></select></div>
+    </div>
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-deduct" ${m.deduct ? "checked" : ""}> Deducts from a yearly balance (uncheck for record-only types like Training)</label>
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-attach" ${m.attach ? "checked" : ""}> Attachment required when applying</label>
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-half" ${m.half ? "checked" : ""}> Half-day (AM/PM) allowed</label>
+    <div class="field" style="margin-top:10px"><label>Notes (optional)</label><input type="text" id="lt-note" value="${esc(m.note || "")}" placeholder="Shown under the type name"></div>
+    <div class="actions">
+      <button class="btn" data-act="ltsave">${isAdd ? "Add leave type" : "Save changes"}</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
 }
 function hrSettings() {
   const o = db.org || {};
@@ -1236,7 +1306,7 @@ function hrBalances() {
       <p class="meta" style="margin:0">Each cell shows <b>days left / entitled this year</b> (pending requests already reserved). Export for payroll or backup (e.g. to your NAS).</p>
       <button class="btn sec" data-act="balcsv">⬇ Export CSV</button>
     </div>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th>${types.map(t => `<th class="num" title="${esc(t.en)}">${esc(t.en.split(" ")[0])}</th>`).join("")}</tr></thead><tbody>
+    <div class="tablebox"><table class="nowrap"><thead><tr><th>Employee</th><th>Team</th>${types.map(t => `<th class="num" title="${esc(t.en)}">${esc(t.en.replace(/ Leave$/, ""))}</th>`).join("")}</tr></thead><tbody>
     ${emps.map(e => `<tr>
       <td><b>${esc(e.name)}</b></td><td class="meta">${esc(e.dept)}</td>
       ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num">${fmtD(b.avail)} / ${fmtD(b.granted)}</td>`; }).join("")}
@@ -1307,7 +1377,7 @@ document.addEventListener("click", async ev => {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; render(); break;
     case "pwopen": vp.pwModal = true; render(); break;
     case "annread": { await sb.rpc("mark_announcement_read", { p_id: Number(id) }); db.announcements = (db.announcements || []).filter(a => String(a.id) !== id); render(); break; }
     case "pwhintdismiss": try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} render(); break;
@@ -1335,8 +1405,8 @@ document.addEventListener("click", async ev => {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -1366,7 +1436,7 @@ document.addEventListener("click", async ev => {
       if (!f.name.trim()) return toast("Please fill in the name");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
       if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
-      if (f.twoLevel && (!f.approver2 || f.approver2 === f.approver1)) return toast("2-level routing needs a different Level 2 approver");
+      if (f.approver1 && f.approver2 && f.approver2 === f.approver1) return toast("The 2nd level approver must be different from the 1st.");
       let dept = f.dept;
       if (dept === "__new") {
         dept = (f.newDept || "").trim();
@@ -1378,8 +1448,10 @@ document.addEventListener("click", async ev => {
       if (!dept) return toast("Please choose a team");
       const base = numOr(f.annualBase, 14);
       const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
-        role: f.role, join_date: f.joinDate, approver1: f.approver1 || null, approver2: f.twoLevel ? f.approver2 : null,
-        two_level: !!f.twoLevel, annual_base: base };
+        role: f.role, join_date: f.joinDate, approver1: f.approver1 || null,
+        approver2: (f.approver1 && f.approver2) ? f.approver2 : null,
+        two_level: !!(f.approver1 && f.approver2), annual_base: base,
+        emp_no: (f.empNo || "").trim() || null, alias: (f.alias || "").trim() || null, mobile: (f.mobile || "").trim() || null };
       if (m.mode === "add") {
         const { data: ins, error } = await sb.from("employees").insert(row).select("id").single();
         if (error) return rpcErr(error);
@@ -1402,6 +1474,35 @@ document.addEventListener("click", async ev => {
       break;
     }
     case "oilopen": vp.oilModal = { empId: id, days: 1, reason: "" }; render(); break;
+    case "ltadd": vp.ltModal = { code: null, name: "", days: 0, gender: "", deduct: true, attach: false, half: false, note: "" }; render(); break;
+    case "ltedit": { const t = lt(el.dataset.c); vp.ltModal = { code: t.code, name: t.en, days: t.days, gender: t.gender || "", deduct: !t.noDeduct, attach: !!t.mc, half: !!t.allowHalf, note: t.note || "" }; render(); break; }
+    case "ltsave": {
+      const name = (document.getElementById("lt-name")?.value || "").trim();
+      if (!name) return toast("Please enter a name for the leave type.");
+      const payload = {
+        name_en: name,
+        default_days: numOr(document.getElementById("lt-days")?.value, 0),
+        gender_eligibility: document.getElementById("lt-gender")?.value || null,
+        no_deduct: !document.getElementById("lt-deduct")?.checked,
+        requires_attachment: !!document.getElementById("lt-attach")?.checked,
+        allow_half_day: !!document.getElementById("lt-half")?.checked,
+        note: (document.getElementById("lt-note")?.value || "").trim() || null
+      };
+      const m = vp.ltModal;
+      if (m.code) {
+        const { error } = await sb.from("leave_types").update(payload).eq("code", m.code);
+        if (error) return rpcErr(error);
+      } else {
+        let base = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24) || "type";
+        let code = base, i = 1;
+        while (db.leaveTypes.some(t => t.code === code)) code = base + "_" + (++i);
+        const maxSort = Math.max(0, ...db.leaveTypes.map(t => t.sort || 0));
+        const { error } = await sb.from("leave_types").insert({ code, name_zh: "", sort: maxSort + 1, ...payload });
+        if (error) return rpcErr(error);
+      }
+      delete vp.ltModal; await reload(); toast(m.code ? "Leave type saved." : "Leave type added.");
+      break;
+    }
     case "oilsave": {
       const m = vp.oilModal;
       if (!(Number(m.days) > 0)) return toast("Please enter a number of days greater than zero.");
@@ -1540,9 +1641,8 @@ document.addEventListener("change", async ev => {
     const e = emp(el.dataset.id), f = el.dataset.f;
     const patch = {};
     if (f === "annualBase") patch.annual_base = numOr(el.value, 14);
-    else if (f === "twoLevel") { patch.two_level = el.checked; if (!el.checked) patch.approver2 = null; }
     else if (f === "approver1") { patch.approver1 = el.value || null; if (!el.value) { patch.two_level = false; patch.approver2 = null; } }
-    else if (f === "approver2") patch.approver2 = el.value || null;
+    else if (f === "approver2") { patch.approver2 = el.value || null; patch.two_level = !!el.value; }
     if ((patch.two_level ?? e.twoLevel) && (patch.approver1 ?? e.approver1) && (patch.approver1 ?? e.approver1) === (patch.approver2 ?? e.approver2)) {
       return toast("Level 2 approver must differ from level 1");
     }
@@ -1561,7 +1661,14 @@ document.addEventListener("change", async ev => {
     const { error } = await sb.from("leave_types").update({ allow_half_day: el.checked }).eq("code", el.dataset.c);
     if (error) return rpcErr(error);
     const lty = lt(el.dataset.c); if (lty) lty.allowHalf = el.checked;
-    toast(el.checked ? "Half-day enabled for this leave type" : "Half-day disabled for this leave type");
+    toast(el.checked ? "Half-day enabled for this leave type." : "Half-day disabled for this leave type.");
+    return;
+  }
+  if (el.dataset.act === "typeattach") {
+    const { error } = await sb.from("leave_types").update({ requires_attachment: el.checked }).eq("code", el.dataset.c);
+    if (error) return rpcErr(error);
+    const lty = lt(el.dataset.c); if (lty) lty.mc = el.checked;
+    toast(el.checked ? "Attachment is now required for this leave type." : "Attachment is no longer required for this leave type.");
     return;
   }
   // Company settings now save via an explicit "Save changes" button (data-act="orgsave").

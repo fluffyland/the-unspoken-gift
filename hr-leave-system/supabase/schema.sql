@@ -16,7 +16,10 @@ create table if not exists employees (
   auth_user_id  uuid unique references auth.users (id) on delete set null,
   name          text not null,
   email         text unique not null,
-  title         text,                             -- 职位 / job title（可空）
+  title         text,                             -- 职位 / occupation（可空）
+  emp_no        text,                             -- 工号 / employee number（可空）
+  alias         text,                             -- 别名 / alias（可空）
+  mobile        text,                             -- 手机 / mobile（可空）
   join_date     date not null,
   dept          text,
   gender        text check (gender in ('M','F')),
@@ -59,14 +62,17 @@ insert into leave_types (code,name_zh,name_en,requires_attachment,gender_eligibi
  ('paternity','陪产假','Paternity Leave',false,'M',false,28,null,7,'4 weeks (Government-Paid Paternity Leave), mandatory for children born on/after 1 Apr 2025.'),
  ('shared_parental','共享育儿假','Shared Parental Leave',false,null,false,70,null,8,'10-week shared pool for child born on/after 1 Apr 2026 (6 weeks if born 1 Apr 2025 - 31 Mar 2026)'),
  ('infant','无薪婴儿照顾假','Unpaid Infant Care',false,null,false,6,null,9,'Unpaid. Child under 2: 6 days per parent per year.'),
- ('adoption','领养假','Adoption Leave',false,'F',false,84,null,10,'12 weeks (Government-Paid Adoption Leave).'),
- ('compassionate','恩恤假','Compassionate Leave',false,null,false,3,null,11,'Company benefit - not required by law.'),
- ('marriage','婚假','Marriage Leave',false,null,false,3,null,12,'Company benefit - not required by law.'),
+ ('adoption','领养假','Adoption Leave',true,'F',false,84,null,10,'12 weeks (Government-Paid Adoption Leave).'),
+ ('compassionate','恩恤假','Compassionate Leave',true,null,false,3,null,11,'Company benefit - not required by law.'),
+ ('marriage','婚假','Marriage Leave',true,null,false,3,null,12,'Company benefit - not required by law.'),
  ('ns','战备军人假','NS / Reservist',false,'M',true,0,null,13,'Statutory for NSmen. Recorded only - no quota deduction.'),
- ('unpaid','无薪假','Unpaid Leave',false,null,true,0,null,14,'Recorded only - no quota deduction.')
+ ('unpaid','无薪假','Unpaid Leave',false,null,true,0,null,14,'Recorded only - no quota deduction.'),
+ ('overseas_trip','','Overseas Business Trip Leave',false,null,true,0,null,20,'Recorded only - work travel.'),
+ ('training','','Training Leave',false,null,true,0,null,21,'Recorded only - training / courses.'),
+ ('others','','Others',false,null,true,0,null,22,'Recorded only - anything not covered above.')
 on conflict (code) do nothing;
 -- 半天假默认仅年假 / 补休可请；其余整天（HR 可在控制台按类型开关）
-update leave_types set allow_half_day = (code in ('annual','oil'));
+update leave_types set allow_half_day = true where code in ('annual','oil');
 
 -- ---------- 3. 公共假期（请假折算工作日时排除） ----------
 create table if not exists public_holidays (
@@ -880,3 +886,34 @@ where ac.expired_at is null and ac.emp_id = current_emp_id()
 alter view my_annual_carry set (security_invoker = true);
 grant select on my_annual_carry to authenticated;
 revoke select on my_annual_carry from anon;
+
+-- =============================================================
+-- 21. v8 账号类型权限：Owner 判定 + 自改锁（详见 migration_app_v8.sql §7）
+-- =============================================================
+create or replace function is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from employees
+                 where auth_user_id = auth.uid() and role = 'admin' and active) $$;
+
+create or replace function guard_employee_self_edit() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare me uuid := current_emp_id();
+begin
+  if me is null then return new; end if;      -- SQL Editor / 后台任务放行
+  if is_admin() then return new; end if;       -- Owner 可改任何人任何字段
+  if new.role = 'admin' and (tg_op = 'INSERT' or old.role is distinct from 'admin') then
+    raise exception '只有 Owner 能设置 Owner / Super Admin 账号';
+  end if;
+  if tg_op = 'UPDATE' and new.id = me and (
+       new.approver1   is distinct from old.approver1
+    or new.approver2   is distinct from old.approver2
+    or new.two_level   is distinct from old.two_level
+    or new.annual_base is distinct from old.annual_base
+    or new.role        is distinct from old.role) then
+    raise exception '不能修改自己的审批人 / 年假基数 / 账号类型，请由 Owner 代改';
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_employee_self_edit on employees;
+create trigger trg_employee_self_edit before insert or update on employees
+  for each row execute function guard_employee_self_edit();
