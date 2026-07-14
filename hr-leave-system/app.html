@@ -365,6 +365,9 @@ async function loadAll() {
   const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status }));
 
   db = { org, departments, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  // Feature detection so the UI stays safe before the v8 database migration is applied.
+  db.empExtra = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
+  db.ltHalf   = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -1450,8 +1453,8 @@ document.addEventListener("click", async ev => {
       const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
         role: f.role, join_date: f.joinDate, approver1: f.approver1 || null,
         approver2: (f.approver1 && f.approver2) ? f.approver2 : null,
-        two_level: !!(f.approver1 && f.approver2), annual_base: base,
-        emp_no: (f.empNo || "").trim() || null, alias: (f.alias || "").trim() || null, mobile: (f.mobile || "").trim() || null };
+        two_level: !!(f.approver1 && f.approver2), annual_base: base };
+      if (db.empExtra) { row.emp_no = (f.empNo || "").trim() || null; row.alias = (f.alias || "").trim() || null; row.mobile = (f.mobile || "").trim() || null; }
       if (m.mode === "add") {
         const { data: ins, error } = await sb.from("employees").insert(row).select("id").single();
         if (error) return rpcErr(error);
@@ -1488,6 +1491,7 @@ document.addEventListener("click", async ev => {
         allow_half_day: !!document.getElementById("lt-half")?.checked,
         note: (document.getElementById("lt-note")?.value || "").trim() || null
       };
+      if (!db.ltHalf) delete payload.allow_half_day;   // column added by v8; omit until then
       const m = vp.ltModal;
       if (m.code) {
         const { error } = await sb.from("leave_types").update(payload).eq("code", m.code);
@@ -1658,6 +1662,7 @@ document.addEventListener("change", async ev => {
     return;
   }
   if (el.dataset.act === "typehalf") {
+    if (!db.ltHalf) { el.checked = !el.checked; return toast("Please run the latest database update (migration v8) first to use half-day settings."); }
     const { error } = await sb.from("leave_types").update({ allow_half_day: el.checked }).eq("code", el.dataset.c);
     if (error) return rpcErr(error);
     const lty = lt(el.dataset.c); if (lty) lty.allowHalf = el.checked;
