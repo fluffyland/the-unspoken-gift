@@ -267,6 +267,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 /* Human dates: "20 Jul" (year only when it differs from the current year) */
 const fmtDate = s => { const [y, m, d] = String(s).split("-").map(Number); return d + " " + MON[m - 1] + (y !== new Date().getFullYear() ? " " + y : ""); };
+const fmtDMY = s => { if (!s) return "—"; const [y, m, d] = String(s).split("-"); return (d && m && y) ? `${d}/${m}/${y}` : s; };  // Day/Month/Year
 /* "20 Jul" · "18–20 Jul" · "28 Jul – 2 Aug" */
 const fmtRange = (s, e) => {
   if (!e || e === s) return fmtDate(s);
@@ -330,7 +331,8 @@ async function loadAll() {
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
-    defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14 };
+    defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
+    prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)) };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -366,8 +368,9 @@ async function loadAll() {
 
   db = { org, departments, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
   // Feature detection so the UI stays safe before the v8 database migration is applied.
-  db.empExtra = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
-  db.ltHalf   = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
+  db.empExtra   = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
+  db.ltHalf     = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
+  db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -453,6 +456,83 @@ const lt = c => db.leaveTypes.find(t => t.code === c);
 const roleName = r => ({ employee: "Employee", approver: "Manager / Supervisor", hr: "HR Admin", admin: "Owner / Super Admin" }[r] || r);
 // Only an Owner (admin) may change someone's own routing / leave base / account type; anyone can edit others.
 function canEditSensitive(e) { return me.role === "admin" || e.id !== me.id; }
+
+/* ---- HR Console staged edits: change → stage in vp.draft → Save / Discard (with leave prompt) ---- */
+function ensureDraft() { vp.draft = vp.draft || {}; vp.draft.types = vp.draft.types || {}; vp.draft.emps = vp.draft.emps || {}; vp.draft.org = vp.draft.org || {}; return vp.draft; }
+function draftDirty() { const d = vp.draft; return !!(d && (Object.keys(d.types || {}).length || Object.keys(d.emps || {}).length || Object.keys(d.org || {}).length)); }
+function draftCount() { const d = vp.draft; if (!d) return 0; let n = Object.keys(d.org || {}).length; for (const c in (d.types || {})) n += Object.keys(d.types[c]).length; for (const i in (d.emps || {})) n += Object.keys(d.emps[i]).length; return n; }
+function stageType(code, k, v) { const d = ensureDraft(); d.types[code] = Object.assign({}, d.types[code], { [k]: v }); }
+function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assign({}, d.emps[id], { [k]: v }); }
+function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
+function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
+function ePick(e, k) { const dv = vp.draft && vp.draft.emps[e.id]; return dv && (k in dv) ? dv[k] : ({ approver1: e.approver1, approver2: e.approver2, annualBase: e.annualBase }[k]); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "prorateCap" ? (o.prorateCap ?? "") : (o.defaultAnnualBase ?? 14); }
+function draftSummary() {
+  const d = vp.draft || {}, out = [];
+  for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
+    if ("days" in dv) p.push(`days/yr → ${fmtD(dv.days)}`);
+    if ("half" in dv) p.push(`half-day → ${dv.half ? "allowed" : "off"}`);
+    if ("mc" in dv) p.push(`attachment → ${dv.mc ? "required" : "not required"}`);
+    out.push(`${t ? t.en : c}: ${p.join(", ")}`); }
+  for (const i in (d.emps || {})) { const e = emp(i), dv = d.emps[i], p = [];
+    if ("approver1" in dv) p.push(`1st approver → ${dv.approver1 ? ((emp(dv.approver1) || {}).name || "?") : "none"}`);
+    if ("approver2" in dv) p.push(`2nd approver → ${dv.approver2 ? ((emp(dv.approver2) || {}).name || "?") : "none"}`);
+    if ("annualBase" in dv) p.push(`AL base → ${fmtD(dv.annualBase)}`);
+    out.push(`${e ? e.name : i}: ${p.join(", ")}`); }
+  if (d.org && Object.keys(d.org).length) { const p = [];
+    if ("company" in d.org) p.push(`company name → ${d.org.company}`);
+    if ("domain" in d.org) p.push(`email domain → ${d.org.domain}`);
+    if ("base" in d.org) p.push(`default AL base → ${fmtD(numOr(d.org.base, 14))}`);
+    out.push(`Company settings: ${p.join(", ")}`); }
+  return out;
+}
+async function saveDraft() {
+  const d = vp.draft; if (!d) return true;
+  for (const code in (d.types || {})) { const dv = d.types[code], patch = {};
+    if ("days" in dv) patch.default_days = numOr(dv.days, 0);
+    if ("half" in dv && db.ltHalf) patch.allow_half_day = dv.half;
+    if ("mc" in dv) patch.requires_attachment = dv.mc;
+    if (Object.keys(patch).length) { const { error } = await sb.from("leave_types").update(patch).eq("code", code); if (error) { rpcErr(error); return false; } } }
+  for (const id in (d.emps || {})) { const e = emp(id), dv = d.emps[id], patch = {};
+    if ("approver1" in dv || "approver2" in dv) {
+      const a1 = ("approver1" in dv) ? dv.approver1 : e.approver1;
+      let a2 = ("approver2" in dv) ? dv.approver2 : e.approver2;
+      if (!a1) a2 = null;
+      if (a1 && a2 && a1 === a2) { toast("The 2nd level approver must be different from the 1st."); return false; }
+      patch.approver1 = a1 || null; patch.approver2 = a2 || null; patch.two_level = !!(a1 && a2);
+    }
+    if ("annualBase" in dv) patch.annual_base = numOr(dv.annualBase, 14);
+    if (Object.keys(patch).length) { const { error } = await sb.from("employees").update(patch).eq("id", id); if (error) { rpcErr(error); return false; } } }
+  if (d.org && Object.keys(d.org).length) {
+    const company = ("company" in d.org) ? d.org.company : (db.org.company || "");
+    const domain = ("domain" in d.org) ? d.org.domain : (db.org.emailDomain || "");
+    const base = ("base" in d.org) ? d.org.base : (db.org.defaultAnnualBase ?? 14);
+    if (!String(company).trim()) { toast("Company name can't be empty."); return false; }
+    const patch = { company_name: String(company).trim(), email_domain: String(domain).trim(), default_annual_base: numOr(base, 14) };
+    if (db.orgProrate) { const pc = ("prorateCap" in d.org) ? d.org.prorateCap : db.org.prorateCap; patch.prorate_cap = (pc === "" || pc == null) ? null : numOr(pc, null); }
+    const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
+    if (error) { rpcErr(error); return false; }
+  }
+  return true;
+}
+function saveBar() {
+  const n = draftCount();
+  return `<div class="callout warn" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+    <span>You have <b>${n}</b> unsaved change${n === 1 ? "" : "s"} on this tab.</span>
+    <span class="actions" style="margin:0"><button class="btn" data-act="hrsave">Save changes</button><button class="btn sec" data-act="hrdiscard">Discard</button></span></div>`;
+}
+function leaveModal() {
+  const lines = draftSummary();
+  return `<div class="modalback"><div class="modal" style="max-width:460px">
+    <div class="hd"><h3>You have unsaved changes</h3></div>
+    <p class="meta" style="margin:0 0 8px">You made these changes but haven't saved them yet:</p>
+    <ul style="margin:0 0 14px;padding-left:18px;font-size:13.5px;line-height:1.6">${lines.map(s => `<li>${esc(s)}</li>`).join("")}</ul>
+    <div class="actions">
+      <button class="btn" data-act="hrsaveleave">Save changes</button>
+      <button class="btn bad" data-act="hrdiscardleave">Discard changes</button>
+      <button class="btn sec" data-act="hrkeep">Keep editing</button>
+    </div></div></div>`;
+}
 const stName = s => ({ pending: "Pending", approved: "Approved", rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", cancel_requested: "Cancellation requested", cancelled: "Cancelled" }[s] || s);
 
 function canSeeLedger(empId) { return empId === me.id || me.role === "hr" || me.role === "admin"; }
@@ -621,7 +701,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -718,13 +798,13 @@ function vProfile() {
         <dt>Gender</dt><dd>${g}</dd>
         <dt>Email</dt><dd>${esc(me.email)}</dd>
         <dt>Mobile</dt><dd>${esc(me.mobile || "—")}</dd>
-        <dt>Hire date</dt><dd>${esc(me.joinDate)}</dd>
+        <dt>Hire date</dt><dd>${fmtDMY(me.joinDate)}</dd>
         <dt>Department</dt><dd>${esc(me.dept || "—")}</dd>
         <dt>Occupation</dt><dd>${esc(me.title || "—")}</dd>
         <dt>Account type</dt><dd>${roleName(me.role)}</dd>
       </dl>
     </div>
-    <div class="card">
+    <div class="card" style="margin-top:20px">
       <h3>My leave entitlement</h3>
       <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Allowance</th><th class="num">Used</th><th class="num">Left</th></tr></thead><tbody>
         ${cards.map(t => { const b = bal(me.id, t.code); return `<tr>
@@ -794,7 +874,7 @@ function vApply() {
       ${nextYearBlocked ? `<div class="callout warn" style="margin:0 0 12px">📅 <b>Next year is view-only for now.</b> Leave dated in ${Number(curYear) + 1} opens for applications on 1 Jan ${Number(curYear) + 1} (that's when next year's balance is granted). You can already preview ${Number(curYear) + 1} public holidays in the <b>Calendar</b> tab.</div>` : ""}
       <div class="field"><label>Remarks<span class="req">*</span></label><textarea data-f="reason" rows="2" placeholder="Provide a brief reason for your leave request.">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
-      <div class="field"><label>Attachment${t.mc ? ` (photo or PDF of your MC)<span class="req">*</span>` : "s — Optional"}</label>
+      <div class="field"><label>Attachment${t.mc ? ` (photo or PDF of your MC)<span class="req">*</span>` : "s"}</label>
         <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
         <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "You may attach supporting documents (e.g., a flight itinerary or booking confirmation) if they help provide additional context for your request. Only you, your approver, and HR can view the attachment."}</span></div>
       <div class="actions">
@@ -1031,8 +1111,9 @@ function detailModal(id) {
 function vHR() {
   const tabs = [["records", "All records"], ["balances", "Balances"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Balance adjustments"], ["settings", "Company settings"]];
   if (!tabs.some(t => t[0] === hrTab)) hrTab = "records";
-  return `<h2>HR Console</h2><p class="sub">Company-wide records, balances, approval routing and the leave ledger</p>
+  return `<h2>HR Console</h2><p class="sub">Company-wide records, balances, approval routing and balance adjustments</p>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-act="hrtab" data-t="${k}" class="${hrTab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    ${draftDirty() ? saveBar() : ""}
     ${{ records: hrRecords, balances: hrBalances, employees: hrEmployees, types: hrTypes, ledger: hrLedger, settings: hrSettings }[hrTab]()}`;
 }
 function hrRecords() {
@@ -1063,8 +1144,11 @@ function annualCalc(joinDate, base) {
   const jy = Number(String(joinDate).slice(0, 4)) || y, jm = Number(String(joinDate).slice(5, 7)) || 1;
   if (jy >= y) {
     const monthsLeft = 12 - jm + 1;
-    const days = Math.ceil(base * monthsLeft / 12 * 2) / 2;
-    return { days, note: `pro-rated for their start date — ${fmtD(days)} day${days === 1 ? "" : "s"} this year` };
+    let days = Math.ceil(base * monthsLeft / 12 * 2) / 2;
+    const cap = db && db.org ? db.org.prorateCap : null;
+    const capped = (cap != null && cap !== "" && days > Number(cap));
+    if (capped) days = Number(cap);
+    return { days, note: `pro-rated for their start date — ${fmtD(days)} day${days === 1 ? "" : "s"} this year${capped ? ` (capped at ${fmtD(Number(cap))})` : ""}` };
   }
   const extra = Math.max(0, y - jy - 1);
   return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year${(y - jy) === 1 ? "" : "s"} of service = ${fmtD(base + extra)} day${(base + extra) === 1 ? "" : "s"}` };
@@ -1113,16 +1197,16 @@ function hrEmployees() {
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)}</td>
       <td>${roleName(e.role)}${lock ? ` <span class="meta" title="Only an Owner/Admin can change your own routing and leave base">🔒</span>` : ""}</td>
-      <td class="num">${esc(e.joinDate)}</td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver1" ${dis}>${apprOpts(e.id, e.approver1, e.approver2)}</select></td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${e.approver1 && !lock ? "" : "disabled"}>${apprOpts(e.id, e.approver2, e.approver1)}</select></td>
-      <td class="num"><input type="number" step="0.5" min="0" value="${e.annualBase ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase" ${dis}></td>
+      <td class="num">${fmtDMY(e.joinDate)}</td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver1" ${dis}>${apprOpts(e.id, ePick(e, "approver1"), ePick(e, "approver2"))}</select></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${ePick(e, "approver1") && !lock ? "" : "disabled"}>${apprOpts(e.id, ePick(e, "approver2"), ePick(e, "approver1"))}</select></td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${ePick(e, "annualBase") ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase" ${dis}></td>
       <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
     </tr>`; }).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
     <p class="meta" style="margin-top:8px">Off-in-lieu credits and one-off corrections live in <b>Balance adjustments</b>. Offboarding is inside <b>Edit</b> (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th></tr></thead><tbody>
-      ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${esc(e.joinDate)}</td><td class="num">${esc(e.lastDay || "—")}</td></tr>`).join("")}
+      ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${fmtDMY(e.joinDate)}</td><td class="num">${e.lastDay ? fmtDMY(e.lastDay) : "—"}</td></tr>`).join("")}
       </tbody></table></div></details>` : ""}
     </div>`;
 }
@@ -1130,6 +1214,8 @@ function empModal() {
   const m = vp.empModal, f = m.form;
   const isAdd = m.mode === "add";
   const selfLock = !!m.id && m.id === me.id && me.role !== "admin";
+  const isOwner = me.role === "admin";
+  const roleOpts = (isOwner || f.role === "admin") ? ["employee", "approver", "hr", "admin"] : ["employee", "approver", "hr"];
   const calc = annualCalc(f.joinDate, numOr(f.annualBase, 14));
   return `<div class="modalback" data-act="closemodal"><div class="modal">
     <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
@@ -1138,7 +1224,7 @@ function empModal() {
       <div class="field"><label>Name<span class="req">*</span></label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
       <div class="field"><label>Email<span class="req">*</span></label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
         ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>`
-                : `<span class="hint">⚠ Changing this doesn't change their sign-in email — that stays as it was first set up.</span>`}</div>
+                : `<span class="hint">⚠ You can edit this. It's the address used for notifications and matching — it does <b>not</b> change the email they sign in with (that's managed in your login system: Authentication → Users).</span>`}</div>
     </div>
     <div class="frow">
       <div class="field"><label>Team / department</label><select data-f="em.dept">
@@ -1156,9 +1242,9 @@ function empModal() {
       <div class="field"><label>Gender</label><select data-f="em.gender">
         <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
         <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
-      <div class="field"><label>Account type</label><select data-f="em.role" ${selfLock ? "disabled" : ""}>
-        ${["employee", "approver", "hr", "admin"].map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
-        <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : "Sets system permissions. Job titles go in Occupation."}</span></div>
+      <div class="field"><label>Account type</label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
+        ${roleOpts.map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
+        <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : (!isOwner ? "Only an Owner can grant Owner / Super Admin." : "Sets system permissions. Job titles go in Occupation.")}</span></div>
       <div class="field"><label>Hire date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
     </div>
     <div class="frow">
@@ -1218,10 +1304,10 @@ function hrTypes() {
     <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th><th>Half-day allowed?</th><th>Attachment required?</th><th>Who is eligible</th><th></th></tr></thead><tbody>
     ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
       <td><b>${esc(t.en)}</b>${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}</td>
-      <td class="num"><input type="number" step="0.5" min="0" value="${t.days}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
+      <td class="num"><input type="number" step="0.5" min="0" value="${tPick(t, "days")}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
       <td style="text-align:center">${t.noDeduct ? "No" : "Yes"}</td>
-      <td style="text-align:center"><input type="checkbox" data-act="typehalf" data-c="${t.code}" ${t.allowHalf ? "checked" : ""}></td>
-      <td style="text-align:center"><input type="checkbox" data-act="typeattach" data-c="${t.code}" ${t.mc ? "checked" : ""}></td>
+      <td style="text-align:center"><input type="checkbox" data-act="typehalf" data-c="${t.code}" ${tPick(t, "half") ? "checked" : ""}></td>
+      <td style="text-align:center"><input type="checkbox" data-act="typeattach" data-c="${t.code}" ${tPick(t, "mc") ? "checked" : ""}></td>
       <td>${t.gender ? (t.gender === "F" ? "Female" : "Male") : "All"}</td>
       <td><button class="btn sec" style="padding:4px 10px" data-act="ltedit" data-c="${t.code}">Edit</button></td></tr>`).join("")}</tbody></table></div>
     <p class="meta" style="margin-top:14px">Public holidays are managed in the <b>Company settings</b> tab.</p>
@@ -1260,14 +1346,16 @@ function hrSettings() {
   <div class="card"><h3>Company defaults</h3>
     <div class="callout acc" style="margin:10px 0 14px"><b>Nothing about your company is hard-coded.</b> Set your defaults here once; every form uses them. Teams are managed in the Employees tab, leave allowances in the Leave types tab.</div>
     <div class="frow">
-      <div class="field" style="max-width:260px"><label>Company name<span class="req">*</span></label><input type="text" id="org-company" value="${esc(o.company || "")}">
+      <div class="field" style="max-width:260px"><label>Company name<span class="req">*</span></label><input type="text" id="org-company" data-f="org.company" value="${esc(oPick("company"))}">
         <span class="hint">Shown in the top bar and everywhere else</span></div>
-      <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" id="org-domain" value="${esc(o.emailDomain || "")}" placeholder="company.com">
+      <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" id="org-domain" data-f="org.domain" value="${esc(oPick("domain"))}" placeholder="company.com">
         <span class="hint">Add employee auto-fills name@this-domain</span></div>
-      <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" value="${o.defaultAnnualBase ?? 14}">
+      <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
         <span class="hint">Pre-filled when adding a new employee</span></div>
+      ${db.orgProrate ? `<div class="field" style="max-width:240px"><label>Cap pro-rated annual leave at</label><input type="number" step="0.5" min="0" data-f="org.prorateCap" value="${oPick("prorateCap")}" placeholder="no cap">
+        <span class="hint">Most a new joiner gets in their first (partial) year. Blank = no cap.</span></div>` : ""}
     </div>
-    <div class="actions"><button class="btn" data-act="orgsave">Save changes</button></div>
+    <p class="hint" style="margin:2px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
   <div class="card"><h3>Public holidays — ${thisYear.length} in ${y}</h3>
     <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> (rows marked <span class="meta">· auto</span>); you can still <b>add, edit (✎) or remove (✕)</b> any date by hand.</p>
@@ -1371,8 +1459,13 @@ document.addEventListener("click", async ev => {
   if (act === "dologin") { ev.preventDefault(); return doLogin(); }
   switch (act) {
     case "logout": signOut(); break;
-    case "nav": view = el.dataset.v; vp = {}; render(); break;
-    case "hrtab": hrTab = el.dataset.t; vp = {}; render(); break;
+    case "nav": if (draftDirty()) { vp.leaveTo = { kind: "nav", v: el.dataset.v }; render(); break; } view = el.dataset.v; vp = {}; render(); break;
+    case "hrtab": if (draftDirty()) { vp.leaveTo = { kind: "hrtab", t: el.dataset.t }; render(); break; } hrTab = el.dataset.t; vp = {}; render(); break;
+    case "hrsave": { if (await saveDraft()) { delete vp.draft; await reload(); toast("Changes saved."); } break; }
+    case "hrdiscard": delete vp.draft; render(); break;
+    case "hrkeep": delete vp.leaveTo; render(); break;
+    case "hrdiscardleave": { const to = vp.leaveTo; delete vp.draft; delete vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; render(); break; }
+    case "hrsaveleave": { if (!(await saveDraft())) break; const to = vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; await reload(); break; }
     case "calmove": {
       const dir = Number(el.dataset.dir);
       if (!dir) vp.calMonth = todayStr().slice(0, 7);
@@ -1642,40 +1735,18 @@ document.addEventListener("change", async ev => {
   }
   if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); render(); return; }
   if (el.dataset.act === "empf") {
-    const e = emp(el.dataset.id), f = el.dataset.f;
-    const patch = {};
-    if (f === "annualBase") patch.annual_base = numOr(el.value, 14);
-    else if (f === "approver1") { patch.approver1 = el.value || null; if (!el.value) { patch.two_level = false; patch.approver2 = null; } }
-    else if (f === "approver2") { patch.approver2 = el.value || null; patch.two_level = !!el.value; }
-    if ((patch.two_level ?? e.twoLevel) && (patch.approver1 ?? e.approver1) && (patch.approver1 ?? e.approver1) === (patch.approver2 ?? e.approver2)) {
-      return toast("Level 2 approver must differ from level 1");
-    }
-    const { error } = await sb.from("employees").update(patch).eq("id", e.id);
-    if (error) return rpcErr(error);
-    await reload(); toast("Saved " + e.name + "'s approval route. It applies to new applications from now on.");
-    return;
+    const id = el.dataset.id, f = el.dataset.f;
+    if (f === "annualBase") stageEmp(id, "annualBase", numOr(el.value, 14));
+    else if (f === "approver1") { stageEmp(id, "approver1", el.value || null); if (!el.value) stageEmp(id, "approver2", null); }
+    else if (f === "approver2") stageEmp(id, "approver2", el.value || null);
+    render(); return;
   }
-  if (el.dataset.act === "typedays") {
-    const { error } = await sb.from("leave_types").update({ default_days: Number(el.value) || 0 }).eq("code", el.dataset.c);
-    if (error) return rpcErr(error);
-    await reload(); toast("Saved. This applies to next year's leave allowances.");
-    return;
-  }
+  if (el.dataset.act === "typedays") { stageType(el.dataset.c, "days", numOr(el.value, 0)); render(); return; }
   if (el.dataset.act === "typehalf") {
     if (!db.ltHalf) { el.checked = !el.checked; return toast("Please run the latest database update (migration v8) first to use half-day settings."); }
-    const { error } = await sb.from("leave_types").update({ allow_half_day: el.checked }).eq("code", el.dataset.c);
-    if (error) return rpcErr(error);
-    const lty = lt(el.dataset.c); if (lty) lty.allowHalf = el.checked;
-    toast(el.checked ? "Half-day enabled for this leave type." : "Half-day disabled for this leave type.");
-    return;
+    stageType(el.dataset.c, "half", el.checked); render(); return;
   }
-  if (el.dataset.act === "typeattach") {
-    const { error } = await sb.from("leave_types").update({ requires_attachment: el.checked }).eq("code", el.dataset.c);
-    if (error) return rpcErr(error);
-    const lty = lt(el.dataset.c); if (lty) lty.mc = el.checked;
-    toast(el.checked ? "Attachment is now required for this leave type." : "Attachment is no longer required for this leave type.");
-    return;
-  }
+  if (el.dataset.act === "typeattach") { stageType(el.dataset.c, "mc", el.checked); render(); return; }
   // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
   if (el.dataset.act === "deptname") {
     const oldName = el.dataset.old, newName = el.value.trim();
@@ -1693,6 +1764,7 @@ document.addEventListener("change", async ev => {
   if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
   if (f === "empDept") { vp.empDept = el.value; render(); return; }
   if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); render(); return; }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;

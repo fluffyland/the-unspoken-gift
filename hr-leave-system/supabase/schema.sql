@@ -536,7 +536,9 @@ create or replace function annual_entitlement_for(p_emp uuid, p_year int)
 returns numeric language sql stable as $$
   select case
     when extract(year from e.join_date) >= p_year
-      then ceil(e.annual_base * (12 - extract(month from e.join_date) + 1) / 12 * 2) / 2
+      then least(
+             ceil(e.annual_base * (12 - extract(month from e.join_date) + 1) / 12 * 2) / 2,
+             coalesce((select prorate_cap from org_settings where id = 1), 1e9))
     else e.annual_base + greatest(0, p_year - extract(year from e.join_date) - 1)
   end
   from employees e where e.id = p_emp;
@@ -667,7 +669,8 @@ create table if not exists org_settings (
   company_name text not null default 'My Company',
   email_domain text,
   country      text not null default 'Singapore',
-  default_annual_base numeric(5,1) not null default 14    -- Add employee 表单的年假基数默认值
+  default_annual_base numeric(5,1) not null default 14,   -- Add employee 表单的年假基数默认值
+  prorate_cap         numeric(5,1)                         -- 首年 pro-rate 封顶（null=不封顶）
 );
 insert into org_settings (id, company_name, email_domain)
 values (1, 'Shanghai Uniforms', 'shanghai-uniforms.com')
