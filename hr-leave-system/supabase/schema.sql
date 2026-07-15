@@ -621,6 +621,36 @@ begin
   update employees set active=false, last_working_day=p_last_day where id=p_emp;
 end $$;
 
+-- 彻底删除员工（record + 所有痕迹；登录账号由 create-login 的 remove 动作删除）。仅 HR、不能删自己。
+create or replace function purge_employee(p_emp uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_hr() then raise exception 'Only HR can delete employees'; end if;
+  if p_emp = current_emp_id() then raise exception 'You cannot delete your own account'; end if;
+  if not exists (select 1 from employees where id = p_emp) then raise exception 'Employee not found'; end if;
+  update employees set approver1 = null where approver1 = p_emp;
+  update employees set approver2 = null, two_level = false where approver2 = p_emp;
+  update leave_ledger set created_by = null where created_by = p_emp;
+  delete from applications where emp_id = p_emp;
+  delete from leave_ledger where emp_id = p_emp;
+  delete from approval_steps where approver_id = p_emp;
+  delete from application_events where actor = p_emp;
+  delete from employees where id = p_emp;
+end $$;
+
+-- 清空员工的请假记录（申请 + 账目），保留档案与登录账号。
+create or replace function clear_employee_records(p_emp uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_hr() then raise exception 'Only HR can clear records'; end if;
+  if not exists (select 1 from employees where id = p_emp) then raise exception 'Employee not found'; end if;
+  delete from applications where emp_id = p_emp;
+  delete from leave_ledger where emp_id = p_emp;
+end $$;
+
+grant execute on function purge_employee(uuid) to authenticated;
+grant execute on function clear_employee_records(uuid) to authenticated;
+
 -- ---------- 17. 附件存储（MC 照片/PDF）：私有 bucket + 本人上传 / 本人+链上审批人+HR 可读 ----------
 insert into storage.buckets (id, name, public) values ('attachments','attachments',false)
 on conflict (id) do nothing;

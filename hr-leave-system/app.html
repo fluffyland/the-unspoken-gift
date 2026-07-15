@@ -1302,7 +1302,14 @@ function empModal() {
       <h4>Offboarding</h4>
       <p>Settle ${esc(f.name)}'s remaining leave (encash or clear), withdraw pending applications, deactivate the account and remove their sign-in login. History is kept.</p>
       <button class="btn bad" data-act="offopen" data-id="${m.id}">Offboard ${esc(f.name)}…</button>
-    </div>` : ""}</div></div>`;
+    </div>${m.id !== me.id ? `<div class="dangerzone">
+      <h4>Danger zone — permanent</h4>
+      <p><b>Clear leave records</b> wipes ${esc(f.name)}'s applications and balance history (balances reset to zero) but keeps the account. <b>Delete permanently</b> removes the record, the login and all traces — this cannot be undone. For real leavers use Offboard instead; these are meant for test data.</p>
+      <div class="actions">
+        <button class="btn sec" data-act="clearrec" data-id="${m.id}">Clear leave records…</button>
+        <button class="btn bad" data-act="empdelete" data-id="${m.id}" data-email="${esc(f.email)}">Delete permanently…</button>
+      </div>
+    </div>` : ""}` : ""}</div></div>`;
 }
 function oilModal() {
   const m = vp.oilModal, e = emp(m.empId);
@@ -1444,7 +1451,14 @@ function hrBalances() {
 function hrLedger() {
   const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
   vp.ledForm = f;
-  const led = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
+  const recent = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
+  const s = vp.ledSort || { col: "ts", dir: -1 };
+  const keyOf = { ts: l => l.ts, emp: l => ((emp(l.empId) || {}).name || "").toLowerCase(),
+    type: l => ((lt(l.type) || {}).en || l.type || "").toLowerCase(), delta: l => l.delta,
+    reason: l => (l.reason || "").toLowerCase(), by: l => ((emp(l.by) || {}).name || "system").toLowerCase() }[s.col] || (l => l.ts);
+  const led = recent.slice().sort((a, b) => { const x = keyOf(a), y = keyOf(b); return (x < y ? -1 : x > y ? 1 : 0) * s.dir; });
+  const arrow = c => s.col === c ? (s.dir === 1 ? " ▲" : " ▼") : "";
+  const H = (c, label, cls) => `<th ${cls ? `class="${cls}" ` : ""}data-act="ledsort" data-col="${c}" style="cursor:pointer;user-select:none" title="Sort by ${label}">${label}${arrow(c)}</th>`;
   return `<div class="stack"><div class="card"><h3>Add or correct a balance (off-in-lieu, adjustments, expiry)</h3>
     <p class="meta" style="margin:4px 0 10px">Use this to <b>credit off-in-lieu (OIL)</b> when someone works a weekend or public holiday, or to make one-off corrections. Positive = credit days, negative = deduct.</p>
     <div class="frow">
@@ -1456,7 +1470,8 @@ function hrLedger() {
     <button class="btn" data-act="ledadd">Add to ledger</button>
   </div>
   <div class="card"><h3>Recent adjustments (last 30) — a balance is always the sum of all its entries</h3>
-    <div class="tablebox"><table><thead><tr><th>Time</th><th>Employee</th><th>Type</th><th class="num">±Days</th><th>Reason</th><th>By</th></tr></thead><tbody>
+    <p class="meta" style="margin:0 0 8px">Click any column heading to sort; click again to reverse.</p>
+    <div class="tablebox"><table><thead><tr>${H("ts", "Time", "num")}${H("emp", "Employee")}${H("type", "Type")}${H("delta", "±Days", "num")}${H("reason", "Reason")}${H("by", "By")}</tr></thead><tbody>
     ${led.map(l => `<tr><td class="num meta">${fmtTs(l.ts)}</td><td>${esc((emp(l.empId) || {}).name || "—")}</td><td>${esc((lt(l.type) || {}).en || l.type)}</td>
       <td class="num" style="color:${l.delta >= 0 ? "var(--good)" : "var(--bad)"};font-weight:600">${l.delta > 0 ? "+" : ""}${fmtD(l.delta)}</td>
       <td>${esc(l.reason)}</td><td>${esc((emp(l.by) || {}).name || "system")}</td></tr>`).join("")}
@@ -1528,6 +1543,26 @@ document.addEventListener("click", async ev => {
       const res = await resetPassword(email, eid);
       if (res && res.reset) toast(nm + "'s password has been reset to Ssu123@.");
       else toast(res && res.error ? res.error : "Could not reset the password.");
+      break;
+    }
+    case "clearrec": {
+      const eid = el.dataset.id, nm = (emp(eid) || {}).name || "this employee";
+      if (!confirm("Clear ALL of " + nm + "'s leave records? Their applications and balance history will be wiped and balances reset to zero. The account stays. This cannot be undone.")) break;
+      toast("Clearing records…");
+      const { error } = await sb.rpc("clear_employee_records", { p_emp: eid });
+      if (error) return rpcErr(error);
+      await reload(); toast(nm + "'s leave records have been cleared.");
+      break;
+    }
+    case "empdelete": {
+      const eid = el.dataset.id, email = el.dataset.email, nm = (emp(eid) || {}).name || "this employee";
+      if (!confirm("Permanently DELETE " + nm + "? This removes their record, their login and all their leave history. This cannot be undone.\n\nFor a real leaver use Offboard instead.")) break;
+      toast("Deleting…");
+      const rem = await removeLogin(email, eid);              // delete the auth login first (needs the link)
+      if (rem && rem.error) return toast("Couldn't remove their login (" + rem.error + ") — deletion stopped. Remove the login in Supabase → Authentication, then try again.");
+      const { error } = await sb.rpc("purge_employee", { p_emp: eid });   // then the DB record + traces
+      if (error) return rpcErr(error);
+      delete vp.empModal; await reload(); toast(nm + " has been permanently deleted.");
       break;
     }
     case "pwopen": vp.pwModal = true; render(); break;
@@ -1708,6 +1743,11 @@ document.addEventListener("click", async ev => {
     }
     case "cancelok": { if (await confirmCancel(id, true, "")) toast("Cancellation confirmed — days refunded"); break; }
     case "cancelno": { if (await confirmCancel(id, false, "")) toast("Cancellation declined"); break; }
+    case "ledsort": {
+      const c = el.dataset.col, s = vp.ledSort || { col: "ts", dir: -1 };
+      if (s.col === c) s.dir = -s.dir; else { s.col = c; s.dir = (c === "ts" || c === "delta") ? -1 : 1; }
+      vp.ledSort = s; render(); break;
+    }
     case "ledadd": {
       const f = vp.ledForm;
       if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
