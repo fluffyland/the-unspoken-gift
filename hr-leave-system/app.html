@@ -146,6 +146,7 @@ td.num{font-variant-numeric:tabular-nums}
 .appcard .when{font-size:15px;margin:2px 0;font-variant-numeric:tabular-nums}
 .appcard .why{font-size:13.5px;margin:0 0 2px;overflow-wrap:anywhere}
 .appcard .metarow{font-size:12.5px;color:var(--muted);margin:2px 0 6px}
+.hchip{display:inline-block;padding:2px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;margin:1px 4px 1px 0;background:var(--bg);white-space:nowrap;font-variant-numeric:tabular-nums}
 .meta{color:var(--muted);font-size:13px}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:8px 0}
 .kv dt{color:var(--muted)}
@@ -436,6 +437,15 @@ function halfSummary(a) {
   if (a.sh || a.eh) return (a.sh ? " · first day ½" : "") + (a.eh ? " · last day ½" : "");
   return "";
 }
+// Half-days as small chips (easier to scan than one long comma line)
+function halfChips(a) {
+  const hd = a.halfDays || [];
+  if (hd.length) return hd.map(x => `<span class="hchip">${fmtDate(x.d)} <b>${String(x.part).toUpperCase()}</b></span>`).join("");
+  const c = [];
+  if (a.sh) c.push(`<span class="hchip">First day <b>½</b></span>`);
+  if (a.eh) c.push(`<span class="hchip">Last day <b>½</b></span>`);
+  return c.join("");
+}
 
 /* Refresh the cache from Supabase and re-render (called after every mutation) */
 async function reload() { await loadAll(); render(); }
@@ -579,9 +589,62 @@ function eligible(t, e) { return !t.gender || t.gender === e.gender; }
 /* ============ State machine — all writes go through security-definer RPCs ============ */
 /* The database enforces every rule (permissions, balance, overlap ack, routing);
    these are thin wrappers that call the RPC, surface errors, then reload. */
+// Older database messages arrive in Chinese until migration v11 is applied (and old
+// ledger rows keep their original text forever) — translate them for display.
+const ZH_ERR = [
+  [/申请不在待审批状态/, "This application is no longer pending — it may already have been decided."],
+  [/你不是当前节点的审批人/, "You are not the current approver for this application."],
+  [/拒绝\/退回必须填写原因/, "A note is required when rejecting or returning."],
+  [/同团队有人同日请假/, "Someone in the same team is away on these dates — tick the acknowledgement box to approve anyway."],
+  [/批准失败：该员工 (\S+) 余额不足，无法扣减 (\S+) 天/, "Cannot approve: not enough $1 balance to deduct $2 day(s)."],
+  [/余额不足：需 (\S+) 天，可用 (\S+) 天/, "Not enough balance: $1 day(s) needed, only $2 available."],
+  [/所选日期与已有申请重叠/, "These dates overlap an existing application."],
+  [/所选日期不含工作日/, "The selected dates contain no working days."],
+  [/请假区间无效或过长/, "Invalid date range (maximum about one year)."],
+  [/该假期类型必须上传证明/, "This leave type requires an attachment (e.g. MC)."],
+  [/不符合该假期的资格条件/, "Not eligible for this leave type."],
+  [/次年假期要到 1 月 1 日才开放申请.*$/, "Next year's leave opens for application on 1 Jan (until then the calendar is view-only)."],
+  [/只能重新提交被退回的申请/, "Only a returned application can be resubmitted."],
+  [/只能撤回待审批的本人申请/, "Only your own pending applications can be withdrawn."],
+  [/只能对未开始的已批准请假申请销假/, "Only approved leave that hasn't started yet can be cancelled."],
+  [/申请不在销假确认状态/, "This application has no pending cancellation request."],
+  [/只有第 1 级审批人或 HR 能确认销假/, "Only the 1st level approver or HR can confirm a cancellation."],
+  [/未找到员工档案/, "Employee profile not found."],
+  [/假期类型不存在/, "Unknown leave type."],
+  [/无权查看该员工余额/, "You are not allowed to view this employee's balance."],
+  [/只有 HR 能执行年度入账/, "Only HR can grant the annual leave allowances."],
+  [/只有 HR 能执行年度结转/, "Only HR can run the annual carry-over."],
+  [/只有 HR 能执行离职结算/, "Only HR can offboard employees."],
+  [/不能对自己执行离职结算/, "You cannot offboard yourself."],
+  [/只有 Owner 能设置 Owner \/ Super Admin 账号/, "Only the Owner can assign the Owner / Super Admin role."],
+  [/不能修改自己的审批人.*$/, "You cannot change your own approvers, leave base or account type — ask the Owner to change them."],
+  [/未知动作/, "Unknown action."],
+];
+function zhToEn(m) {
+  for (const [re, en] of ZH_ERR) if (re.test(m)) return m.replace(re, en).replace(/[（(]?acknowledge[）)]?/g, "").trim();
+  return m;
+}
 function rpcErr(error) {
-  const m = (error && (error.message || error.hint || "")) || "Something went wrong";
-  toast(m.length > 120 ? m.slice(0, 120) + "…" : m);
+  const m = zhToEn((error && (error.message || error.hint || "")) || "Something went wrong");
+  toast(m.length > 140 ? m.slice(0, 140) + "…" : m);
+}
+// System announcements created before v11 carried bilingual titles/bodies — strip the
+// Chinese halves for display (announcements are system-written only, so this is safe).
+function annEn(s) {
+  return String(s || "")
+    .replace(/系统已按 MOM 官方数据更新公共假期。/g, "")
+    .replace(/ ?公共假期已更新/g, "").replace(/ ?公共假期已变更（请复核）/g, "")
+    .replace(/ ?新增或更新:/g, ":").replace(/ ?移除:/g, ":")
+    .replace(/ {2,}/g, " ").trim();
+}
+// Ledger reasons written by the database before v11 (and historical rows forever).
+function reasonEn(s) {
+  return String(s || "")
+    .replace(/^请假扣减$/, "Leave taken")
+    .replace(/^销假返还$/, "Refunded — leave cancelled")
+    .replace(/^(\d{4}) 年度配额$/, "$1 annual allowance")
+    .replace(/^(\d{4}) 结转年假到期作废 \(expired carry-over\)$/, "$1 carry-over expired (unused)")
+    .replace(/^(\d{4}) 年假超出结转上限\(([\d.]+)\)作废 \(excess forfeited\)$/, "$1 annual leave above the carry-over cap ($2) — forfeited");
 }
 
 async function submitApp(data, editId) {
@@ -738,10 +801,10 @@ function noticeBanner() {
   return `<div class="wrap" style="padding-top:14px">${list.map(a => `
     <div class="callout ${a.audience === "hr" ? "warn" : "acc"}" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-        <b>${esc(a.title)}</b>
+        <b>${esc(annEn(a.title))}</b>
         <button class="iconbtn" data-act="annread" data-id="${a.id}" title="Dismiss">✕</button>
       </div>
-      <div style="white-space:pre-wrap;margin-top:6px">${esc(a.body)}</div>
+      <div style="white-space:pre-wrap;margin-top:6px">${esc(annEn(a.body))}</div>
     </div>`).join("")}</div>`;
 }
 
@@ -831,6 +894,7 @@ function vProfile() {
         <dt>Account type</dt><dd>${roleName(me.role)}</dd>
       </dl>
     </div>
+    ${teamCard()}
     <div class="card" style="margin-top:20px">
       <h3>My leave entitlement</h3>
       <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Allowance</th><th class="num">Used</th><th class="num">Left</th></tr></thead><tbody>
@@ -841,6 +905,24 @@ function vProfile() {
           <td class="num">${t.noDeduct ? "—" : fmtD(b.avail)}</td></tr>`; }).join("")}
       </tbody></table></div>
     </div>`;
+}
+
+// My team — everyone in the same department. Rendered from the live roster, so a new
+// team member appears for the whole team automatically after the next data refresh.
+function teamCard() {
+  if (!me.dept) return "";
+  const mates = db.employees.filter(e => e.active !== false && e.dept === me.dept)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  return `<div class="card" style="margin-top:20px">
+    <h3>My team — ${esc(me.dept)}</h3>
+    <p class="meta" style="margin:2px 0 8px">${mates.length} member${mates.length === 1 ? "" : "s"}. New teammates show up here automatically.</p>
+    <div class="tablebox"><table><thead><tr><th>Name</th><th>Occupation</th><th>Account type</th></tr></thead><tbody>
+      ${mates.map(e => `<tr>
+        <td><b>${esc(e.name)}</b>${e.id === me.id ? ` <span class="meta">(you)</span>` : ""}</td>
+        <td>${esc(e.title || "—")}</td>
+        <td>${roleName(e.role)}</td></tr>`).join("")}
+    </tbody></table></div>
+  </div>`;
 }
 
 /* ---- Apply ---- */
@@ -1061,11 +1143,17 @@ function vApprovals() {
 function approvalCard(a) {
   const e = emp(a.empId), t = lt(a.type), b = bal(a.empId, a.type);
   const conflicts = overlapConflicts(a);
+  const chips = halfChips(a);
   return `<div class="card appcard">
     <div class="hd"><b>${esc(e.name)}</b><span class="typechip">${esc(t.en)}</span><span class="pill st-pending">${a.steps.length > 1 ? `Level ${a.cur + 1}/${a.steps.length}` : "Pending"}</span></div>
-    <div class="when">${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}${halfSummary(a)}</div>
-    <div class="why">${esc(a.reason)}</div>
-    <div class="metarow">${t.noDeduct ? "For records only — doesn't affect their leave balance" : `Balance after this: <b>${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"}`}${a.att ? ` · ${attLink(a.att)}` : ""} · Submitted ${fmtDate(iso(new Date(a.createdAt)))}${a.backdated ? " · backdated" : ""}</div>
+    <dl class="kv" style="margin:10px 0 4px">
+      <dt>Dates</dt><dd><b>${fmtRange(a.start, a.end)}</b> · ${fmtD(a.days)} day${a.days === 1 ? "" : "s"}${a.backdated ? ` <span class="pill st-returned" style="font-size:11px">backdated</span>` : ""}</dd>
+      ${chips ? `<dt>Half days</dt><dd>${chips}</dd>` : ""}
+      <dt>Remarks</dt><dd>${esc(a.reason)}</dd>
+      <dt>Balance after</dt><dd>${t.noDeduct ? `<span class="meta">For records only — doesn't affect their leave balance</span>` : `<b style="${b.avail <= 0 ? "color:var(--bad)" : ""}">${fmtD(b.avail)}</b> day${b.avail === 1 ? "" : "s"} left`}</dd>
+      ${a.att ? `<dt>Attachment</dt><dd>${attLink(a.att)}</dd>` : ""}
+      <dt>Submitted</dt><dd class="meta">${fmtDate(iso(new Date(a.createdAt)))}</dd>
+    </dl>
     ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 Remind ${esc(e.name)}: the original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
     ${a.steps.length > 1 ? stepsView(a) : ""}
     ${conflicts.length ? `<div class="callout warn" style="margin:8px 0 0">
@@ -1479,7 +1567,7 @@ function hrLedger() {
     <div class="tablebox"><table><thead><tr>${H("ts", "Time", "num")}${H("emp", "Employee")}${H("type", "Type")}${H("delta", "±Days", "num")}${H("reason", "Reason")}${H("by", "By")}</tr></thead><tbody>
     ${led.map(l => `<tr><td class="num meta">${fmtTs(l.ts)}</td><td>${esc((emp(l.empId) || {}).name || "—")}</td><td>${esc((lt(l.type) || {}).en || l.type)}</td>
       <td class="num" style="color:${l.delta >= 0 ? "var(--good)" : "var(--bad)"};font-weight:600">${l.delta > 0 ? "+" : ""}${fmtD(l.delta)}</td>
-      <td>${esc(l.reason)}</td><td>${esc((emp(l.by) || {}).name || "system")}</td></tr>`).join("")}
+      <td>${esc(reasonEn(l.reason))}</td><td>${esc((emp(l.by) || {}).name || "system")}</td></tr>`).join("")}
     </tbody></table></div></div></div>`;
 }
 
@@ -1746,8 +1834,8 @@ document.addEventListener("click", async ev => {
       }
       break;
     }
-    case "cancelok": { if (await confirmCancel(id, true, "")) toast("Cancellation confirmed — days refunded"); break; }
-    case "cancelno": { if (await confirmCancel(id, false, "")) toast("Cancellation declined"); break; }
+    case "cancelok": { if (await confirmCancel(id, true, "")) { render(); toast("Cancellation confirmed — days refunded"); } break; }
+    case "cancelno": { if (await confirmCancel(id, false, "")) { render(); toast("Cancellation declined"); } break; }
     case "ledsort": {
       const c = el.dataset.col, s = vp.ledSort || { col: "ts", dir: -1 };
       if (s.col === c) s.dir = -s.dir; else { s.col = c; s.dir = (c === "ts" || c === "delta") ? -1 : 1; }
@@ -1827,8 +1915,10 @@ document.addEventListener("click", async ev => {
       const cm = (document.getElementById("cm-" + id) || {}).value || "";
       if ((d === "reject" || d === "return") && !cm.trim()) return toast(d === "reject" ? "A reason is required when rejecting" : "Please say what needs to be added before returning");
       const ackEl = document.getElementById("ack-" + id);
-      if (await actOnStep(id, d, cm.trim(), !!(ackEl && ackEl.checked)))
-        toast(d === "approve" ? "Approved" : d === "reject" ? "Rejected — employee notified" : "Returned — employee notified");
+      if (await actOnStep(id, d, cm.trim(), !!(ackEl && ackEl.checked))) {
+        render();  // refresh the page so the card leaves the waiting list right away
+        toast(d === "approve" ? "✅ Approved — moved down to your Decision history" : d === "reject" ? "Rejected — the employee has been notified" : "Returned — the employee has been notified");
+      }
       break;
     }
   }

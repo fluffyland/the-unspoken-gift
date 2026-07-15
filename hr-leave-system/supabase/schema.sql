@@ -244,39 +244,39 @@ declare me employees%rowtype; t leave_types%rowtype; d numeric; app_id uuid; ava
         hd jsonb := coalesce(p_half_days, '[]'::jsonb);
 begin
   select * into me from employees where auth_user_id = auth.uid() and active;
-  if me.id is null then raise exception '未找到员工档案'; end if;
+  if me.id is null then raise exception 'Employee profile not found'; end if;
   -- 串行化同一员工的并发提交：消除余额/重叠「查后写」竞态（锁在事务提交时自动释放）
   perform pg_advisory_xact_lock(hashtext(me.id::text));
   select * into t from leave_types where code = p_type;
-  if t.code is null then raise exception '假期类型不存在'; end if;
+  if t.code is null then raise exception 'Unknown leave type'; end if;
   if t.gender_eligibility is not null and t.gender_eligibility <> me.gender then
-    raise exception '不符合该假期的资格条件'; end if;
+    raise exception 'Not eligible for this leave type'; end if;
   if t.requires_attachment and p_attachment is null then
-    raise exception '该假期类型必须上传证明（MC）'; end if;
+    raise exception 'This leave type requires an attachment (e.g. MC)'; end if;
   -- 范围夹取：进逐日循环前拦掉超大区间，防 CPU DoS
   if p_end < p_start or p_end - p_start > 366 then
-    raise exception '请假区间无效或过长（最多约一年）'; end if;
+    raise exception 'Invalid date range (maximum about one year)'; end if;
   -- 次年日历只读：次年额度要到 1 月 1 日才发放，此前不能申请落在次年的假
   if extract(year from p_start)::int > extract(year from current_date)::int
      or extract(year from p_end)::int > extract(year from current_date)::int then
-    raise exception '次年假期要到 1 月 1 日才开放申请（次年日历现在仅供查看） / Next year''s leave opens on 1 Jan';
+    raise exception 'Next year''s leave opens for application on 1 Jan (until then the calendar is view-only)';
   end if;
   -- 半天假仅对允许的假期类型生效；其余类型忽略半天明细，一律按整天计
   if not coalesce(t.allow_half_day, false) then hd := '[]'::jsonb; end if;
   d := case when jsonb_array_length(hd) > 0
             then working_days_hd(p_start, p_end, hd)
             else working_days(p_start, p_end, p_sh, p_eh) end;
-  if d <= 0 then raise exception '所选日期不含工作日'; end if;
+  if d <= 0 then raise exception 'The selected dates contain no working days'; end if;
   if not t.no_deduct then
     select available into avail from leave_balances
       where emp_id = me.id and leave_type = p_type;
-    if coalesce(avail, 0) < d then raise exception '余额不足：需 % 天，可用 % 天', d, coalesce(avail,0); end if;
+    if coalesce(avail, 0) < d then raise exception 'Not enough balance: % day(s) needed, only % available', d, coalesce(avail,0); end if;
   end if;
   if exists (select 1 from applications a where a.emp_id = me.id
              and a.id is distinct from p_resubmit_id
              and a.status in ('pending','approved','cancel_requested')
              and not (a.end_date < p_start or a.start_date > p_end)) then
-    raise exception '所选日期与已有申请重叠';
+    raise exception 'These dates overlap an existing application';
   end if;
 
   if p_resubmit_id is not null then
@@ -286,7 +286,7 @@ begin
       status='pending', current_step=1, backdated=(p_start<current_date), updated_at=now()
       where id=p_resubmit_id and emp_id=me.id and status='returned'
       returning id into app_id;
-    if app_id is null then raise exception '只能重新提交被退回的申请'; end if;
+    if app_id is null then raise exception 'Only a returned application can be resubmitted'; end if;
     delete from approval_steps where application_id = app_id;
   else
     insert into applications (emp_id,leave_type,start_date,end_date,start_half,end_half,half_days,days,reason,attachment_path,backdated)
@@ -302,7 +302,7 @@ begin
     update applications set status='approved', updated_at=now() where id=app_id;
     if not t.no_deduct then
       insert into leave_ledger (emp_id, leave_type, delta_days, reason, ref_application, created_by)
-      values (me.id, p_type, -d, '请假扣减', app_id, me.id);
+      values (me.id, p_type, -d, 'Leave taken', app_id, me.id);
     end if;
     insert into application_events (application_id, actor, action, comment)
     values (app_id, me.id, 'auto_approved', 'No approver required (Managing Director)');
@@ -358,7 +358,7 @@ begin
     select 1 from applications a join approval_steps s on s.application_id = a.id
     where a.emp_id = p_emp and s.approver_id = current_emp_id()
   ) into allowed;
-  if not allowed then raise exception '无权查看该员工余额'; end if;
+  if not allowed then raise exception 'You are not allowed to view this employee''s balance'; end if;
   return coalesce((select balance from leave_balances where emp_id = p_emp and leave_type = p_code), 0)
        - coalesce((select sum(days) from applications
                    where emp_id = p_emp and leave_type = p_code and status = 'pending'), 0);
@@ -371,25 +371,25 @@ returns void language plpgsql security definer set search_path = public as $$
 declare me_id uuid := current_emp_id(); a applications%rowtype; s approval_steps%rowtype;
         t leave_types%rowtype; nxt approval_steps%rowtype; has_overlap boolean;
 begin
-  if me_id is null then raise exception '未找到员工档案'; end if;
+  if me_id is null then raise exception 'Employee profile not found'; end if;
   select * into a from applications where id = p_app for update;
-  if a.id is null or a.status <> 'pending' then raise exception '申请不在待审批状态'; end if;
+  if a.id is null or a.status <> 'pending' then raise exception 'This application is no longer pending — it may already have been decided'; end if;
   select * into s from approval_steps
     where application_id = p_app and step_order = a.current_step;
   -- 当前节点指名审批人，或 HR 代批他人（HR 不能借此自批）。
   -- is distinct from：me_id/approver_id 任一为 NULL 时仍能正确判否（裸 <> 会得 NULL 而跳过）
   if s.approver_id is distinct from me_id
      and not (is_hr() and a.emp_id is distinct from me_id) then
-    raise exception '你不是当前节点的审批人（HR 可代批他人）'; end if;
+    raise exception 'You are not the current approver for this application'; end if;
   if p_action in ('reject','return') and coalesce(trim(p_comment),'') = '' then
-    raise exception '拒绝/退回必须填写原因'; end if;
+    raise exception 'A note is required when rejecting or returning'; end if;
 
   select * into t from leave_types where code = a.leave_type;
 
   if p_action = 'approve' then
     select exists (select 1 from overlapping_team_leave(p_app)) into has_overlap;
     if has_overlap and not p_ack then
-      raise exception '同团队有人同日请假，必须勾选知晓（acknowledge）后才能批准';
+      raise exception 'Someone in the same team is away on these dates — tick the acknowledgement box to approve anyway';
     end if;
     if has_overlap then update applications set overlap_acknowledged = true where id = p_app; end if;
     update approval_steps set status='approved', comment=p_comment, acted_at=now() where id=s.id;
@@ -406,10 +406,10 @@ begin
         -- 落账前复核：防提交与批准之间余额变化把余额扣成负数
         if coalesce((select balance from leave_balances
                      where emp_id=a.emp_id and leave_type=a.leave_type),0) < a.days then
-          raise exception '批准失败：该员工 % 余额不足，无法扣减 % 天', a.leave_type, a.days;
+          raise exception 'Cannot approve: not enough % balance to deduct % day(s)', a.leave_type, a.days;
         end if;
         insert into leave_ledger (emp_id, leave_type, delta_days, reason, ref_application, created_by)
-        values (a.emp_id, a.leave_type, -a.days, '请假扣减', p_app, me_id);
+        values (a.emp_id, a.leave_type, -a.days, 'Leave taken', p_app, me_id);
       end if;
       insert into application_events (application_id,actor,action,comment)
       values (p_app, me_id, case when has_overlap then 'approved_overlap_ack' else 'approved' end, p_comment);
@@ -425,7 +425,7 @@ begin
     insert into application_events (application_id,actor,action,comment)
     values (p_app, me_id, 'returned', p_comment);
   else
-    raise exception '未知动作 %', p_action;
+    raise exception 'Unknown action %', p_action;
   end if;
 end $$;
 
@@ -436,7 +436,7 @@ declare me_id uuid := current_emp_id();
 begin
   update applications set status='withdrawn', updated_at=now()
     where id=p_app and emp_id=me_id and status='pending';
-  if not found then raise exception '只能撤回待审批的本人申请'; end if;
+  if not found then raise exception 'Only your own pending applications can be withdrawn'; end if;
   insert into application_events (application_id,actor,action) values (p_app, me_id, 'withdrawn');
 end $$;
 
@@ -447,7 +447,7 @@ declare me_id uuid := current_emp_id();
 begin
   update applications set status='cancel_requested', updated_at=now()
     where id=p_app and emp_id=me_id and status='approved' and start_date > current_date;
-  if not found then raise exception '只能对未开始的已批准请假申请销假'; end if;
+  if not found then raise exception 'Only approved leave that hasn''t started yet can be cancelled'; end if;
   insert into application_events (application_id,actor,action) values (p_app, me_id, 'cancel_requested');
 end $$;
 
@@ -456,16 +456,16 @@ returns void language plpgsql security definer set search_path = public as $$
 declare me_id uuid := current_emp_id(); a applications%rowtype; t leave_types%rowtype;
 begin
   select * into a from applications where id=p_app for update;
-  if a.status <> 'cancel_requested' then raise exception '申请不在销假确认状态'; end if;
+  if a.status <> 'cancel_requested' then raise exception 'This application has no pending cancellation request'; end if;
   if not exists (select 1 from approval_steps
                  where application_id=p_app and step_order=1 and approver_id=me_id)
-     and not is_hr() then raise exception '只有第 1 级审批人或 HR 能确认销假'; end if;
+     and not is_hr() then raise exception 'Only the 1st level approver or HR can confirm a cancellation'; end if;
   select * into t from leave_types where code=a.leave_type;
   if p_ok then
     update applications set status='cancelled', updated_at=now() where id=p_app;
     if not t.no_deduct then
       insert into leave_ledger (emp_id, leave_type, delta_days, reason, ref_application, created_by)
-      values (a.emp_id, a.leave_type, a.days, '销假返还', p_app, me_id);
+      values (a.emp_id, a.leave_type, a.days, 'Refunded — leave cancelled', p_app, me_id);
     end if;
     insert into application_events (application_id,actor,action,comment) values (p_app, me_id, 'cancelled', p_comment);
   else
@@ -550,7 +550,7 @@ declare n int := 0; r record; amt numeric;
 begin
   -- 白名单门禁：只有在职 HR（经 API）或 SQL Editor 超级用户可执行。
   -- （旧版 `if auth.uid() is not null and not is_hr()` 会被 anon(auth.uid()=NULL) 绕过。）
-  if not is_hr() and session_user <> 'postgres' then raise exception '只有 HR 能执行年度入账'; end if;
+  if not is_hr() and session_user <> 'postgres' then raise exception 'Only HR can grant the annual leave allowances'; end if;
   for r in
     select e.id as emp_id, t.code, t.default_days
     from employees e cross join leave_types t
@@ -558,12 +558,12 @@ begin
       and (t.gender_eligibility is null or t.gender_eligibility = e.gender)
       and not exists (select 1 from leave_ledger l
                       where l.emp_id = e.id and l.leave_type = t.code
-                        and l.reason = p_year || ' 年度配额')
+                        and l.reason in (p_year || ' 年度配额', p_year || ' annual allowance'))
   loop
     amt := case when r.code = 'annual' then annual_entitlement_for(r.emp_id, p_year) else r.default_days end;
     if amt > 0 then
       insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
-      values (r.emp_id, r.code, amt, p_year || ' 年度配额', current_emp_id());
+      values (r.emp_id, r.code, amt, p_year || ' annual allowance', current_emp_id());
       n := n + 1;
     end if;
   end loop;
@@ -599,9 +599,9 @@ create or replace function offboard_employee(p_emp uuid, p_last_day date, p_mode
 returns void language plpgsql security definer set search_path = public as $$
 declare me_id uuid := current_emp_id(); r record; tgt employees%rowtype;
 begin
-  if not is_hr() then raise exception '只有 HR 能执行离职结算'; end if;
-  if p_mode not in ('encash','clear') then raise exception 'mode 必须是 encash 或 clear'; end if;
-  if p_emp = me_id then raise exception '不能对自己执行离职结算'; end if;
+  if not is_hr() then raise exception 'Only HR can offboard employees'; end if;
+  if p_mode not in ('encash','clear') then raise exception 'mode must be encash or clear'; end if;
+  if p_emp = me_id then raise exception 'You cannot offboard yourself'; end if;
   select * into tgt from employees where id = p_emp;
   if tgt.id is null then raise exception 'Employee not found'; end if;
   if tgt.role = 'admin' and not is_admin() then
@@ -827,9 +827,9 @@ declare
   r record; changed boolean := false; add_txt text; rem_txt text; ann_body text;
 begin
   if current_user <> 'service_role' and session_user <> 'postgres' then
-    raise exception 'apply_holiday_sync 仅限系统同步任务调用'; end if;
+    raise exception 'apply_holiday_sync can only be called by the system sync task'; end if;
   if p_years is null or array_length(p_years, 1) is null then
-    raise exception 'p_years 不能为空'; end if;
+    raise exception 'p_years must not be empty'; end if;
   for r in select (e->>'holiday')::date as d, e->>'name' as nm
            from jsonb_array_elements(coalesce(p_holidays, '[]'::jsonb)) e
            where extract(year from (e->>'holiday')::date)::int = any(p_years)
@@ -859,13 +859,13 @@ begin
                 from jsonb_array_elements(v_added || v_renamed) e);
     rem_txt := (select string_agg(to_char((e->>'holiday')::date, 'YYYY-MM-DD (Dy)') || '  ' || (e->>'name'), E'\n')
                 from jsonb_array_elements(v_removed) e);
-    ann_body := 'The public-holiday calendar was updated from the official MOM source (data.gov.sg). 系统已按 MOM 官方数据更新公共假期。';
-    if add_txt is not null then ann_body := ann_body || E'\n\n➕ Added / updated 新增或更新:\n' || add_txt; end if;
-    if rem_txt is not null then ann_body := ann_body || E'\n\n➖ Removed 移除:\n' || rem_txt; end if;
+    ann_body := 'The public-holiday calendar was updated from the official MOM source (data.gov.sg).';
+    if add_txt is not null then ann_body := ann_body || E'\n\n➕ Added / updated:\n' || add_txt; end if;
+    if rem_txt is not null then ann_body := ann_body || E'\n\n➖ Removed:\n' || rem_txt; end if;
     insert into announcements (kind, title, body, audience)
-    values ('holiday', '📅 Public holidays updated 公共假期已更新', ann_body, 'all');
+    values ('holiday', '📅 Public holidays updated', ann_body, 'all');
     insert into announcements (kind, title, body, audience)
-    values ('holiday', '🛠️ HR: public holidays changed — please review 公共假期已变更（请复核）',
+    values ('holiday', '🛠️ HR: public holidays changed — please review',
             'The automatic sync updated the public-holiday calendar. Review or adjust it in HR Console → Company settings — you can add, edit or remove any date.'
             || E'\n\n' || ann_body, 'hr');
   end if;
@@ -902,7 +902,7 @@ create or replace function rollover_annual_leave(p_year int)
 returns int language plpgsql security definer set search_path = public as $$
 declare r record; cap numeric; used numeric; rem numeric; bal numeric; carry numeric; excess numeric; n int := 0;
 begin
-  if not is_hr() and session_user <> 'postgres' then raise exception '只有 HR 能执行年度结转'; end if;
+  if not is_hr() and session_user <> 'postgres' then raise exception 'Only HR can run the annual carry-over'; end if;
   cap := coalesce((select carry_over_cap from leave_types where code = 'annual'), 0);
   for r in select id from employees where active loop
     perform 1 from annual_carry where emp_id = r.id and year = p_year - 1 and expired_at is null;
@@ -912,7 +912,7 @@ begin
       rem  := greatest(0, carry - used);
       if rem > 0 then
         insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
-        values (r.id, 'annual', -rem, (p_year - 1) || ' 结转年假到期作废 (expired carry-over)', null);
+        values (r.id, 'annual', -rem, (p_year - 1) || ' carry-over expired (unused)', null);
       end if;
       update annual_carry set expired_days = rem, expired_at = now()
         where emp_id = r.id and year = p_year - 1;
@@ -922,12 +922,12 @@ begin
       -- 若本年度额度已发放，剔除它 → 只按「上一年遗留」算结转，避免 rollover/grant 执行顺序出错
       bal    := bal - coalesce((select sum(delta_days) from leave_ledger
                                 where emp_id = r.id and leave_type = 'annual'
-                                  and reason = p_year || ' 年度配额'), 0);
+                                  and reason in (p_year || ' 年度配额', p_year || ' annual allowance')), 0);
       carry  := least(cap, greatest(0, bal));
       excess := greatest(0, bal - cap);
       if excess > 0 then
         insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
-        values (r.id, 'annual', -excess, (p_year - 1) || ' 年假超出结转上限(' || cap || ')作废 (excess forfeited)', null);
+        values (r.id, 'annual', -excess, (p_year - 1) || ' annual leave above the carry-over cap (' || cap || ') — forfeited', null);
       end if;
       insert into annual_carry (emp_id, year, carry_in) values (r.id, p_year, carry);
       n := n + 1;
@@ -965,7 +965,7 @@ begin
   if coalesce(current_setting('leavedesk.svc', true), '') = '1' then return new; end if;  -- 服务端函数内部放行
   if is_admin() then return new; end if;       -- Owner 可改任何人任何字段
   if new.role = 'admin' and (tg_op = 'INSERT' or old.role is distinct from 'admin') then
-    raise exception '只有 Owner 能设置 Owner / Super Admin 账号';
+    raise exception 'Only the Owner can assign the Owner / Super Admin role';
   end if;
   if tg_op = 'UPDATE' and new.id = me and (
        new.approver1   is distinct from old.approver1
@@ -973,7 +973,7 @@ begin
     or new.two_level   is distinct from old.two_level
     or new.annual_base is distinct from old.annual_base
     or new.role        is distinct from old.role) then
-    raise exception '不能修改自己的审批人 / 年假基数 / 账号类型，请由 Owner 代改';
+    raise exception 'You cannot change your own approvers, leave base or account type — ask the Owner to change them';
   end if;
   return new;
 end $$;
