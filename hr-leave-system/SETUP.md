@@ -104,6 +104,21 @@
    见 auto-deploy）。前端会在登录后展示未读公告、仪表盘显示「本年结转 X 天，X 前用完」，
    申请页对次年日期只读、必填项标红 `*`。
 
+## 一键创建员工登录（create-login Edge Function）
+
+让「Add employee」直接建好登录账号，HR 不用再去 Supabase Authentication 手动开号。
+一次性部署，之后永久一键。
+
+1. **部署函数**（二选一）：
+   - **Dashboard（免 CLI）**：Supabase → **Edge Functions** → **Create a new function** →
+     命名 `create-login` → 把 `supabase/functions/create-login/index.ts` 全文粘贴 → **Deploy**。
+   - **CLI**：`supabase functions deploy create-login`
+   > 无需任何密钥：`SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY` 平台自动注入。
+2. **关自助注册**（保持）：Authentication → Providers/Settings 里「Enable email signups」可关；
+   本函数用 service_role 建号并预确认邮箱，员工可立即用「邮箱 + 临时密码」登录。
+3. 用法：应用里 **Add employee** 保存后会自动建登录并弹出**临时密码**（转交员工，
+   让其首次登录后改密）。给老员工补登录：打开其 **Edit** → **Create login**。
+
 ## 每年例行维护（HR）—— v7 后已自动化
 
 - **公共假期**：无需再手工维护——系统每月自动核对、次年公布后自动载入并公告全员。

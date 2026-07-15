@@ -281,7 +281,7 @@ const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
 /* ============ Supabase → in-memory cache (renderers read db.* unchanged) ============ */
 const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
-  empNo: r.emp_no || "", alias: r.alias || "", mobile: r.mobile || "",
+  empNo: r.emp_no || "", alias: r.alias || "", mobile: r.mobile || "", hasLogin: !!r.auth_user_id,
   twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
   gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days),
@@ -439,6 +439,15 @@ function halfSummary(a) {
 
 /* Refresh the cache from Supabase and re-render (called after every mutation) */
 async function reload() { await loadAll(); render(); }
+// One-click login creation via the create-login Edge Function (HR-only, checked server-side).
+async function createLogin(email, empId) {
+  try {
+    const { data, error } = await sb.functions.invoke("create-login", { body: { email, emp_id: empId } });
+    if (error) { let msg = ""; try { msg = (await error.context.json()).error || ""; } catch (e) {} return { error: msg || error.message || "Could not reach the create-login function." }; }
+    if (data && data.error) return { error: data.error };
+    return data || {};
+  } catch (e) { return { error: (e && e.message) || "Could not create the login." }; }
+}
 /* Resolve the signed-in auth user to their employee row */
 async function loadMe() {
   const { data: { user } } = await sb.auth.getUser();
@@ -701,7 +710,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -1210,6 +1219,15 @@ function hrEmployees() {
       </tbody></table></div></details>` : ""}
     </div>`;
 }
+function loginResultModal() {
+  const m = vp.loginResult;
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:440px">
+    <div class="hd"><h3>✅ Login created for ${esc(m.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <p class="meta" style="margin:0 0 12px">Share these sign-in details with ${esc(m.name)}. Ask them to change the password after their first sign-in (top-right → 🔑 Password).</p>
+    <dl class="kv"><dt>Email</dt><dd><b>${esc(m.email)}</b></dd><dt>Temporary password</dt><dd><b style="font-size:16px;letter-spacing:.5px">${esc(m.password)}</b></dd></dl>
+    <div class="actions"><button class="btn" data-act="closemodal">Done</button></div>
+  </div></div>`;
+}
 function empModal() {
   const m = vp.empModal, f = m.form;
   const isAdd = m.mode === "add";
@@ -1233,6 +1251,7 @@ function empModal() {
       ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
       <div class="field"><label>Occupation</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Process Engineer"></div>
     </div>
+    ${(!isAdd && f.hasLogin === false) ? `<div class="callout warn" style="margin:0 0 12px">This person has no sign-in account yet. <button class="btn" style="margin-left:8px;padding:6px 12px" data-act="createlogin" data-id="${m.id}" data-email="${esc(f.email)}">Create login</button></div>` : ""}
     <div class="frow">
       <div class="field"><label>Employee No.</label><input type="text" data-f="em.empNo" value="${esc(f.empNo || "")}" placeholder="e.g. 00816"></div>
       <div class="field"><label>Alias</label><input type="text" data-f="em.alias" value="${esc(f.alias || "")}" placeholder="preferred name"></div>
@@ -1473,7 +1492,15 @@ document.addEventListener("click", async ev => {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; delete vp.loginResult; render(); break;
+    case "createlogin": {
+      const email = el.dataset.email, eid = el.dataset.id;
+      toast("Creating login…");
+      const res = await createLogin(email, eid);
+      if (res && res.password) { const nm = (emp(eid) || {}).name || email; delete vp.empModal; await reload(); vp.loginResult = { name: nm, email, password: res.password }; render(); }
+      else toast(res && res.error ? res.error : "Could not create the login.");
+      break;
+    }
     case "pwopen": vp.pwModal = true; render(); break;
     case "annread": { await sb.rpc("mark_announcement_read", { p_id: Number(id) }); db.announcements = (db.announcements || []).filter(a => String(a.id) !== id); render(); break; }
     case "pwhintdismiss": try { localStorage.setItem("pwhint_" + me.id, "1"); } catch (e) {} render(); break;
@@ -1501,8 +1528,8 @@ document.addEventListener("click", async ev => {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -1561,7 +1588,11 @@ document.addEventListener("click", async ev => {
             reason: t.code === "annual" ? "Pro-rated leave allowance (joined " + f.joinDate + ")" : "Leave allowance on joining", created_by: me.id });
         }
         if (rows.length) { const { error: e2 } = await sb.from("leave_ledger").insert(rows); if (e2) return rpcErr(e2); }
-        delete vp.empModal; await reload(); toast(f.name.trim() + " has been added, with " + fmtD(calc.days) + " day" + (calc.days === 1 ? "" : "s") + " of annual leave. Next, create their sign-in account using the same email address.");
+        const nm = f.name.trim(), addedMsg = nm + " has been added, with " + fmtD(calc.days) + " day" + (calc.days === 1 ? "" : "s") + " of annual leave.";
+        const login = await createLogin(row.email, ins.id);
+        delete vp.empModal; await reload();
+        if (login && login.password) { vp.loginResult = { name: nm, email: row.email, password: login.password }; render(); }
+        else toast(addedMsg + " Their login wasn't auto-created" + (login && login.error ? " (" + login.error + ")" : "") + " — open their Edit form and click ‘Create login’.");
       } else {
         const { error } = await sb.from("employees").update(row).eq("id", m.id);
         if (error) return rpcErr(error);
