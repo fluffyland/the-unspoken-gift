@@ -597,11 +597,17 @@ create trigger on_auth_user_created
 -- ---------- 16. 离职结算（HR）：撤回在途申请 → 余额结清（encash/clear）→ 停用账号 ----------
 create or replace function offboard_employee(p_emp uuid, p_last_day date, p_mode text)
 returns void language plpgsql security definer set search_path = public as $$
-declare me_id uuid := current_emp_id(); r record; remaining numeric;
+declare me_id uuid := current_emp_id(); r record; tgt employees%rowtype;
 begin
   if not is_hr() then raise exception '只有 HR 能执行离职结算'; end if;
   if p_mode not in ('encash','clear') then raise exception 'mode 必须是 encash 或 clear'; end if;
   if p_emp = me_id then raise exception '不能对自己执行离职结算'; end if;
+  select * into tgt from employees where id = p_emp;
+  if tgt.id is null then raise exception 'Employee not found'; end if;
+  if tgt.role = 'admin' and not is_admin() then
+    raise exception 'Only the Owner / Super Admin can offboard an Owner account';
+  end if;
+  perform set_config('leavedesk.svc', '1', true);
 
   update applications set status='withdrawn', updated_at=now()
     where emp_id=p_emp and status='pending';
@@ -618,34 +624,57 @@ begin
             case when p_mode='encash' then 'encashed' else 'cleared' end, me_id);
   end loop;
 
+  -- 他名下待审的别人申请 → 转给执行操作的 HR；把他从别人的审批链上摘下来
+  update approval_steps set approver_id = me_id
+    where approver_id = p_emp and status in ('pending', 'waiting');
+  update employees set approver1 = null where approver1 = p_emp;
+  update employees set approver2 = null, two_level = false where approver2 = p_emp;
+
   update employees set active=false, last_working_day=p_last_day where id=p_emp;
 end $$;
 
--- 彻底删除员工（record + 所有痕迹；登录账号由 create-login 的 remove 动作删除）。仅 HR、不能删自己。
+-- 彻底删除员工（record + 所有痕迹；登录账号由 create-login 的 remove 动作删除）。
+-- 仅 HR、不能删自己、目标是 Owner 时只有 Owner 能删；待审环节转给执行操作的 HR。
 create or replace function purge_employee(p_emp uuid) returns void
 language plpgsql security definer set search_path = public as $$
+declare me_id uuid := current_emp_id(); tgt employees%rowtype;
 begin
   if not is_hr() then raise exception 'Only HR can delete employees'; end if;
-  if p_emp = current_emp_id() then raise exception 'You cannot delete your own account'; end if;
-  if not exists (select 1 from employees where id = p_emp) then raise exception 'Employee not found'; end if;
+  if p_emp = me_id then raise exception 'You cannot delete your own account'; end if;
+  select * into tgt from employees where id = p_emp;
+  if tgt.id is null then raise exception 'Employee not found'; end if;
+  if tgt.role = 'admin' and not is_admin() then
+    raise exception 'Only the Owner / Super Admin can delete an Owner account';
+  end if;
+  perform set_config('leavedesk.svc', '1', true);   -- 本事务内放行守卫触发器
   update employees set approver1 = null where approver1 = p_emp;
   update employees set approver2 = null, two_level = false where approver2 = p_emp;
   update leave_ledger set created_by = null where created_by = p_emp;
   delete from applications where emp_id = p_emp;
   delete from leave_ledger where emp_id = p_emp;
+  delete from annual_carry where emp_id = p_emp;
+  delete from announcement_reads where emp_id = p_emp;
+  update approval_steps set approver_id = me_id
+    where approver_id = p_emp and status in ('pending', 'waiting');
   delete from approval_steps where approver_id = p_emp;
   delete from application_events where actor = p_emp;
   delete from employees where id = p_emp;
 end $$;
 
--- 清空员工的请假记录（申请 + 账目），保留档案与登录账号。
+-- 清空员工的请假记录（申请 + 账目 + 结转），保留档案与登录账号。
 create or replace function clear_employee_records(p_emp uuid) returns void
 language plpgsql security definer set search_path = public as $$
+declare tgt employees%rowtype;
 begin
   if not is_hr() then raise exception 'Only HR can clear records'; end if;
-  if not exists (select 1 from employees where id = p_emp) then raise exception 'Employee not found'; end if;
+  select * into tgt from employees where id = p_emp;
+  if tgt.id is null then raise exception 'Employee not found'; end if;
+  if tgt.role = 'admin' and not is_admin() then
+    raise exception 'Only the Owner / Super Admin can clear an Owner account''s records';
+  end if;
   delete from applications where emp_id = p_emp;
   delete from leave_ledger where emp_id = p_emp;
+  delete from annual_carry where emp_id = p_emp;
 end $$;
 
 grant execute on function purge_employee(uuid) to authenticated;
@@ -933,6 +962,7 @@ language plpgsql security definer set search_path = public as $$
 declare me uuid := current_emp_id();
 begin
   if me is null then return new; end if;      -- SQL Editor / 后台任务放行
+  if coalesce(current_setting('leavedesk.svc', true), '') = '1' then return new; end if;  -- 服务端函数内部放行
   if is_admin() then return new; end if;       -- Owner 可改任何人任何字段
   if new.role = 'admin' and (tg_op = 'INSERT' or old.role is distinct from 'admin') then
     raise exception '只有 Owner 能设置 Owner / Super Admin 账号';

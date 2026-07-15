@@ -107,7 +107,9 @@
 ## 一键创建员工登录（create-login Edge Function）
 
 让「Add employee」直接建好登录账号，HR 不用再去 Supabase Authentication 手动开号。
-一次性部署，之后永久一键。
+一次性部署，之后永久一键。同一个函数还负责：**Reset password**（重置回默认密码
+`Ssu123@`）与 **remove**（离职/删除时收回登录）。目标是 Owner / Super Admin 账号时，
+只有另一位 Owner 能操作（防 HR 重置 Owner 密码接管账号）。
 
 1. **部署函数**（二选一）：
    - **Dashboard（免 CLI）**：Supabase → **Edge Functions** → **Create a new function** →
@@ -121,6 +123,15 @@
    打开其 **Edit** → **Create login**。
    > `Ssu123@` 含大小写字母、数字、符号，满足常见复杂度要求；一般不会被最小长度或
    > 泄露密码检查拦下。改动此默认密码只需改函数里的 `DEFAULT_PASSWORD` 再重新部署。
+
+## 员工删除 / 清空记录（migration v10）
+
+SQL Editor 跑一次 `supabase/migration_app_v10.sql`，应用里 Edit 表单底部即多出两个按钮：
+- **Clear leave records**：清空该员工的申请与账目（余额归零），保留档案与登录；
+- **Delete permanently**：先收回登录，再删除档案与全部痕迹（测试数据用；真实离职用 Offboard）。
+
+v10 同时加固：HR 不能删除/清空/离职结算 Owner 账号；被删除或离职者名下**待审**的
+别人申请自动转给执行操作的 HR（不会卡死）；其审批人引用自动解开。
 
 ## 每年例行维护（HR）—— v7 后已自动化
 

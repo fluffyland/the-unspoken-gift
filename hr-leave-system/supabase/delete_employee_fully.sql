@@ -19,9 +19,11 @@ begin
   -- 2) 他给别人记账时的 created_by 置空（保留别人的账目）
   update leave_ledger set created_by = null where created_by = v_id;
 
-  -- 3) 他自己的申请（approval_steps / application_events 会级联删除）与账目
+  -- 3) 他自己的申请（approval_steps / application_events 会级联删除）、账目、结转、公告已读
   delete from applications where emp_id = v_id;
   delete from leave_ledger where emp_id = v_id;
+  delete from annual_carry where emp_id = v_id;
+  delete from announcement_reads where emp_id = v_id;
 
   -- 4) 他在别人申请上留下的审批步骤/事件（审计痕迹，彻底清除时一并删）
   delete from approval_steps where approver_id = v_id;

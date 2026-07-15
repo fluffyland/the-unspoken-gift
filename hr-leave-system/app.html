@@ -1251,6 +1251,10 @@ function empModal() {
   const isAdd = m.mode === "add";
   const selfLock = !!m.id && m.id === me.id && me.role !== "admin";
   const isOwner = me.role === "admin";
+  // Gate on the STORED role (not the form value) so login/offboard/delete controls
+  // for an Owner account only show to another Owner. Enforced server-side too.
+  const stored = isAdd ? null : emp(m.id);
+  const adminLocked = !!stored && stored.role === "admin" && !isOwner;
   const roleOpts = (isOwner || f.role === "admin") ? ["employee", "approver", "hr", "admin"] : ["employee", "approver", "hr"];
   const calc = annualCalc(f.joinDate, numOr(f.annualBase, 14));
   return `<div class="modalback" data-act="closemodal"><div class="modal">
@@ -1269,8 +1273,9 @@ function empModal() {
       ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
       <div class="field"><label>Occupation</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Process Engineer"></div>
     </div>
-    ${(!isAdd && f.hasLogin === false) ? `<div class="callout warn" style="margin:0 0 12px">This person has no sign-in account yet. <button class="btn" style="margin-left:8px;padding:6px 12px" data-act="createlogin" data-id="${m.id}" data-email="${esc(f.email)}">Create login</button></div>` : ""}
-    ${(!isAdd && f.hasLogin !== false) ? `<div class="callout" style="margin:0 0 12px">Forgot their password? Reset it to the default (<b>Ssu123@</b>). <button class="btn sec" style="margin-left:8px;padding:6px 12px" data-act="resetpw" data-id="${m.id}" data-email="${esc(f.email)}">Reset password</button></div>` : ""}
+    ${(!isAdd && adminLocked) ? `<div class="callout" style="margin:0 0 12px">This is an Owner / Super Admin account — only another Owner can manage its login, offboarding or deletion.</div>` : ""}
+    ${(!isAdd && !adminLocked && f.hasLogin === false) ? `<div class="callout warn" style="margin:0 0 12px">This person has no sign-in account yet. <button class="btn" style="margin-left:8px;padding:6px 12px" data-act="createlogin" data-id="${m.id}" data-email="${esc(f.email)}">Create login</button></div>` : ""}
+    ${(!isAdd && !adminLocked && f.hasLogin !== false) ? `<div class="callout" style="margin:0 0 12px">Forgot their password? Reset it to the default (<b>Ssu123@</b>). <button class="btn sec" style="margin-left:8px;padding:6px 12px" data-act="resetpw" data-id="${m.id}" data-email="${esc(f.email)}">Reset password</button></div>` : ""}
     <div class="frow">
       <div class="field"><label>Employee No.</label><input type="text" data-f="em.empNo" value="${esc(f.empNo || "")}" placeholder="e.g. 00816"></div>
       <div class="field"><label>Alias</label><input type="text" data-f="em.alias" value="${esc(f.alias || "")}" placeholder="preferred name"></div>
@@ -1298,7 +1303,7 @@ function empModal() {
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
     </div>
-    ${!isAdd ? `<div class="dangerzone">
+    ${(!isAdd && !adminLocked) ? `<div class="dangerzone">
       <h4>Offboarding</h4>
       <p>Settle ${esc(f.name)}'s remaining leave (encash or clear), withdraw pending applications, deactivate the account and remove their sign-in login. History is kept.</p>
       <button class="btn bad" data-act="offopen" data-id="${m.id}">Offboard ${esc(f.name)}…</button>

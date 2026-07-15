@@ -35,29 +35,40 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader.startsWith("Bearer ")) return json({ error: "Not signed in." }, 401);
 
-    // 1) 用调用者身份校验是否 HR/admin（is_hr() 依 auth.uid()）
+    // 1) 用调用者身份校验是否 HR/admin（is_hr()/is_admin() 依 auth.uid()）
     const asUser = createClient(URL, ANON, { global: { headers: { Authorization: authHeader } } });
     const { data: isHr, error: hrErr } = await asUser.rpc("is_hr");
     if (hrErr) return json({ error: "Could not verify permissions: " + hrErr.message }, 400);
-    if (!isHr) return json({ error: "Only HR can create logins." }, 403);
+    if (!isHr) return json({ error: "Only HR can manage logins." }, 403);
+    // 调用者是否 Owner/Super Admin（is_admin 不存在或报错时按 false 处理）
+    let isAdmin = false;
+    try { const { data } = await asUser.rpc("is_admin"); isAdmin = !!data; } catch (_e) { /* treat as false */ }
 
     const { email, emp_id, password, action } = await req.json().catch(() => ({}));
     const mail = String(email || "").trim().toLowerCase();
     const admin = createClient(URL, SERVICE);
 
-    // ===== 移除登录（off-board 时调用）=====
+    // 2) 找到目标员工档案（按 emp_id 优先，否则按邮箱）。所有动作都必须对应一个真实员工，
+    //    防止 HR 借本函数为任意邮箱开通与系统无关的账号。
+    let target: { id: string; email: string; role: string; auth_user_id: string | null } | null = null;
+    if (emp_id) {
+      const { data } = await admin.from("employees").select("id,email,role,auth_user_id").eq("id", emp_id).maybeSingle();
+      target = data as typeof target;
+    }
+    if (!target && mail) {
+      const { data } = await admin.from("employees").select("id,email,role,auth_user_id").eq("email", mail).maybeSingle();
+      target = data as typeof target;
+    }
+    if (!target) return json({ error: "No employee record matches this email — add the employee first." }, 400);
+    // 3) 越权防线：HR 不能动 Owner / Super Admin 的登录（重置密码=接管账号），只有 Owner 能。
+    if (target.role === "admin" && !isAdmin) {
+      return json({ error: "Only the Owner / Super Admin can manage an Owner account's login." }, 403);
+    }
+
+    // ===== 移除登录（off-board / 彻底删除时调用）=====
     if (action === "remove") {
-      let uid: string | null = null;
-      if (emp_id) {
-        const { data } = await admin.from("employees").select("auth_user_id").eq("id", emp_id).maybeSingle();
-        uid = (data?.auth_user_id as string) || null;
-      }
-      if (!uid && mail) {
-        const { data } = await admin.from("employees").select("auth_user_id").eq("email", mail).maybeSingle();
-        uid = (data?.auth_user_id as string) || null;
-      }
-      if (!uid) return json({ ok: true, removed: false, note: "No login to remove." });
-      const { error: dErr } = await admin.auth.admin.deleteUser(uid);
+      if (!target.auth_user_id) return json({ ok: true, removed: false, note: "No login to remove." });
+      const { error: dErr } = await admin.auth.admin.deleteUser(target.auth_user_id);
       if (dErr) return json({ error: dErr.message }, 400);
       // 外键 on delete set null 已自动清空 employees.auth_user_id
       return json({ ok: true, removed: true });
@@ -65,39 +76,29 @@ Deno.serve(async (req) => {
 
     // ===== 重置密码为默认值（Edit → Reset password 时调用）=====
     if (action === "reset") {
-      let uid: string | null = null;
-      if (emp_id) {
-        const { data } = await admin.from("employees").select("auth_user_id").eq("id", emp_id).maybeSingle();
-        uid = (data?.auth_user_id as string) || null;
-      }
-      if (!uid && mail) {
-        const { data } = await admin.from("employees").select("auth_user_id").eq("email", mail).maybeSingle();
-        uid = (data?.auth_user_id as string) || null;
-      }
-      if (!uid) return json({ error: "This person has no login yet — use ‘Create login’ first." }, 400);
-      const { error: uErr } = await admin.auth.admin.updateUserById(uid, { password: DEFAULT_PASSWORD });
+      if (!target.auth_user_id) return json({ error: "This person has no login yet — use ‘Create login’ first." }, 400);
+      const { error: uErr } = await admin.auth.admin.updateUserById(target.auth_user_id, { password: DEFAULT_PASSWORD });
       if (uErr) return json({ error: uErr.message }, 400);
-      return json({ ok: true, reset: true, email: mail, password: DEFAULT_PASSWORD });
+      return json({ ok: true, reset: true, email: target.email, password: DEFAULT_PASSWORD });
     }
 
     // ===== 创建登录 =====
-    if (!mail) return json({ error: "Email is required." }, 400);
+    const loginMail = mail || String(target.email || "").trim().toLowerCase();
+    if (!loginMail) return json({ error: "Email is required." }, 400);
     const pw = (typeof password === "string" && password.length >= 6) ? password : DEFAULT_PASSWORD;
 
-    // 2) 建 auth 用户（邮箱预确认，员工可立即用密码登录）
+    // 建 auth 用户（邮箱预确认，员工可立即用密码登录）
     const { data: created, error: cErr } = await admin.auth.admin.createUser({
-      email: mail, password: pw, email_confirm: true,
+      email: loginMail, password: pw, email_confirm: true,
     });
     if (cErr) return json({ error: cErr.message }, 400); // 常见：邮箱已存在（已建过登录）
 
-    // 3) 关联到员工档案（按 emp_id 优先，否则按邮箱）
-    const linkCol = emp_id ? "id" : "email";
-    const linkVal = emp_id ? emp_id : mail;
+    // 关联到员工档案
     const { error: lErr } = await admin.from("employees")
-      .update({ auth_user_id: created.user.id }).eq(linkCol, linkVal);
+      .update({ auth_user_id: created.user.id }).eq("id", target.id);
     if (lErr) return json({ error: "Login created but linking failed: " + lErr.message }, 400);
 
-    return json({ ok: true, email: mail, password: pw });
+    return json({ ok: true, email: loginMail, password: pw });
   } catch (e) {
     return json({ error: (e as Error)?.message || String(e) }, 500);
   }

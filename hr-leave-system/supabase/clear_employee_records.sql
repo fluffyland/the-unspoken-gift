@@ -15,6 +15,7 @@ begin
 
   delete from applications where emp_id = v_id;   -- 连带 approval_steps / application_events
   delete from leave_ledger where emp_id = v_id;   -- 清空账目 → 余额归零
+  delete from annual_carry where emp_id = v_id;   -- 结转记录一并清
 
   raise notice 'Cleared all leave records for employee %. Account kept.', v_id;
 end $$;
