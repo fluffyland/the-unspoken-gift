@@ -457,6 +457,15 @@ async function removeLogin(email, empId) {
     return data || {};
   } catch (e) { return { error: (e && e.message) || "Could not remove the login." }; }
 }
+// Reset a person's password back to the default, same HR-only function.
+async function resetPassword(email, empId) {
+  try {
+    const { data, error } = await sb.functions.invoke("create-login", { body: { action: "reset", email, emp_id: empId } });
+    if (error) { let msg = ""; try { msg = (await error.context.json()).error || ""; } catch (e) {} return { error: msg || error.message || "Could not reach the login service." }; }
+    if (data && data.error) return { error: data.error };
+    return data || {};
+  } catch (e) { return { error: (e && e.message) || "Could not reset the password." }; }
+}
 /* Resolve the signed-in auth user to their employee row */
 async function loadMe() {
   const { data: { user } } = await sb.auth.getUser();
@@ -1261,6 +1270,7 @@ function empModal() {
       <div class="field"><label>Occupation</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Process Engineer"></div>
     </div>
     ${(!isAdd && f.hasLogin === false) ? `<div class="callout warn" style="margin:0 0 12px">This person has no sign-in account yet. <button class="btn" style="margin-left:8px;padding:6px 12px" data-act="createlogin" data-id="${m.id}" data-email="${esc(f.email)}">Create login</button></div>` : ""}
+    ${(!isAdd && f.hasLogin !== false) ? `<div class="callout" style="margin:0 0 12px">Forgot their password? Reset it to the default (<b>Ssu123@</b>). <button class="btn sec" style="margin-left:8px;padding:6px 12px" data-act="resetpw" data-id="${m.id}" data-email="${esc(f.email)}">Reset password</button></div>` : ""}
     <div class="frow">
       <div class="field"><label>Employee No.</label><input type="text" data-f="em.empNo" value="${esc(f.empNo || "")}" placeholder="e.g. 00816"></div>
       <div class="field"><label>Alias</label><input type="text" data-f="em.alias" value="${esc(f.alias || "")}" placeholder="preferred name"></div>
@@ -1508,6 +1518,16 @@ document.addEventListener("click", async ev => {
       const res = await createLogin(email, eid);
       if (res && res.password) { const nm = (emp(eid) || {}).name || email; delete vp.empModal; await reload(); vp.loginResult = { name: nm, email, password: res.password }; render(); }
       else toast(res && res.error ? res.error : "Could not create the login.");
+      break;
+    }
+    case "resetpw": {
+      const email = el.dataset.email, eid = el.dataset.id;
+      const nm = (emp(eid) || {}).name || email;
+      if (!confirm("Reset " + nm + "'s password back to the default (Ssu123@)? They'll need to sign in with it and can change it afterwards.")) break;
+      toast("Resetting password…");
+      const res = await resetPassword(email, eid);
+      if (res && res.reset) toast(nm + "'s password has been reset to Ssu123@.");
+      else toast(res && res.error ? res.error : "Could not reset the password.");
       break;
     }
     case "pwopen": vp.pwModal = true; render(); break;

@@ -1,7 +1,8 @@
-// LeaveDesk SG — 员工登录账号管理 Edge Function（创建 / 移除）
-// HR 在应用里「Add employee」后自动创建登录；「Offboard」后自动移除登录；无需再去 Supabase Auth 手动操作。
+// LeaveDesk SG — 员工登录账号管理 Edge Function（创建 / 重置 / 移除）
+// HR 在应用里「Add employee」后自动创建登录；「Reset password」重置为默认密码；「Offboard」后自动移除登录。
 // 原理：用调用者的 JWT 校验其为 HR/admin →
 //   · 创建：用 service_role 建 auth 用户（邮箱预确认）→ 回填 employees.auth_user_id → 返回默认密码（Ssu123@）。
+//   · 重置（body.action="reset"）：把该员工登录密码重置为默认密码 Ssu123@。
 //   · 移除（body.action="remove"）：查出该员工的 auth_user_id → 删除对应 auth 用户
 //     （employees.auth_user_id 外键 on delete set null，自动清空，员工历史保留）。
 //
@@ -60,6 +61,23 @@ Deno.serve(async (req) => {
       if (dErr) return json({ error: dErr.message }, 400);
       // 外键 on delete set null 已自动清空 employees.auth_user_id
       return json({ ok: true, removed: true });
+    }
+
+    // ===== 重置密码为默认值（Edit → Reset password 时调用）=====
+    if (action === "reset") {
+      let uid: string | null = null;
+      if (emp_id) {
+        const { data } = await admin.from("employees").select("auth_user_id").eq("id", emp_id).maybeSingle();
+        uid = (data?.auth_user_id as string) || null;
+      }
+      if (!uid && mail) {
+        const { data } = await admin.from("employees").select("auth_user_id").eq("email", mail).maybeSingle();
+        uid = (data?.auth_user_id as string) || null;
+      }
+      if (!uid) return json({ error: "This person has no login yet — use ‘Create login’ first." }, 400);
+      const { error: uErr } = await admin.auth.admin.updateUserById(uid, { password: DEFAULT_PASSWORD });
+      if (uErr) return json({ error: uErr.message }, 400);
+      return json({ ok: true, reset: true, email: mail, password: DEFAULT_PASSWORD });
     }
 
     // ===== 创建登录 =====
