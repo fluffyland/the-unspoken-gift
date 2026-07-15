@@ -269,6 +269,18 @@ const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","
 /* Human dates: "20 Jul" (year only when it differs from the current year) */
 const fmtDate = s => { const [y, m, d] = String(s).split("-").map(Number); return d + " " + MON[m - 1] + (y !== new Date().getFullYear() ? " " + y : ""); };
 const fmtDMY = s => { if (!s) return "—"; const [y, m, d] = String(s).split("-"); return (d && m && y) ? `${d}/${m}/${y}` : s; };  // Day/Month/Year
+// Parse a typed "DD/MM/YYYY" (also accepts - or . separators, 2-digit year) into ISO "yyyy-mm-dd"; "" if invalid.
+function dmyToIso(s) {
+  const m = String(s || "").trim().match(/^(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*(\d{2,4})$/);
+  if (!m) return "";
+  let d = +m[1], mo = +m[2], y = +m[3];
+  if (y < 100) y += 2000;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return "";
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return "";  // rejects e.g. 31/02
+  const p = n => String(n).padStart(2, "0");
+  return `${y}-${p(mo)}-${p(d)}`;
+}
 /* "20 Jul" · "18–20 Jul" · "28 Jul – 2 Aug" */
 const fmtRange = (s, e) => {
   if (!e || e === s) return fmtDate(s);
@@ -1376,7 +1388,7 @@ function empModal() {
       <div class="field"><label>Account type</label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
         ${roleOpts.map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
         <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : (!isOwner ? "Only an Owner can grant Owner / Super Admin." : "Sets system permissions. Job titles go in Occupation.")}</span></div>
-      <div class="field"><label>Hire date</label><input type="date" data-f="em.joinDate" value="${f.joinDate}"></div>
+      <div class="field"><label>Hire date</label><input type="text" data-f="em.joinDMY" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${f.joinDate ? fmtDMY(f.joinDate) : esc(f.joinDMY || "")}"><span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
     </div>
     <div class="frow">
       <div class="field"><label>1st level approver</label><select data-f="em.approver1" ${selfLock ? "disabled" : ""}>${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
@@ -1713,7 +1725,10 @@ document.addEventListener("click", async ev => {
     }
     case "empsave": {
       const m = vp.empModal, f = m.form;
+      // If they typed a hire date but never blurred, parse it now from the raw text.
+      if (f.joinDMY) { const iso = dmyToIso(f.joinDMY); if (iso) f.joinDate = iso; }
       if (!f.name.trim()) return toast("Please fill in the name");
+      if (!f.joinDate || !dmyToIso(fmtDMY(f.joinDate))) return toast("Please enter a valid hire date as day/month/year, e.g. 15/07/2026");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
       if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
       if (f.approver1 && f.approver2 && f.approver2 === f.approver1) return toast("The 2nd level approver must be different from the 1st.");
@@ -1965,6 +1980,12 @@ document.addEventListener("change", async ev => {
   if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); render(); return; }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
+    if (k === "joinDMY") {   // free-typed hire date → parse to ISO on blur, then reformat + refresh pro-rate
+      const iso = dmyToIso(el.value);
+      if (iso) { vp.empModal.form.joinDate = iso; vp.empModal.form.joinDMY = fmtDMY(iso); render(); }
+      else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
+      return;
+    }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
     if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
     if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) render(); // refresh pro-rate preview / dependent selects / new-team field
