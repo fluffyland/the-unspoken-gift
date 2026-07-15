@@ -1,7 +1,7 @@
 // LeaveDesk SG — 一键为员工创建登录账号 Edge Function
 // HR 在应用里「Add employee」后自动调用（或点「Create login」），无需再去 Supabase Auth 手动建号。
 // 原理：用调用者的 JWT 校验其为 HR/admin → 用 service_role 建 auth 用户（邮箱预确认）→
-//       回填 employees.auth_user_id 完成关联 → 把临时密码返回给 HR 转交员工。
+//       回填 employees.auth_user_id 完成关联 → 返回默认密码（ssu123）给 HR 转交员工。
 //
 // 部署（二选一）：
 //   A. Dashboard → Edge Functions → Create a new function，命名 create-login，粘贴本文件 → Deploy
@@ -22,13 +22,8 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-// 易读的临时密码：去掉易混字符（0/O/1/l/I），长度 10。
-function genPassword(): string {
-  const cs = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  const a = new Uint32Array(10);
-  crypto.getRandomValues(a);
-  return Array.from(a, (n) => cs[n % cs.length]).join("");
-}
+// 每个新账号统一使用这个默认密码；员工首次登录后可自行修改。
+const DEFAULT_PASSWORD = "ssu123";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -48,7 +43,7 @@ Deno.serve(async (req) => {
     if (!mail) return json({ error: "Email is required." }, 400);
 
     const admin = createClient(URL, SERVICE);
-    const pw = (typeof password === "string" && password.length >= 8) ? password : genPassword();
+    const pw = (typeof password === "string" && password.length >= 6) ? password : DEFAULT_PASSWORD;
 
     // 2) 建 auth 用户（邮箱预确认，员工可立即用密码登录）
     const { data: created, error: cErr } = await admin.auth.admin.createUser({

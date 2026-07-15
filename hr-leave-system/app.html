@@ -1223,8 +1223,8 @@ function loginResultModal() {
   const m = vp.loginResult;
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:440px">
     <div class="hd"><h3>✅ Login created for ${esc(m.name)}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
-    <p class="meta" style="margin:0 0 12px">Share these sign-in details with ${esc(m.name)}. Ask them to change the password after their first sign-in (top-right → 🔑 Password).</p>
-    <dl class="kv"><dt>Email</dt><dd><b>${esc(m.email)}</b></dd><dt>Temporary password</dt><dd><b style="font-size:16px;letter-spacing:.5px">${esc(m.password)}</b></dd></dl>
+    <p class="meta" style="margin:0 0 12px">Share these sign-in details with ${esc(m.name)}. Everyone starts on the same default password — ask them to change it after their first sign-in (top-right → 🔑 Password).</p>
+    <dl class="kv"><dt>Email</dt><dd><b>${esc(m.email)}</b></dd><dt>Default password</dt><dd><b style="font-size:16px;letter-spacing:.5px">${esc(m.password)}</b></dd></dl>
     <div class="actions"><button class="btn" data-act="closemodal">Done</button></div>
   </div></div>`;
 }
