@@ -1,7 +1,9 @@
-// LeaveDesk SG — 一键为员工创建登录账号 Edge Function
-// HR 在应用里「Add employee」后自动调用（或点「Create login」），无需再去 Supabase Auth 手动建号。
-// 原理：用调用者的 JWT 校验其为 HR/admin → 用 service_role 建 auth 用户（邮箱预确认）→
-//       回填 employees.auth_user_id 完成关联 → 返回默认密码（Ssu123@）给 HR 转交员工。
+// LeaveDesk SG — 员工登录账号管理 Edge Function（创建 / 移除）
+// HR 在应用里「Add employee」后自动创建登录；「Offboard」后自动移除登录；无需再去 Supabase Auth 手动操作。
+// 原理：用调用者的 JWT 校验其为 HR/admin →
+//   · 创建：用 service_role 建 auth 用户（邮箱预确认）→ 回填 employees.auth_user_id → 返回默认密码（Ssu123@）。
+//   · 移除（body.action="remove"）：查出该员工的 auth_user_id → 删除对应 auth 用户
+//     （employees.auth_user_id 外键 on delete set null，自动清空，员工历史保留）。
 //
 // 部署（二选一）：
 //   A. Dashboard → Edge Functions → Create a new function，命名 create-login，粘贴本文件 → Deploy
@@ -38,11 +40,30 @@ Deno.serve(async (req) => {
     if (hrErr) return json({ error: "Could not verify permissions: " + hrErr.message }, 400);
     if (!isHr) return json({ error: "Only HR can create logins." }, 403);
 
-    const { email, emp_id, password } = await req.json().catch(() => ({}));
+    const { email, emp_id, password, action } = await req.json().catch(() => ({}));
     const mail = String(email || "").trim().toLowerCase();
-    if (!mail) return json({ error: "Email is required." }, 400);
-
     const admin = createClient(URL, SERVICE);
+
+    // ===== 移除登录（off-board 时调用）=====
+    if (action === "remove") {
+      let uid: string | null = null;
+      if (emp_id) {
+        const { data } = await admin.from("employees").select("auth_user_id").eq("id", emp_id).maybeSingle();
+        uid = (data?.auth_user_id as string) || null;
+      }
+      if (!uid && mail) {
+        const { data } = await admin.from("employees").select("auth_user_id").eq("email", mail).maybeSingle();
+        uid = (data?.auth_user_id as string) || null;
+      }
+      if (!uid) return json({ ok: true, removed: false, note: "No login to remove." });
+      const { error: dErr } = await admin.auth.admin.deleteUser(uid);
+      if (dErr) return json({ error: dErr.message }, 400);
+      // 外键 on delete set null 已自动清空 employees.auth_user_id
+      return json({ ok: true, removed: true });
+    }
+
+    // ===== 创建登录 =====
+    if (!mail) return json({ error: "Email is required." }, 400);
     const pw = (typeof password === "string" && password.length >= 6) ? password : DEFAULT_PASSWORD;
 
     // 2) 建 auth 用户（邮箱预确认，员工可立即用密码登录）

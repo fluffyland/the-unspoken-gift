@@ -448,6 +448,15 @@ async function createLogin(email, empId) {
     return data || {};
   } catch (e) { return { error: (e && e.message) || "Could not create the login." }; }
 }
+// Remove a person's sign-in account (used on off-boarding), same HR-only function.
+async function removeLogin(email, empId) {
+  try {
+    const { data, error } = await sb.functions.invoke("create-login", { body: { action: "remove", email, emp_id: empId } });
+    if (error) { let msg = ""; try { msg = (await error.context.json()).error || ""; } catch (e) {} return { error: msg || error.message || "Could not reach the login service." }; }
+    if (data && data.error) return { error: data.error };
+    return data || {};
+  } catch (e) { return { error: (e && e.message) || "Could not remove the login." }; }
+}
 /* Resolve the signed-in auth user to their employee row */
 async function loadMe() {
   const { data: { user } } = await sb.auth.getUser();
@@ -1281,7 +1290,7 @@ function empModal() {
     </div>
     ${!isAdd ? `<div class="dangerzone">
       <h4>Offboarding</h4>
-      <p>Settle ${esc(f.name)}'s remaining leave (encash or clear), withdraw pending applications and deactivate the account. History is kept.</p>
+      <p>Settle ${esc(f.name)}'s remaining leave (encash or clear), withdraw pending applications, deactivate the account and remove their sign-in login. History is kept.</p>
       <button class="btn bad" data-act="offopen" data-id="${m.id}">Offboard ${esc(f.name)}…</button>
     </div>` : ""}</div></div>`;
 }
@@ -1647,8 +1656,11 @@ document.addEventListener("click", async ev => {
       if (e.id === me.id) return toast("You cannot offboard yourself");
       const { error } = await sb.rpc("offboard_employee", { p_emp: m.empId, p_last_day: m.lastDay, p_mode: m.mode });
       if (error) return rpcErr(error);
+      const rem = await removeLogin(e.email, e.id);
       delete vp.offModal; delete vp.empModal; await reload();
-      toast(e.name + " has been offboarded and their balances are settled. Remember to remove their sign-in account too.");
+      if (rem && rem.removed) toast(e.name + " has been offboarded — balances settled and their sign-in account removed.");
+      else if (rem && rem.error) toast(e.name + " has been offboarded and balances settled, but their login couldn't be removed automatically (" + rem.error + ") — remove it in Supabase → Authentication.");
+      else toast(e.name + " has been offboarded and their balances are settled. (No sign-in account needed removing.)");
       break;
     }
     case "submit": doSubmit(); break;
