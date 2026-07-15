@@ -117,10 +117,10 @@
 2. **关自助注册**（保持）：Authentication → Providers/Settings 里「Enable email signups」可关；
    本函数用 service_role 建号并预确认邮箱，员工可立即用「邮箱 + 临时密码」登录。
 3. 用法：应用里 **Add employee** 保存后会自动建登录，所有新账号统一使用默认密码
-   **`ssu123`**（弹窗会显示，转交员工，让其首次登录后改密）。给老员工补登录：
+   **`Ssu123@`**（弹窗会显示，转交员工，让其首次登录后改密）。给老员工补登录：
    打开其 **Edit** → **Create login**。
-   > 若 Supabase 开了 Authentication → Policies 里的 **Minimum password length > 6** 或
-   > **Leaked password protection**，`ssu123` 可能被拒；把最小长度设为 6 并关掉泄露密码检查即可。
+   > `Ssu123@` 含大小写字母、数字、符号，满足常见复杂度要求；一般不会被最小长度或
+   > 泄露密码检查拦下。改动此默认密码只需改函数里的 `DEFAULT_PASSWORD` 再重新部署。
 
 ## 每年例行维护（HR）—— v7 后已自动化
 

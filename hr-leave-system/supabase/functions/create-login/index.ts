@@ -1,7 +1,7 @@
 // LeaveDesk SG — 一键为员工创建登录账号 Edge Function
 // HR 在应用里「Add employee」后自动调用（或点「Create login」），无需再去 Supabase Auth 手动建号。
 // 原理：用调用者的 JWT 校验其为 HR/admin → 用 service_role 建 auth 用户（邮箱预确认）→
-//       回填 employees.auth_user_id 完成关联 → 返回默认密码（ssu123）给 HR 转交员工。
+//       回填 employees.auth_user_id 完成关联 → 返回默认密码（Ssu123@）给 HR 转交员工。
 //
 // 部署（二选一）：
 //   A. Dashboard → Edge Functions → Create a new function，命名 create-login，粘贴本文件 → Deploy
@@ -23,7 +23,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
 // 每个新账号统一使用这个默认密码；员工首次登录后可自行修改。
-const DEFAULT_PASSWORD = "ssu123";
+const DEFAULT_PASSWORD = "Ssu123@";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
