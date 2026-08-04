@@ -1,0 +1,75 @@
+# Keeps the free-tier Supabase project awake.
+#
+# Free projects pause after 7 days with no database request. This job makes a
+# real database round-trip once a day, which resets that timer.
+#
+# IMPORTANT — two things this file depends on:
+#   1. It must live at .github/workflows/keepalive.yml (this path). GitHub does
+#      not read workflows from anywhere else.
+#   2. Scheduled workflows ONLY run from the repository's DEFAULT branch.
+#      This repo's default branch is claude/gift-box-sales-redesign-ar81tt,
+#      so this file must be present there or the schedule never fires.
+#
+# The key below is the PUBLIC anon key (already visible in the website source).
+# It grants nothing on its own — all access is enforced by database RLS.
+
+name: Keep Supabase awake
+
+on:
+  schedule:
+    # Daily at 01:17 UTC (09:17 SGT). Daily (not every 2 days) leaves margin
+    # because GitHub's scheduled runs are best-effort and can be delayed.
+    # The odd minute avoids the on-the-hour queue when runs are most often dropped.
+    - cron: "17 1 * * *"
+  workflow_dispatch:   # lets you run it by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: https://aypyolzkdupkpefpxius.supabase.co
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5cHlvbHprZHVwa3BlZnB4aXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDM0MTMsImV4cCI6MjA5OTA3OTQxM30.hoRS_j8yBTJkcQBG_IZRuVgDD06ZGCRam8lqz923f6s
+        run: |
+          set -uo pipefail
+
+          # Preferred: call the keepalive_ping() function — a guaranteed query
+          # that reaches Postgres itself, not just a cached API response.
+          code=$(curl -sS -o /tmp/ping.txt -w '%{http_code}' \
+            -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive_ping" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}' || echo "000")
+
+          echo "rpc keepalive_ping -> HTTP $code"
+          cat /tmp/ping.txt || true
+          echo
+
+          if [ "$code" = "200" ]; then
+            echo "Database is awake."
+            exit 0
+          fi
+
+          # Fallback: plain REST read. Still reaches PostgREST + Postgres.
+          # Used when keepalive_ping() has not been installed yet (HTTP 404).
+          echo "::warning::keepalive_ping() unavailable (HTTP $code) — falling back to a REST read."
+          echo "::warning::Run hr-leave-system/supabase/keepalive_ping.sql in the Supabase SQL Editor to enable the reliable ping."
+
+          code2=$(curl -sS -o /tmp/ping2.txt -w '%{http_code}' \
+            "$SUPABASE_URL/rest/v1/leave_types?select=code&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" || echo "000")
+
+          echo "rest fallback -> HTTP $code2"
+          cat /tmp/ping2.txt || true
+          echo
+
+          if [ "$code2" = "200" ]; then
+            echo "Database is awake (via fallback)."
+            exit 0
+          fi
+
+          # Fail loudly so GitHub emails you instead of failing silently.
+          echo "::error::Supabase ping FAILED (rpc HTTP $code, rest HTTP $code2). The project may already be paused — open the Supabase dashboard and restore it."
+          exit 1
