@@ -109,11 +109,9 @@ h3{font-size:15px;margin:0 0 10px}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
 th{color:var(--muted);font-weight:600;text-align:left;font-size:12px;letter-spacing:.03em}
 th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
-/* "All / None" toggles inside a checkbox column header */
-.coltoggle{display:flex;gap:5px;align-items:center;margin-top:5px;justify-content:center}
-.coltoggle button{background:var(--surface);border:1px solid var(--line);border-radius:6px;color:var(--muted);
-  font:inherit;font-size:11px;font-weight:600;letter-spacing:0;line-height:1;padding:5px 9px;cursor:pointer}
-.coltoggle button:hover{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+/* Set-every-row checkbox inside a column header (dash = rows are mixed) */
+.coltoggle{display:flex;justify-content:center;margin-top:6px}
+.coltoggle input{cursor:pointer;transform:scale(1.15);transform-origin:center}
 tr.rowlink{cursor:pointer}
 tr.rowlink:hover td{background:var(--gray-soft)}
 td.num{font-variant-numeric:tabular-nums}
@@ -529,9 +527,18 @@ function setType(code, k, v) {
 // Tick or clear a whole checkbox column at once. Only types that actually differ
 // get staged, so the unsaved-change count stays honest.
 function setAllTypes(k, v) { for (const t of db.leaveTypes) if (!!tPick(t, k) !== v) setType(t.code, k, v); }
-const colToggle = k => `<div class="coltoggle">
-  <button type="button" data-act="typeall" data-k="${k}" data-v="1">All</button>
-  <button type="button" data-act="typeall" data-k="${k}" data-v="0">None</button></div>`;
+// Header checkbox for a whole column: ticked when every type is on, cleared when
+// none are, and a dash when they're mixed. Tapping a dash turns everything on.
+function colState(k) {
+  const ts = db.leaveTypes || [];
+  let on = 0; for (const t of ts) if (tPick(t, k)) on++;
+  return { all: ts.length > 0 && on === ts.length, mixed: on > 0 && on < ts.length };
+}
+const colToggle = k => { const s = colState(k);
+  return `<div class="coltoggle"><input type="checkbox" data-act="typeall" data-k="${k}"
+    ${s.all ? "checked" : ""}${s.mixed ? ' data-mixed="1"' : ""}
+    title="Set every leave type at once" aria-label="Set every leave type at once"></div>`;
+};
 function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assign({}, d.emps[id], { [k]: v }); }
 function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
 function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
@@ -801,6 +808,8 @@ function render() {
       el.focus({ preventScroll: true });
     }
   }
+  // "Mixed" is a JS-only checkbox state — it can't be set from HTML.
+  document.querySelectorAll('input[data-mixed="1"]').forEach(el => { el.indeterminate = true; });
   if (document.getElementById("attprev")) hydrateAttPreview();
 }
 // Fetch a short-lived signed URL and show the attachment inline (image → preview, else a link).
@@ -1672,11 +1681,6 @@ document.addEventListener("click", async ev => {
     case "hrtab": if (draftDirty()) { vp.leaveTo = { kind: "hrtab", t: el.dataset.t }; render(); break; } hrTab = el.dataset.t; vp = {}; render(); break;
     case "hrsave": { if (await saveDraft()) { delete vp.draft; await reload(); toast("Changes saved."); } break; }
     case "hrdiscard": delete vp.draft; render(); break;
-    case "typeall": {   // "All" / "None" above a checkbox column in Leave types
-      const k = el.dataset.k, v = el.dataset.v === "1";
-      if (k === "half" && !db.ltHalf) { toast("Please run the latest database update (migration v8) first to use half-day settings."); break; }
-      setAllTypes(k, v); rerender(); break;
-    }
     case "hrkeep": delete vp.leaveTo; render(); break;
     case "hrdiscardleave": { const to = vp.leaveTo; delete vp.draft; delete vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; render(); break; }
     case "hrsaveleave": { if (!(await saveDraft())) break; const to = vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; await reload(); break; }
@@ -2009,6 +2013,11 @@ document.addEventListener("change", async ev => {
     else if (f === "approver1") { stageEmp(id, "approver1", el.value || null); if (!el.value) stageEmp(id, "approver2", null); }
     else if (f === "approver2") stageEmp(id, "approver2", el.value || null);
     rerender(); return;
+  }
+  if (el.dataset.act === "typeall") {   // column header checkbox → set every leave type
+    const k = el.dataset.k;
+    if (k === "half" && !db.ltHalf) { el.checked = !el.checked; return toast("Please run the latest database update (migration v8) first to use half-day settings."); }
+    setAllTypes(k, el.checked); rerender(); return;
   }
   if (el.dataset.act === "typedays") { setType(el.dataset.c, "days", numOr(el.value, 0)); rerender(); return; }
   if (el.dataset.act === "typehalf") {
