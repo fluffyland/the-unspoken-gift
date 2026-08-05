@@ -109,6 +109,11 @@ h3{font-size:15px;margin:0 0 10px}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
 th{color:var(--muted);font-weight:600;text-align:left;font-size:12px;letter-spacing:.03em}
 th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+/* "All / None" toggles inside a checkbox column header */
+.coltoggle{display:flex;gap:5px;align-items:center;margin-top:5px;justify-content:center}
+.coltoggle button{background:var(--surface);border:1px solid var(--line);border-radius:6px;color:var(--muted);
+  font:inherit;font-size:11px;font-weight:600;letter-spacing:0;line-height:1;padding:5px 9px;cursor:pointer}
+.coltoggle button:hover{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
 tr.rowlink{cursor:pointer}
 tr.rowlink:hover td{background:var(--gray-soft)}
 td.num{font-variant-numeric:tabular-nums}
@@ -511,6 +516,22 @@ function ensureDraft() { vp.draft = vp.draft || {}; vp.draft.types = vp.draft.ty
 function draftDirty() { const d = vp.draft; return !!(d && (Object.keys(d.types || {}).length || Object.keys(d.emps || {}).length || Object.keys(d.org || {}).length)); }
 function draftCount() { const d = vp.draft; if (!d) return 0; let n = Object.keys(d.org || {}).length; for (const c in (d.types || {})) n += Object.keys(d.types[c]).length; for (const i in (d.emps || {})) n += Object.keys(d.emps[i]).length; return n; }
 function stageType(code, k, v) { const d = ensureDraft(); d.types[code] = Object.assign({}, d.types[code], { [k]: v }); }
+// The value as it currently stands in the database — lets us tell a real edit
+// from a change-and-change-back, which should leave nothing to save.
+function origType(t, k) { return k === "days" ? Number(t.days) : k === "half" ? !!t.allowHalf : !!t.mc; }
+function setType(code, k, v) {
+  const t = lt(code); if (!t) return stageType(code, k, v);
+  const d = ensureDraft();
+  if (origType(t, k) === v) {   // back to the saved value → drop it from the draft
+    if (d.types[code]) { delete d.types[code][k]; if (!Object.keys(d.types[code]).length) delete d.types[code]; }
+  } else stageType(code, k, v);
+}
+// Tick or clear a whole checkbox column at once. Only types that actually differ
+// get staged, so the unsaved-change count stays honest.
+function setAllTypes(k, v) { for (const t of db.leaveTypes) if (!!tPick(t, k) !== v) setType(t.code, k, v); }
+const colToggle = k => `<div class="coltoggle">
+  <button type="button" data-act="typeall" data-k="${k}" data-v="1">All</button>
+  <button type="button" data-act="typeall" data-k="${k}" data-v="0">None</button></div>`;
 function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assign({}, d.emps[id], { [k]: v }); }
 function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
 function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
@@ -750,9 +771,36 @@ function myDecisions(u) {
 const $app = () => document.getElementById("app");
 function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
 
+// Editing a field in the HR Console re-renders the whole page. Without this the
+// browser jumps back to the top on every tick, so ticking a second box means
+// scrolling all the way down again. rerender() keeps your place and your focus;
+// render() still scrolls to top, which is what you want when changing page/tab.
+let keepScrollOnce = false;
+function rerender() { keepScrollOnce = true; render(); }
+// A selector that finds the same control again once the HTML has been rebuilt.
+function focusKey(el) {
+  if (!el || !el.dataset || !el.dataset.act) return null;
+  let s = `[data-act="${el.dataset.act}"]`;
+  for (const k of ["c", "id", "f", "t", "k"]) if (el.dataset[k] != null) s += `[data-${k}="${el.dataset[k]}"]`;
+  return s;
+}
 function render() {
+  const keep = keepScrollOnce; keepScrollOnce = false;
+  const y = keep ? window.scrollY : 0;
+  const fk = keep ? focusKey(document.activeElement) : null;
+  // Where the control you touched sat on screen, so we can put it back exactly
+  // there — the save bar appearing would otherwise shift everything down.
+  const wasAt = fk ? document.activeElement.getBoundingClientRect().top : 0;
   $app().innerHTML = (me && !me.unlinked) ? shell() : loginPage();
-  window.scrollTo(0, 0);
+  window.scrollTo(0, y);
+  if (fk) {
+    const el = document.querySelector(fk);
+    if (el) {
+      const nowAt = el.getBoundingClientRect().top;
+      if (nowAt !== wasAt) window.scrollTo(0, y + (nowAt - wasAt));
+      el.focus({ preventScroll: true });
+    }
+  }
   if (document.getElementById("attprev")) hydrateAttPreview();
 }
 // Fetch a short-lived signed URL and show the attachment inline (image → preview, else a link).
@@ -1451,7 +1499,10 @@ function hrTypes() {
   return `<div class="card">
     <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible. Default days only affect next year's allowances.</div>
     <div class="frow" style="margin-bottom:12px"><button class="btn" data-act="ltadd">+ Add leave type</button></div>
-    <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th><th>Half-day allowed?</th><th>Attachment required?</th><th>Who is eligible</th><th></th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th>
+      <th style="text-align:center">Half-day allowed?${db.ltHalf ? colToggle("half") : ""}</th>
+      <th style="text-align:center">Attachment required?${colToggle("mc")}</th>
+      <th>Who is eligible</th><th></th></tr></thead><tbody>
     ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
       <td><b>${esc(t.en)}</b>${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}</td>
       <td class="num"><input type="number" step="0.5" min="0" value="${tPick(t, "days")}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
@@ -1621,6 +1672,11 @@ document.addEventListener("click", async ev => {
     case "hrtab": if (draftDirty()) { vp.leaveTo = { kind: "hrtab", t: el.dataset.t }; render(); break; } hrTab = el.dataset.t; vp = {}; render(); break;
     case "hrsave": { if (await saveDraft()) { delete vp.draft; await reload(); toast("Changes saved."); } break; }
     case "hrdiscard": delete vp.draft; render(); break;
+    case "typeall": {   // "All" / "None" above a checkbox column in Leave types
+      const k = el.dataset.k, v = el.dataset.v === "1";
+      if (k === "half" && !db.ltHalf) { toast("Please run the latest database update (migration v8) first to use half-day settings."); break; }
+      setAllTypes(k, v); rerender(); break;
+    }
     case "hrkeep": delete vp.leaveTo; render(); break;
     case "hrdiscardleave": { const to = vp.leaveTo; delete vp.draft; delete vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; render(); break; }
     case "hrsaveleave": { if (!(await saveDraft())) break; const to = vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; await reload(); break; }
@@ -1952,14 +2008,14 @@ document.addEventListener("change", async ev => {
     if (f === "annualBase") stageEmp(id, "annualBase", numOr(el.value, 14));
     else if (f === "approver1") { stageEmp(id, "approver1", el.value || null); if (!el.value) stageEmp(id, "approver2", null); }
     else if (f === "approver2") stageEmp(id, "approver2", el.value || null);
-    render(); return;
+    rerender(); return;
   }
-  if (el.dataset.act === "typedays") { stageType(el.dataset.c, "days", numOr(el.value, 0)); render(); return; }
+  if (el.dataset.act === "typedays") { setType(el.dataset.c, "days", numOr(el.value, 0)); rerender(); return; }
   if (el.dataset.act === "typehalf") {
     if (!db.ltHalf) { el.checked = !el.checked; return toast("Please run the latest database update (migration v8) first to use half-day settings."); }
-    stageType(el.dataset.c, "half", el.checked); render(); return;
+    setType(el.dataset.c, "half", el.checked); rerender(); return;
   }
-  if (el.dataset.act === "typeattach") { stageType(el.dataset.c, "mc", el.checked); render(); return; }
+  if (el.dataset.act === "typeattach") { setType(el.dataset.c, "mc", el.checked); rerender(); return; }
   // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
   if (el.dataset.act === "deptname") {
     const oldName = el.dataset.old, newName = el.value.trim();
@@ -1977,7 +2033,7 @@ document.addEventListener("change", async ev => {
   if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
   if (f === "empDept") { vp.empDept = el.value; render(); return; }
   if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
-  if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); render(); return; }
+  if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); rerender(); return; }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
     if (k === "joinDMY") {   // free-typed hire date → parse to ISO on blur, then reformat + refresh pro-rate
