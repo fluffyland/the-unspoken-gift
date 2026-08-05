@@ -65,7 +65,12 @@
 - Dashboard 关闭自助注册（第一道门）+ 全部只读策略要求 `is_staff()`（第二道门）
 - `leave_balances` 视图 `security_invoker`（修复视图绕过 RLS 的余额泄漏）
 - 离职员工：`current_emp_id()` 要求 `active` → 服务器层自动登出；前端同步提示
-- 防休眠：`keepalive.yml`（GitHub Actions 每 2 天探活一次数据库）
+- 防休眠：`keepalive.yml`（GitHub Actions 每天**写入**一次心跳表）
+  - ⚠️ 2026-07 事故：旧版只做「读」，每次都 HTTP 200，项目照样被暂停，
+    HR 系统停摆两周。**纯读不算活动**，v2 改成真正的写入
+    （`supabase/keepalive_ping_v2.sql`，需在 SQL Editor 手动跑一次）。
+  - 写入是推断，不是官方保证。若再次被暂停，就升级 Pro（US$25/月）——那是唯一有保证的方案。
+  - 探活失败会自动开 GitHub Issue 报警（旧版只发邮件，没人看到）。
 
 HR 日常手册：
 - **员工忘记密码**：Supabase Dashboard → Authentication → Users → 该员工 →

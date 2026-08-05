@@ -125,6 +125,21 @@ same two lines in the current repo's `index.html` and push.
    assign approval routes.
 6. Tell everyone: log in with work email + `Ssu123@`, then change password.
 
+### Step 7b — Stop the free project from pausing (**REQUIRED**, ≈2 min)
+
+免费版 Supabase **7 天没有活动就会自动暂停**，暂停后 HR 系统直接打不开，
+而且 **暂停满 90 天项目会被永久删除**。
+
+1. SQL Editor → New query → 粘贴 **`supabase/keepalive_ping_v2.sql`** → **Run**。
+   最后应看到两个**不同**的时间戳（证明它真的在写入，而不是只读）。
+2. 确认 `.github/workflows/keepalive.yml` 在部署仓库的 **默认分支** 上。
+   定时任务只从默认分支运行 —— 放在别的分支等于没放。
+3. Actions 分页 → **Keep Supabase awake** → **Run workflow** 手动跑一次，确认绿灯。
+
+> ⚠️ 2026-07 教训：旧版心跳只做「读」，每次都返回 HTTP 200，项目照样被暂停，
+> 系统停摆两周才被发现。**纯读不算活动，必须写。**
+> 写入也只是推断而非官方保证 —— 如果还会被暂停，就升级 Pro（US$25/月）。
+
 ### Step 8 — Optional extras (any time later)
 | Want | Do | Where documented |
 |---|---|---|
@@ -141,6 +156,8 @@ same two lines in the current repo's `index.html` and push.
 - [ ] Owner logs in and changed their password
 - [ ] create-login deployed (name exactly `create-login`)
 - [ ] Site live with the new URL + anon key
+- [ ] `keepalive_ping_v2.sql` ran and returned **two different** timestamps
+- [ ] `keepalive.yml` on the deploy repo's **default** branch, manually run once, green
 - [ ] Company settings + teams + employees entered
 - [ ] A test application → approve → shows in Decision history
 

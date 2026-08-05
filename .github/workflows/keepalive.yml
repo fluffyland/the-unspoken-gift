@@ -1,14 +1,32 @@
-# Keeps the free-tier Supabase project awake.
+# Keeps the free-tier Supabase project awake — v2, WRITE-based.
 #
-# Free projects pause after 7 days with no database request. This job makes a
-# real database round-trip once a day, which resets that timer.
+# WHY THIS WAS REWRITTEN (2026-08 incident)
+#   v1 pinged with a read (`select now()`), every 2 days, and every single ping
+#   returned HTTP 200 — 13, 15, 17, 19 and 21 July all succeeded. The project
+#   was paused anyway, some time between 21 and 23 July, and the HR system was
+#   down for ~2 weeks (23 Jul → 5 Aug).
+#   Supabase support only restated the rule: "paused after 7 days of inactivity".
+#   Conclusion: a successful READ does not reset Supabase's inactivity timer.
 #
-# IMPORTANT — two things this file depends on:
-#   1. It must live at .github/workflows/keepalive.yml (this path). GitHub does
-#      not read workflows from anywhere else.
+#   v2 therefore performs a real WRITE on every ping (updates a single-row
+#   heartbeat table). A write generates WAL and changes database state, which is
+#   a far stronger "activity" signal than a read.
+#
+#   HONEST CAVEAT: Supabase does not document what counts as activity. A write is
+#   the best available inference, NOT a guarantee. The only guaranteed fix is Pro
+#   (US$25/mo). If the project pauses again despite this, stop patching — upgrade.
+#
+# SETUP REQUIRED — run this once, or every run will fail on purpose:
+#   Supabase Dashboard → SQL Editor → paste and run:
+#     hr-leave-system/supabase/keepalive_ping_v2.sql
+#
+# TWO THINGS THIS FILE DEPENDS ON:
+#   1. It must live at .github/workflows/keepalive.yml (this exact path).
 #   2. Scheduled workflows ONLY run from the repository's DEFAULT branch.
-#      This repo's default branch is claude/gift-box-sales-redesign-ar81tt,
-#      so this file must be present there or the schedule never fires.
+#      Merging this to a feature branch alone changes nothing.
+#
+# ALSO: GitHub disables scheduled workflows in a repo with no commit activity
+# for 60 days. If this repo goes quiet, re-enable it from the Actions tab.
 #
 # The key below is the PUBLIC anon key (already visible in the website source).
 # It grants nothing on its own — all access is enforced by database RLS.
@@ -23,53 +41,110 @@ on:
     - cron: "17 1 * * *"
   workflow_dispatch:   # lets you run it by hand from the Actions tab
 
+permissions:
+  contents: read
+  issues: write        # needed to raise an alert issue when the ping fails
+
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase
+      - name: Ping Supabase (write heartbeat)
         env:
           SUPABASE_URL: https://aypyolzkdupkpefpxius.supabase.co
           SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5cHlvbHprZHVwa3BlZnB4aXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDM0MTMsImV4cCI6MjA5OTA3OTQxM30.hoRS_j8yBTJkcQBG_IZRuVgDD06ZGCRam8lqz923f6s
         run: |
           set -uo pipefail
 
-          # Preferred: call the keepalive_ping() function — a guaranteed query
-          # that reaches Postgres itself, not just a cached API response.
-          code=$(curl -sS -o /tmp/ping.txt -w '%{http_code}' \
-            -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive_ping" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{}' || echo "000")
+          ping() {
+            # $1 = output file. Echoes the HTTP status code.
+            curl -sS -o "$1" -w '%{http_code}' \
+              -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive_ping" \
+              -H "apikey: $SUPABASE_ANON_KEY" \
+              -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{}' 2>/dev/null || echo "000"
+          }
 
-          echo "rpc keepalive_ping -> HTTP $code"
-          cat /tmp/ping.txt || true
-          echo
+          code1=$(ping /tmp/ping1.txt)
+          ts1=$(tr -d '"' < /tmp/ping1.txt)
+          echo "ping 1 -> HTTP $code1 : $ts1"
 
-          if [ "$code" = "200" ]; then
-            echo "Database is awake."
-            exit 0
+          if [ "$code1" != "200" ]; then
+            # Diagnose: is the whole project down, or just the function missing?
+            rest=$(curl -sS -o /tmp/rest.txt -w '%{http_code}' \
+              "$SUPABASE_URL/rest/v1/leave_types?select=code&limit=1" \
+              -H "apikey: $SUPABASE_ANON_KEY" 2>/dev/null || echo "000")
+            echo "diagnostic REST read -> HTTP $rest"
+            cat /tmp/rest.txt 2>/dev/null; echo
+
+            if [ "$rest" = "200" ]; then
+              echo "::error::keepalive_ping() is missing or erroring (HTTP $code1), though the database is reachable. Run hr-leave-system/supabase/keepalive_ping_v2.sql in the Supabase SQL Editor. NOTE: a plain read does NOT keep the project awake, so this is NOT a safe state."
+            else
+              echo "::error::Supabase is unreachable (rpc HTTP $code1, rest HTTP $rest). The project is probably PAUSED — open the Supabase dashboard and restore it. Free projects are permanently deleted 90 days after pausing."
+            fi
+            exit 1
           fi
 
-          # Fallback: plain REST read. Still reaches PostgREST + Postgres.
-          # Used when keepalive_ping() has not been installed yet (HTTP 404).
-          echo "::warning::keepalive_ping() unavailable (HTTP $code) — falling back to a REST read."
-          echo "::warning::Run hr-leave-system/supabase/keepalive_ping.sql in the Supabase SQL Editor to enable the reliable ping."
+          # Second ping. A WRITE-based function returns a new timestamp on every
+          # call; the old read-only v1 returns the same one. This proves v2 is
+          # really installed rather than trusting a 200.
+          sleep 2
+          code2=$(ping /tmp/ping2.txt)
+          ts2=$(tr -d '"' < /tmp/ping2.txt)
+          echo "ping 2 -> HTTP $code2 : $ts2"
 
-          code2=$(curl -sS -o /tmp/ping2.txt -w '%{http_code}' \
-            "$SUPABASE_URL/rest/v1/leave_types?select=code&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY" || echo "000")
-
-          echo "rest fallback -> HTTP $code2"
-          cat /tmp/ping2.txt || true
-          echo
-
-          if [ "$code2" = "200" ]; then
-            echo "Database is awake (via fallback)."
-            exit 0
+          if [ "$code2" != "200" ]; then
+            echo "::error::Second ping failed (HTTP $code2) after the first succeeded. Treating as unhealthy."
+            exit 1
           fi
 
-          # Fail loudly so GitHub emails you instead of failing silently.
-          echo "::error::Supabase ping FAILED (rpc HTTP $code, rest HTTP $code2). The project may already be paused — open the Supabase dashboard and restore it."
-          exit 1
+          if [ -z "$ts1" ] || [ "$ts1" = "$ts2" ]; then
+            echo "::error::keepalive_ping() returned the same timestamp twice ($ts1). The OLD read-only v1 function is still installed, so this workflow is NOT keeping the project awake. Run hr-leave-system/supabase/keepalive_ping_v2.sql in the Supabase SQL Editor."
+            exit 1
+          fi
+
+          echo "Heartbeat written twice ($ts1 -> $ts2). Database is awake and accepting writes."
+
+      - name: Raise an alert issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          MARKER="Supabase keep-alive FAILED"
+
+          # Reuse the open issue if there is one, so a long outage does not open
+          # a brand-new issue every single day.
+          existing=$(gh issue list --state open --limit 50 \
+            --json number,title \
+            --jq "[.[] | select(.title | contains(\"$MARKER\"))] | .[0].number // empty")
+
+          body=$(cat <<EOF
+          The daily Supabase keep-alive check failed.
+
+          **Run log:** $RUN_URL
+
+          The HR leave system (LeaveDesk) may be **down right now** — staff will not
+          be able to apply for or approve leave.
+
+          **What to do**
+          1. Open the Supabase dashboard for project \`aypyolzkdupkpefpxius\`.
+          2. If it says *Paused*, click **Restore**. It takes a few minutes.
+          3. Check the run log above for which check failed and why.
+
+          Free-tier projects are **permanently deleted 90 days** after they pause.
+          EOF
+          )
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Commented on existing alert issue #$existing"
+          else
+            gh issue create \
+              --title "🚨 $MARKER — LeaveDesk may be down" \
+              --body "$body"
+            echo "Opened a new alert issue"
+          fi
