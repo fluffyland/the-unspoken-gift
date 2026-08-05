@@ -138,12 +138,16 @@ same two lines in the current repo's `index.html` and push.
 
    | 项 | 值 |
    |---|---|
-   | URL | `https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping` |
-   | Method | **POST**（必须；写函数不接受 GET） |
-   | Header | `apikey: <anon key>` |
-   | Header | `Content-Type: application/json` |
-   | Body | `{}` |
+   | URL | `https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>` |
+   | Method | **POST**（必须；写函数不接受 GET，GET 会返回 405） |
+   | Header | **不用填**（见下方警告） |
+   | Body | 留空 |
    | Schedule | 每天一次 |
+
+   > 🔑 **apikey 一定要放在 URL 里，不要放 header。** 很多定时服务的自定义
+   > header 填不进去或不生效，会报 `{"message":"No API key found in request"}`。
+   > PostgREST 同时接受 url param —— 实测一个 header 都不加也返回 200。
+   > anon key 本来就是公开的（网站源码里就有），放 URL 不增加任何暴露。
 
 3. **打开它的失败通知**，并把通知发到你**每天真的会看**的地方。
 4. 点 **Run now** 手动跑一次，应返回 HTTP 200 和一个数字。

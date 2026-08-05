@@ -19,10 +19,16 @@
 -- 幂等：可以重复执行，不会重复建表或丢数据。
 --
 -- 谁来定时调用它：**cron-job.org**（外部免费定时服务），每天一次：
---   POST https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping
---   headers: apikey: <anon key> / Content-Type: application/json
---   body:    {}
---   ⚠️ 必须 POST：本函数是 volatile（会写），PostgREST 不允许用 GET 调用。
+--
+--   POST https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
+--   不需要任何 header，body 留空即可。
+--
+--   ⚠️ 把 apikey 放进 URL，不要放 header：很多定时服务的自定义 header 填不进去，
+--      会报 {"message":"No API key found in request"}。PostgREST 同时接受
+--      url param，实测无 header 也返回 200。
+--      （anon key 本来就是公开的 —— 网站源码里就有 —— 放 URL 不增加任何暴露。）
+--   ⚠️ 必须 POST：本函数是 volatile（会写），GET 会返回
+--      405 "cannot execute UPDATE in a read-only transaction"。
 --   ⚠️ 不要改用 GitHub Actions：仓库 60 天无提交就会被自动停用定时任务，
 --      而「没在跑」不产生任何失败通知 —— 沉默和成功长得一模一样。
 -- =============================================================

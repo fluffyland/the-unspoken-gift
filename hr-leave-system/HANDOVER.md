@@ -47,8 +47,10 @@ DEPLOY REPO   github.com/fluffyland/hrleavesystem   (branch: main)
   (no .github/workflows — the keep-alive is NOT a GitHub Action, see below)
 
 KEEP-ALIVE    cron-job.org (external, free) → POST daily to
-  https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping
-  headers: apikey: <anon key>, Content-Type: application/json   body: {}
+  https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
+  NO headers needed, empty body. Put the key in the URL, not in a header —
+  cron services often drop custom headers, giving "No API key found in request".
+  Must be POST; GET returns 405 (the function writes).
   Free Supabase pauses after 7 idle days, and is DELETED 90 days after pausing.
   Deliberately NOT a GitHub Action: GitHub disables cron in repos with no commit
   for 60 days, and a workflow that stops running raises no failure — silence is
