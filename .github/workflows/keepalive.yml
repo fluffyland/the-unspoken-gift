@@ -121,6 +121,25 @@ jobs:
 
           echo "Heartbeat counter advanced $n1 -> $n2. The write persisted; database is awake."
 
+      # Covers a failure mode the alert issue below cannot: if this workflow stops
+      # running AT ALL (GitHub disables cron in repos idle for 60 days, or someone
+      # disables the Action), nothing fails, so no issue is ever raised and the
+      # silence looks exactly like success. An external watchdog notices the
+      # missing check-in instead. Optional — skipped when no secret is set.
+      # To enable: create a check at healthchecks.io (free), then add its ping URL
+      # as a repository secret named HEALTHCHECK_URL.
+      - name: Watchdog check-in (only if a HEALTHCHECK_URL secret is set)
+        if: success()
+        env:
+          HC_URL: ${{ secrets.HEALTHCHECK_URL }}
+        run: |
+          if [ -n "${HC_URL:-}" ]; then
+            curl -fsS --retry 3 "$HC_URL" > /dev/null && echo "Watchdog checked in"
+          else
+            echo "No HEALTHCHECK_URL secret set — skipping watchdog."
+            echo "Without it, a workflow that stops running entirely will not alert anyone."
+          fi
+
       - name: Raise an alert issue
         if: failure()
         env:
