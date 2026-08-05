@@ -44,8 +44,16 @@ SOURCE REPO   github.com/fluffyland/the-unspoken-gift
 DEPLOY REPO   github.com/fluffyland/hrleavesystem   (branch: main)
   index.html         ← copy of app.html; GitHub Pages serves this
   supabase.min.js    ← vendored supabase-js (same-origin, no CDN)
-  .github/workflows/keepalive.yml  ← daily WRITE heartbeat (free tier pauses after 7 idle days)
-                                     v1 used a READ and still got paused — see keepalive_ping_v2.sql
+  (no .github/workflows — the keep-alive is NOT a GitHub Action, see below)
+
+KEEP-ALIVE    cron-job.org (external, free) → POST daily to
+  https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping
+  headers: apikey: <anon key>, Content-Type: application/json   body: {}
+  Free Supabase pauses after 7 idle days, and is DELETED 90 days after pausing.
+  Deliberately NOT a GitHub Action: GitHub disables cron in repos with no commit
+  for 60 days, and a workflow that stops running raises no failure — silence is
+  indistinguishable from success. That is the same trap as the read-only ping.
+  The function it calls must be installed first: supabase/keepalive_ping_v2.sql
 
 BACKEND       Supabase project ref: aypyolzkdupkpefpxius
   URL:  https://aypyolzkdupkpefpxius.supabase.co
@@ -122,8 +130,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `SETUP.md` | original backend setup guide + optional extras (email, cron, holiday sync) |
 | `NEW_COMPANY_SETUP.md` | **SOP manual**: stand up a new company / full reset / yearly routine / troubleshooting |
 | `HANDOVER.md` | this file |
-| `keepalive.yml` | reference copy; live one is in deploy repo `.github/workflows/` — **must be on that repo's DEFAULT branch or cron never fires** |
-| `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
+| `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
 | `supabase/migration_app_v1..v11.sql` | incremental history; user has applied through v11 EXCEPT v9 |
 | `supabase/bootstrap_owner.sql` | create first Owner (edit name/email inside) |

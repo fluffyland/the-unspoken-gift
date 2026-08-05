@@ -3,7 +3,7 @@
 --
 -- 背景（2026-08 事故）：
 --   v1 的 keepalive_ping() 是 `stable` 函数，只跑 `select now()` —— 纯读。
---   GitHub Actions 每 2 天成功 ping 一次（7/13、15、17、19、21 全部 HTTP 200），
+--   定时任务每 2 天成功 ping 一次（7/13、15、17、19、21 全部 HTTP 200），
 --   但项目仍然在 7/21–7/23 之间被自动暂停，HR 系统停摆约两周（7/23 → 8/5）。
 --   Supabase 官方回信只说「7 天无活动即暂停」。
 --   结论：**纯读请求不会重置 Supabase 的闲置计时器。**
@@ -17,6 +17,14 @@
 --
 -- 执行方式：Supabase Dashboard → SQL Editor → New query → 整段粘贴 → Run（跑一次即可）
 -- 幂等：可以重复执行，不会重复建表或丢数据。
+--
+-- 谁来定时调用它：**cron-job.org**（外部免费定时服务），每天一次：
+--   POST https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping
+--   headers: apikey: <anon key> / Content-Type: application/json
+--   body:    {}
+--   ⚠️ 必须 POST：本函数是 volatile（会写），PostgREST 不允许用 GET 调用。
+--   ⚠️ 不要改用 GitHub Actions：仓库 60 天无提交就会被自动停用定时任务，
+--      而「没在跑」不产生任何失败通知 —— 沉默和成功长得一模一样。
 -- =============================================================
 
 -- 1) 心跳表：永远只有一行（id = 1）。不含任何业务数据。
@@ -45,7 +53,8 @@ revoke all on table public.keepalive_heartbeat from anon, authenticated;
 --    v1 返回 now()，而两次独立的 HTTP 请求 = 两个事务 = 两个不同的时间戳，
 --    所以「时间戳变了」根本证明不了写入发生过。
 --    改成返回**持久化的计数器**后，连调两次必然是 N、N+1 —— 只有真的写进磁盘
---    才会递增。workflow 就靠这一点验证 v2 确实装上了。
+--    才会递增。想确认心跳真的通了，就看这个数字有没有在涨：
+--      select last_ping_at, ping_count from public.keepalive_heartbeat;
 --
 --    改返回类型必须先 drop（create or replace 不允许改返回类型）。
 drop function if exists public.keepalive_ping();

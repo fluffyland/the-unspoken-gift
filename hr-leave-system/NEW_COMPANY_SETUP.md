@@ -134,12 +134,29 @@ same two lines in the current repo's `index.html` and push.
    最后一格应显示 **`ping_count = 2`**。
    （SQL Editor 一次跑多条语句时只显示最后一条的结果，前面两行的返回值看不到，
    这是正常的。计数器能到 2，就证明两次调用都真的写进了磁盘 —— 只读的旧版永远是 0。）
-2. 确认 `.github/workflows/keepalive.yml` 在部署仓库的 **默认分支** 上。
-   定时任务只从默认分支运行 —— 放在别的分支等于没放。
-3. Actions 分页 → **Keep Supabase awake** → **Run workflow** 手动跑一次，确认绿灯。
+2. 到 **cron-job.org**（免费）注册，New cronjob，按下表填：
 
-> ⚠️ 2026-07 教训：旧版心跳只做「读」，每次都返回 HTTP 200，项目照样被暂停，
-> 系统停摆两周才被发现。**纯读不算活动，必须写。**
+   | 项 | 值 |
+   |---|---|
+   | URL | `https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping` |
+   | Method | **POST**（必须；写函数不接受 GET） |
+   | Header | `apikey: <anon key>` |
+   | Header | `Content-Type: application/json` |
+   | Body | `{}` |
+   | Schedule | 每天一次 |
+
+3. **打开它的失败通知**，并把通知发到你**每天真的会看**的地方。
+4. 点 **Run now** 手动跑一次，应返回 HTTP 200 和一个数字。
+   再回 SQL Editor 跑 `select ping_count from public.keepalive_heartbeat;`，
+   数字应该比刚才大 —— 这才证明心跳真的通了。
+
+> ⚠️ 2026-07 教训（两条，都得记）：
+> 1. 旧版心跳只做「读」，每次都返回 HTTP 200，项目照样被暂停，系统停摆两周。
+>    **纯读不算活动，必须写。**
+> 2. 失败邮件发了 8 封没人看见。**报警发到没人看的地方 = 没有报警。**
+>
+> 不要用 GitHub Actions 做这件事：仓库 60 天没有提交，GitHub 会自动停用定时任务，
+> 而「定时任务没在跑」不会触发任何失败通知 —— 沉默和成功长得一模一样。
 > 写入也只是推断而非官方保证 —— 如果还会被暂停，就升级 Pro（US$25/月）。
 
 ### Step 8 — Optional extras (any time later)
@@ -159,7 +176,8 @@ same two lines in the current repo's `index.html` and push.
 - [ ] create-login deployed (name exactly `create-login`)
 - [ ] Site live with the new URL + anon key
 - [ ] `keepalive_ping_v2.sql` ran and the last result shows **`ping_count = 2`**
-- [ ] `keepalive.yml` on the deploy repo's **default** branch, manually run once, green
+- [ ] cron-job.org job created (POST + apikey header), run once, `ping_count` went up
+- [ ] cron-job.org failure alerts point somewhere you actually read
 - [ ] Company settings + teams + employees entered
 - [ ] A test application → approve → shows in Decision history
 
