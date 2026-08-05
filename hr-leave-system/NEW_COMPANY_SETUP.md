@@ -149,9 +149,16 @@ same two lines in the current repo's `index.html` and push.
    > PostgREST 同时接受 url param —— 实测一个 header 都不加也返回 200。
    > anon key 本来就是公开的（网站源码里就有），放 URL 不增加任何暴露。
 
-3. **打开它的失败通知**，并把通知发到你**每天真的会看**的地方。
-4. 点 **Run now** 手动跑一次，应返回 HTTP 200 和一个数字。
-   再回 SQL Editor 跑 `select ping_count from public.keepalive_heartbeat;`，
+3. **再建第二个**（EasyCron / FastCron 等），设置完全一样，
+   但时间**错开 12 小时**（一个早上、一个晚上）。
+   两个互不相干的服务同时坏掉的概率，远低于只靠一个。
+4. **监控**：UptimeRobot（免费）5 分钟一次，**务必装手机 App 开推送通知**。
+   监控**数据库**（不是网站！），普通 GET 即可：
+   `https://<项目ref>.supabase.co/rest/v1/leave_types?select=code&limit=1&apikey=<anon key>`
+   返回 200 就算正常（返回 `[]` 是对的，anon 本来就读不到数据）。
+   ⚠️ 只监控网站没用 —— 2026-07 停摆那两周，网站一直是好的，睡着的是数据库。
+5. 每个都点一次 **Run now**，再回 SQL Editor 跑
+   `select ping_count from public.keepalive_heartbeat;`，
    数字应该比刚才大 —— 这才证明心跳真的通了。
 
 > ⚠️ 2026-07 教训（两条，都得记）：
@@ -180,8 +187,8 @@ same two lines in the current repo's `index.html` and push.
 - [ ] create-login deployed (name exactly `create-login`)
 - [ ] Site live with the new URL + anon key
 - [ ] `keepalive_ping_v2.sql` ran and the last result shows **`ping_count = 2`**
-- [ ] cron-job.org job created (POST + apikey header), run once, `ping_count` went up
-- [ ] cron-job.org failure alerts point somewhere you actually read
+- [ ] Two cron services created (POST, apikey in URL), 12h apart, `ping_count` went up
+- [ ] UptimeRobot watching the **database** URL, phone push notifications ON
 - [ ] Company settings + teams + employees entered
 - [ ] A test application → approve → shows in Decision history
 

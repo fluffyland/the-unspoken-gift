@@ -46,11 +46,38 @@ DEPLOY REPO   github.com/fluffyland/hrleavesystem   (branch: main)
   supabase.min.js    ← vendored supabase-js (same-origin, no CDN)
   (no .github/workflows — the keep-alive is NOT a GitHub Action, see below)
 
-KEEP-ALIVE    cron-job.org (external, free) → POST daily to
-  https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
-  NO headers needed, empty body. Put the key in the URL, not in a header —
-  cron services often drop custom headers, giving "No API key found in request".
-  Must be POST; GET returns 405 (the function writes).
+KEEP-ALIVE / MONITORING  (three external services, none of them in this repo)
+
+  Free Supabase pauses after 7 idle days and is DELETED 90 days after pausing.
+  Two independent "keepers" poke it; one "watcher" reports when it dies anyway.
+
+  KEEPER 1  cron-job.org   POST daily (~09:00 SGT)
+  KEEPER 2  EasyCron/etc   POST daily (~21:00 SGT — deliberately 12h offset, so
+                           one service having a bad day still leaves a poke)
+    URL for both:
+      https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
+    NO headers, empty body.
+    - Key goes in the URL, NOT a header: cron services often drop custom headers,
+      giving {"message":"No API key found in request"}. Verified working with no
+      headers at all, and with either json or form content-type.
+    - Must be POST. GET returns 405 — keepalive_ping() writes.
+
+  WATCHER   UptimeRobot, 5-min interval, PHONE PUSH enabled (not just email)
+    Monitor the DATABASE, plain GET, key in URL:
+      https://aypyolzkdupkpefpxius.supabase.co/rest/v1/leave_types?select=code&limit=1&apikey=<anon key>
+      Returns 200 with [] — anon cannot read rows (RLS). The 200 is the signal.
+    Optionally also the site: https://fluffyland.github.io/hrleavesystem/
+    ⚠️ Watching only the WEBSITE would not have caught the July outage — Pages
+       stayed up for all 14 days while the database was asleep.
+
+  WHY NOT GitHub Actions: it disables cron after 60 days with no commit, and a
+  workflow that stops running raises no failure — silence looks like success.
+  WHY NOT pg_cron: it runs inside the database, so it sleeps when the database
+  does and can never wake it.
+
+  Health check any time:
+    select last_ping_at, ping_count from public.keepalive_heartbeat;
+  last_ping_at older than ~2 days means both keepers have stopped.
   Free Supabase pauses after 7 idle days, and is DELETED 90 days after pausing.
   Deliberately NOT a GitHub Action: GitHub disables cron in repos with no commit
   for 60 days, and a workflow that stops running raises no failure — silence is
