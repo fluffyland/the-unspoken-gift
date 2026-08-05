@@ -166,6 +166,10 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `app.html` | THE app. Edit this, never index.html directly. |
 | `index.html` | deploy copy of app.html (`cp`, then push to both repos) |
 | `supabase.min.js` | vendored supabase-js v2 (same-origin; new sites must copy it too) |
+| `MIGRATION_GUIDE.md` | **stand the whole system up from zero on a new account** — accounts to register, repos to create (and which must be public vs private), SQL to run, functions to deploy, keep-alive + monitoring, final verification checklist |
+| `GUIDE_HR.md` | HR / Owner operations manual |
+| `GUIDE_EMPLOYEE.md` | employee-facing manual — safe to hand to staff as-is |
+| `YEARLY_CHECKLIST.md` | annual routine. Verifies OUTCOMES rather than schedules: holiday sync, rollover + grant, keep-alive liveness, whether alerts still reach a human |
 | `README.md`, `DESIGN.md` | early design notes (partly outdated; trust code + this file) |
 | `SETUP.md` | original backend setup guide + optional extras (email, cron, holiday sync) |
 | `NEW_COMPANY_SETUP.md` | **SOP manual**: stand up a new company / full reset / yearly routine / troubleshooting |

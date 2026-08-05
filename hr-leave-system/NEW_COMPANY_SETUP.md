@@ -1,3 +1,8 @@
+> 🆕 **要在一个全新账号上从零搭整套系统**（新 Supabase + 新 GitHub + 防休眠 + 监控）？
+> 请看 **[`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md)** —— 那份更详细，含要注册哪些网站、
+> 哪个仓库必须 public / 哪个必须 private、以及最后的逐条验收清单。
+> 本文件侧重**换公司 / 全量重置 / 每年例行**的 SOP。
+
 # LeaveDesk — Standard Operating Procedure (SOP)
 ## Setting up for a new company · Full system reset · First-day operations
 

@@ -5,10 +5,24 @@
 员工随时可查各类假期（Annual / Sick / Hospitalisation / Maternity / Off-in-Lieu 等
 新加坡全部法定假期）的剩余天数。**界面为全英文**。
 
+## 📖 先看这些（按你的身份挑一份）
+
+| 你是谁 / 要做什么 | 看这份 |
+|---|---|
+| **要在新账号上从零搭一遍**（新 Supabase、新 GitHub、新监控） | **[`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md)** ← 一步步点，最详细 |
+| **HR / Owner 日常操作**（加人、审批、离职、改假期类型） | [`GUIDE_HR.md`](GUIDE_HR.md) |
+| **发给普通员工看的** | [`GUIDE_EMPLOYEE.md`](GUIDE_EMPLOYEE.md) |
+| **每年 1 月例行检查**（含「自动同步万一没跑成怎么办」） | [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md) |
+| 交接给下一个开发者 / AI | [`HANDOVER.md`](HANDOVER.md) |
+| 换公司 / 全量重置 SOP | [`NEW_COMPANY_SETUP.md`](NEW_COMPANY_SETUP.md) |
+
 ## 文件说明
 
 | 文件 | 用途 |
 |---|---|
+| `MIGRATION_GUIDE.md` | **新账号从零部署总指南**：要注册哪些网站、建哪些仓库、跑哪些 SQL、部署哪些函数、防休眠与监控怎么配、最后逐条验收。 |
+| `GUIDE_HR.md` / `GUIDE_EMPLOYEE.md` | HR 操作手册 / 员工使用手册（英文，与界面一致）。 |
+| `YEARLY_CHECKLIST.md` | 每年例行检查。重点是**不要盲信自动化**：公共假期同步、年度入账、防休眠、报警通道，逐项验证「结果」而不是「有没有排程」。 |
 | `app.html` | **生产版应用**（部署在 https://fluffyland.github.io/hrleavesystem/ ）。真实登录 + Supabase 数据库,持续维护更新。 |
 | `index.html` | 演示版（单文件、免安装,数据存浏览器）。**已冻结**,新功能只进 app.html。 |
 | `supabase/schema.sql` | 正式版数据库底座：7 张表、余额视图、状态机存储过程、RLS 权限、年度入账函数。在 Supabase SQL Editor 执行一次即可。 |
