@@ -131,7 +131,8 @@ same two lines in the current repo's `index.html` and push.
 而且 **暂停满 90 天项目会被永久删除**。
 
 1. SQL Editor → New query → 粘贴 **`supabase/keepalive_ping_v2.sql`** → **Run**。
-   最后应看到两个**不同**的时间戳（证明它真的在写入，而不是只读）。
+   最后应看到两个**连号的数字**（例如 `1` 和 `2`）——计数器持久递增，
+   就证明它真的写进了数据库，而不是只读。
 2. 确认 `.github/workflows/keepalive.yml` 在部署仓库的 **默认分支** 上。
    定时任务只从默认分支运行 —— 放在别的分支等于没放。
 3. Actions 分页 → **Keep Supabase awake** → **Run workflow** 手动跑一次，确认绿灯。
@@ -156,7 +157,7 @@ same two lines in the current repo's `index.html` and push.
 - [ ] Owner logs in and changed their password
 - [ ] create-login deployed (name exactly `create-login`)
 - [ ] Site live with the new URL + anon key
-- [ ] `keepalive_ping_v2.sql` ran and returned **two different** timestamps
+- [ ] `keepalive_ping_v2.sql` ran and returned **two consecutive numbers** (e.g. 1 then 2)
 - [ ] `keepalive.yml` on the deploy repo's **default** branch, manually run once, green
 - [ ] Company settings + teams + employees entered
 - [ ] A test application → approve → shows in Decision history

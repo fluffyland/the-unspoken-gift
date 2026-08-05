@@ -40,46 +40,55 @@ alter table public.keepalive_heartbeat enable row level security;
 revoke all on table public.keepalive_heartbeat from anon, authenticated;
 
 -- 3) 把 keepalive_ping() 从「只读」换成「真写」。
---    返回值仍是 timestamptz，所以可以直接 create or replace 覆盖 v1。
-create or replace function public.keepalive_ping()
-returns timestamptz
+--
+--    返回值从 timestamptz 改成 bigint（累计 ping 次数）。这是刻意的：
+--    v1 返回 now()，而两次独立的 HTTP 请求 = 两个事务 = 两个不同的时间戳，
+--    所以「时间戳变了」根本证明不了写入发生过。
+--    改成返回**持久化的计数器**后，连调两次必然是 N、N+1 —— 只有真的写进磁盘
+--    才会递增。workflow 就靠这一点验证 v2 确实装上了。
+--
+--    改返回类型必须先 drop（create or replace 不允许改返回类型）。
+drop function if exists public.keepalive_ping();
+
+create function public.keepalive_ping()
+returns bigint
 language plpgsql
 volatile              -- 关键：v1 是 stable(只读)，v2 必须是 volatile(会写)
 security definer
 set search_path = public
 as $$
 declare
-  v_now timestamptz;
+  v_count bigint;
 begin
   update public.keepalive_heartbeat
      set last_ping_at = now(),
          ping_count   = ping_count + 1
    where id = 1
-  returning last_ping_at into v_now;
+  returning ping_count into v_count;
 
   -- 万一那一行被人删了，自愈补回来
-  if v_now is null then
+  if v_count is null then
     insert into public.keepalive_heartbeat (id, last_ping_at, ping_count)
     values (1, now(), 1)
     on conflict (id) do update
       set last_ping_at = now(),
           ping_count   = public.keepalive_heartbeat.ping_count + 1
-    returning last_ping_at into v_now;
+    returning ping_count into v_count;
   end if;
 
-  return v_now;
+  return v_count;
 end;
 $$;
 
 comment on function public.keepalive_ping() is
-  'Keep-alive heartbeat. Performs a real WRITE (updates keepalive_heartbeat) and returns the write timestamp. Exposes no business data.';
+  'Keep-alive heartbeat. Performs a real WRITE (updates keepalive_heartbeat) and returns the persisted ping counter. Exposes no business data.';
 
--- 允许未登录（anon）调用：它只写心跳表、只回一个时间戳，不碰任何业务数据。
+-- 允许未登录（anon）调用：它只写心跳表、只回一个计数，不碰任何业务数据。
 grant execute on function public.keepalive_ping() to anon, authenticated;
 
 -- =============================================================
--- 验证：连跑两次，两个时间戳必须不同，且 ping_count 递增 2。
--- 如果时间戳一样 → 说明还在跑 v1 的只读版本，函数没覆盖成功。
+-- 验证：连跑两次，返回的两个数字必须是 N 和 N+1（例如 1、2）。
+-- 如果返回的是时间戳而不是数字 → 说明覆盖失败，还在跑 v1。
 -- =============================================================
 select public.keepalive_ping() as ping_1;
 select public.keepalive_ping() as ping_2;

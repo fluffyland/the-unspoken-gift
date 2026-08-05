@@ -45,6 +45,11 @@ permissions:
   contents: read
   issues: write        # needed to raise an alert issue when the ping fails
 
+# Never let a manual run and the scheduled run overlap.
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: false
+
 jobs:
   ping:
     runs-on: ubuntu-latest
@@ -67,8 +72,8 @@ jobs:
           }
 
           code1=$(ping /tmp/ping1.txt)
-          ts1=$(tr -d '"' < /tmp/ping1.txt)
-          echo "ping 1 -> HTTP $code1 : $ts1"
+          n1=$(tr -d '"' < /tmp/ping1.txt)
+          echo "ping 1 -> HTTP $code1 : $n1"
 
           if [ "$code1" != "200" ]; then
             # Diagnose: is the whole project down, or just the function missing?
@@ -86,25 +91,35 @@ jobs:
             exit 1
           fi
 
-          # Second ping. A WRITE-based function returns a new timestamp on every
-          # call; the old read-only v1 returns the same one. This proves v2 is
-          # really installed rather than trusting a 200.
-          sleep 2
+          # v2 returns a PERSISTED counter, so two calls must return N and N+1.
+          # Do not check timestamps here: the old read-only v1 returned now(),
+          # and two separate HTTP calls are two separate transactions, so its
+          # timestamps differ too — that would prove nothing. Only a counter
+          # that survives between requests proves a write actually landed.
+          if ! [ "$n1" -eq "$n1" ] 2>/dev/null; then
+            echo "::error::keepalive_ping() returned '$n1', which is not a number. That is the OLD read-only v1 function (it returned a timestamp), so this workflow is NOT keeping the project awake. Run hr-leave-system/supabase/keepalive_ping_v2.sql in the Supabase SQL Editor."
+            exit 1
+          fi
+
           code2=$(ping /tmp/ping2.txt)
-          ts2=$(tr -d '"' < /tmp/ping2.txt)
-          echo "ping 2 -> HTTP $code2 : $ts2"
+          n2=$(tr -d '"' < /tmp/ping2.txt)
+          echo "ping 2 -> HTTP $code2 : $n2"
 
           if [ "$code2" != "200" ]; then
             echo "::error::Second ping failed (HTTP $code2) after the first succeeded. Treating as unhealthy."
             exit 1
           fi
 
-          if [ -z "$ts1" ] || [ "$ts1" = "$ts2" ]; then
-            echo "::error::keepalive_ping() returned the same timestamp twice ($ts1). The OLD read-only v1 function is still installed, so this workflow is NOT keeping the project awake. Run hr-leave-system/supabase/keepalive_ping_v2.sql in the Supabase SQL Editor."
+          # "Advanced" rather than "exactly +1": a manual run overlapping the cron
+          # would bump the counter too, and a false alarm here is not harmless —
+          # alert fatigue is part of why the July outage went unnoticed for weeks.
+          # Any advance still proves the write persisted between two requests.
+          if ! [ "$n2" -gt "$n1" ] 2>/dev/null; then
+            echo "::error::Heartbeat counter did not advance ($n1 -> $n2). The write is not persisting, so the project is NOT being kept awake. Inspect public.keepalive_heartbeat in the Supabase SQL Editor."
             exit 1
           fi
 
-          echo "Heartbeat written twice ($ts1 -> $ts2). Database is awake and accepting writes."
+          echo "Heartbeat counter advanced $n1 -> $n2. The write persisted; database is awake."
 
       - name: Raise an alert issue
         if: failure()
