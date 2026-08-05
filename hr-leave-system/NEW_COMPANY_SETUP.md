@@ -131,8 +131,9 @@ same two lines in the current repo's `index.html` and push.
 而且 **暂停满 90 天项目会被永久删除**。
 
 1. SQL Editor → New query → 粘贴 **`supabase/keepalive_ping_v2.sql`** → **Run**。
-   最后应看到两个**连号的数字**（例如 `1` 和 `2`）——计数器持久递增，
-   就证明它真的写进了数据库，而不是只读。
+   最后一格应显示 **`ping_count = 2`**。
+   （SQL Editor 一次跑多条语句时只显示最后一条的结果，前面两行的返回值看不到，
+   这是正常的。计数器能到 2，就证明两次调用都真的写进了磁盘 —— 只读的旧版永远是 0。）
 2. 确认 `.github/workflows/keepalive.yml` 在部署仓库的 **默认分支** 上。
    定时任务只从默认分支运行 —— 放在别的分支等于没放。
 3. Actions 分页 → **Keep Supabase awake** → **Run workflow** 手动跑一次，确认绿灯。
@@ -157,7 +158,7 @@ same two lines in the current repo's `index.html` and push.
 - [ ] Owner logs in and changed their password
 - [ ] create-login deployed (name exactly `create-login`)
 - [ ] Site live with the new URL + anon key
-- [ ] `keepalive_ping_v2.sql` ran and returned **two consecutive numbers** (e.g. 1 then 2)
+- [ ] `keepalive_ping_v2.sql` ran and the last result shows **`ping_count = 2`**
 - [ ] `keepalive.yml` on the deploy repo's **default** branch, manually run once, green
 - [ ] Company settings + teams + employees entered
 - [ ] A test application → approve → shows in Decision history

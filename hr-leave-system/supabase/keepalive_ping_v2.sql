@@ -87,9 +87,18 @@ comment on function public.keepalive_ping() is
 grant execute on function public.keepalive_ping() to anon, authenticated;
 
 -- =============================================================
--- 验证：连跑两次，返回的两个数字必须是 N 和 N+1（例如 1、2）。
--- 如果返回的是时间戳而不是数字 → 说明覆盖失败，还在跑 v1。
+-- 验证
+--
+-- ⚠️ Supabase SQL Editor 一次跑多条语句时，**只显示最后一条的结果**。
+--    所以下面前两行的返回值你是看不到的 —— 这是正常的，不是出错。
+--
+-- ✅ 通过标准：最后一行显示 ping_count = 2（首次安装时）。
+--    计数器能到 2，就说明两次调用各自都真的写进了磁盘并保留了下来 ——
+--    只读的 v1 永远只会是 0，因为它根本没有表可写。
+--
+-- 想单独看返回值，就只选中这一行单独 Run（每跑一次数字 +1）：
+--    select public.keepalive_ping();
 -- =============================================================
-select public.keepalive_ping() as ping_1;
-select public.keepalive_ping() as ping_2;
+select public.keepalive_ping() as ping_1;   -- 结果不会显示（见上）
+select public.keepalive_ping() as ping_2;   -- 结果不会显示（见上）
 select last_ping_at, ping_count from public.keepalive_heartbeat where id = 1;
