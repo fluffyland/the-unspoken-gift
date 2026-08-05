@@ -51,16 +51,27 @@ KEEP-ALIVE / MONITORING  (three external services, none of them in this repo)
   Free Supabase pauses after 7 idle days and is DELETED 90 days after pausing.
   Two independent "keepers" poke it; one "watcher" reports when it dies anyway.
 
-  KEEPER 1  cron-job.org   POST daily (~09:00 SGT)
-  KEEPER 2  EasyCron/etc   POST daily (~21:00 SGT — deliberately 12h offset, so
-                           one service having a bad day still leaves a poke)
-    URL for both:
-      https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
+  KEEPER 1  cron-job.org                POST daily, morning SGT
+    URL: https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
     NO headers, empty body.
-    - Key goes in the URL, NOT a header: cron services often drop custom headers,
-      giving {"message":"No API key found in request"}. Verified working with no
-      headers at all, and with either json or form content-type.
+    - Key goes in the URL, NOT a header: web-form cron services often drop custom
+      headers, giving {"message":"No API key found in request"}. Verified working
+      with no headers at all, and with either json or form content-type.
     - Must be POST. GET returns 405 — keepalive_ping() writes.
+
+  KEEPER 2  github.com/fluffyland/leavedesk-keepalive  (PRIVATE)  21:17 SGT
+    A repo containing only .github/workflows/keepalive.yml. Deliberately 12h
+    offset from keeper 1, so one service having a bad day still leaves a poke.
+    Smarter than a web-form cron: it calls the function TWICE and requires the
+    counter to advance, so it cannot be fooled by a 200 from a broken setup —
+    exactly the check that would have caught July. Opens a GitHub issue on
+    failure (the mobile app pushes those).
+    ⚠️ MUST STAY PRIVATE. GitHub auto-disables scheduled workflows after 60 days
+       of no repo activity IN PUBLIC REPOS ONLY. Making it public re-arms that
+       timer on the thing protecting the HR system.
+    ⚠️ Do NOT move it into hrleavesystem, and do NOT make that repo private:
+       on the Free plan a private repo cannot publish Pages, so the website
+       would be unpublished and the HR system would go offline.
 
   WATCHER   UptimeRobot, 5-min interval, PHONE PUSH enabled (not just email)
     Monitor the DATABASE, plain GET, key in URL:

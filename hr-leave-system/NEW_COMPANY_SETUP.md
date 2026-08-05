@@ -149,9 +149,14 @@ same two lines in the current repo's `index.html` and push.
    > PostgREST 同时接受 url param —— 实测一个 header 都不加也返回 200。
    > anon key 本来就是公开的（网站源码里就有），放 URL 不增加任何暴露。
 
-3. **再建第二个**（EasyCron / FastCron 等），设置完全一样，
-   但时间**错开 12 小时**（一个早上、一个晚上）。
-   两个互不相干的服务同时坏掉的概率，远低于只靠一个。
+3. **再建第二个定时器**，时间**错开 12 小时**（一个早上、一个晚上）。
+   两个互不相干的东西同时坏掉的概率，远低于只靠一个。二选一：
+   - 简单：再注册一个 EasyCron / FastCron，设置和上面完全一样；
+   - 更好：建一个**私有**仓库放 GitHub Actions 定时任务
+     （本项目用的是 `fluffyland/leavedesk-keepalive`）。它会连调两次并检查
+     计数器有没有涨，不会被一个 200 骗过去；失败还会自动开 Issue（手机 App 有推送）。
+     ⚠️ 必须 private：「60 天无活动自动停用」只针对 public 仓库。
+     ⚠️ 不要放进网站仓库，网站仓库必须 public，否则免费版 Pages 会下线。
 4. **监控**：UptimeRobot（免费）5 分钟一次，**务必装手机 App 开推送通知**。
    监控**数据库**（不是网站！），普通 GET 即可：
    `https://<项目ref>.supabase.co/rest/v1/leave_types?select=code&limit=1&apikey=<anon key>`
