@@ -266,6 +266,20 @@ begin
   end if;
 end $$;
 
+-- ---------- 7. 日历视图带上「这个人周六上不上班」 ----------
+-- 日历要按**假期所属的人**来决定周六画不画休假条，但原视图只有 name/dept/日期/状态。
+-- 这里让视图自己算好（走 emp_works_saturday，个人覆盖也算得到），
+-- 既拿到了需要的信息，又不用把 emp_id 暴露给全体员工。
+create or replace view leave_calendar as
+select e.name, e.dept, a.start_date, a.end_date,
+       case when a.status = 'pending' then 'pending' else 'approved' end as status,
+       emp_works_saturday(e.id) as works_saturday
+from applications a join employees e on e.id = a.emp_id
+where a.status in ('pending','approved','cancel_requested') and e.active
+  and is_staff();
+grant select on leave_calendar to authenticated;
+revoke select on leave_calendar from anon;
+
 -- ---------- 验证 ----------
 -- 1) 权威函数存在且行为正确（周日永远 false；周六看设置；公共假期永远 false）
 select 'is_working_day exists' as check, is_working_day(null::uuid, date '2026-08-16') as sunday_should_be_false;

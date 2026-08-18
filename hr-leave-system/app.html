@@ -298,7 +298,8 @@ const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
 const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
   empNo: r.emp_no || "", alias: r.alias || "", mobile: r.mobile || "", hasLogin: !!r.auth_user_id,
-  twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
+  twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null,
+  worksSat: r.works_saturday });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
   gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days),
   allowHalf: r.allow_half_day, sort: r.sort, note: r.note || "" });
@@ -333,7 +334,7 @@ async function loadAll() {
     rosterP,
     sb.from("leave_types").select("*"),
     phP,
-    sb.from("departments").select("name"),
+    sb.from("departments").select("*"),
     sb.from("org_settings").select("*").maybeSingle()
   ]);
   const firstErr = [empR, typeR, phR, deptR, orgR].map(r => r.error).find(Boolean);
@@ -345,6 +346,9 @@ async function loadAll() {
   const phNames = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.name || "Public holiday"]));
   const phSource = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.source || "manual"]));
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
+  // Keep `departments` a plain list of names — dropdowns everywhere depend on that.
+  // The Saturday flag rides alongside as a lookup instead of changing the shape.
+  const deptSat = Object.fromEntries((deptR.data || []).map(x => [x.name, !!x.works_saturday]));
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
     defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
@@ -380,9 +384,9 @@ async function loadAll() {
   // Company-wide calendar comes from a dedicated view (everyone can read it),
   // separate from `applications` which RLS limits to your own + those you approve.
   const calR = await sb.from("leave_calendar").select("*");
-  const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status }));
+  const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status, worksSat: !!c.works_saturday }));
 
-  db = { org, departments, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  db = { org, departments, deptSat, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
   // Feature detection so the UI stays safe before the v8 database migration is applied.
   db.empExtra   = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
   db.ltHalf     = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
@@ -426,14 +430,41 @@ function wdCount(start, end, sh, eh, phList) {
   return n;
 }
 /* Working days (ISO strings) in a range, excluding weekends + SG public holidays */
-function workingDaysList(start, end) {
-  const ph = db.publicHolidays;
+/* Mirrors SQL emp_works_saturday(): personal override wins, else the department
+   default, else no. `null` means "inherit" and must stay distinct from `false`. */
+function empWorksSat(e) {
+  if (!e) return false;
+  if (e.worksSat === true || e.worksSat === false) return e.worksSat;
+  return !!((db.deptSat || {})[e.dept]);
+}
+/* Frontend mirror of the SQL authority is_working_day(emp, date). Keep the two in
+   step: Sunday never counts, Saturday only for Saturday workers, a public holiday
+   never counts for anyone. Do NOT re-derive this rule anywhere else — three
+   divergent copies are what put weekends on the calendar as leave. */
+function isWorkingDayFor(ds, worksSat) {
+  if (db.publicHolidays.includes(ds)) return false;
+  const d = new Date(ds + "T00:00:00").getDay();   // 0 = Sun … 6 = Sat
+  if (d === 0) return false;
+  if (d === 6) return !!worksSat;
+  return true;
+}
+/* Does this draft clash with the applicant's own existing leave? Used BOTH while the
+   dates are being picked (so the warning is immediate) and again at submit. The
+   database enforces it independently — this is UX, not the guard. */
+function selfOverlap(f, exceptId) {
+  return db.applications.find(a => a.empId === me.id && a.id !== exceptId &&
+    ["pending", "approved", "cancel_requested"].includes(a.status) &&
+    !(f.end < a.start || f.start > a.end));
+}
+function workingDaysList(start, end, forEmp) {
   const s = new Date(start + "T00:00:00"), e = new Date(end + "T00:00:00");
   const list = [];
   if (!(s <= e)) return list;
+  // Defer to the one mirror of the SQL rule rather than re-testing weekends here —
+  // this function having its own copy is how the calendar drifted out of step.
+  const sat = empWorksSat(forEmp || me);
   for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-    const wd = d.getDay();
-    if (wd !== 0 && wd !== 6 && !ph.includes(iso(d))) list.push(iso(d));
+    if (isWorkingDayFor(iso(d), sat)) list.push(iso(d));
   }
   return list;
 }
@@ -445,12 +476,24 @@ function wdCountHalf(start, end, half) {
   if (n <= 0 && list.length) n = 0.5;
   return n;
 }
-/* Human-readable half-day summary for an application (handles legacy sh/eh records) */
+/* Legacy sh/eh records only — a per-day half map gets its own table row (halfDayRows).
+   Cramming eight half-days onto the Dates line made it unreadable. */
 function halfSummary(a) {
-  const hd = a.halfDays || [];
-  if (hd.length) return " · half: " + hd.map(x => fmtDate(x.d) + " " + String(x.part).toUpperCase()).join(", ");
+  if ((a.halfDays || []).length) return "";
   if (a.sh || a.eh) return (a.sh ? " · first day ½" : "") + (a.eh ? " · last day ½" : "");
   return "";
+}
+/* Half-days, one per line, with the weekday — an approver checking a pattern of
+   half-days shouldn't have to parse a comma-separated run-on sentence. */
+function halfDayRows(a) {
+  const hd = (a.halfDays || []).slice().sort((x, y) => x.d < y.d ? -1 : x.d > y.d ? 1 : 0);
+  if (!hd.length) return "";
+  const dow = ds => new Date(ds + "T00:00:00").toLocaleDateString("en-SG", { weekday: "short" });
+  const part = p => String(p).toUpperCase() === "AM" ? "Morning (AM)" : "Afternoon (PM)";
+  return `<dt>Half days</dt><dd><div class="tablebox" style="max-width:320px"><table>
+    <thead><tr><th>Date</th><th>Day</th><th>Half</th></tr></thead><tbody>
+    ${hd.map(x => `<tr><td class="num">${fmtDate(x.d)}</td><td class="meta">${dow(x.d)}</td><td>${part(x.part)}</td></tr>`).join("")}
+    </tbody></table></div></dd>`;
 }
 // Half-days as small chips (easier to scan than one long comma line)
 function halfChips(a) {
@@ -1019,6 +1062,9 @@ function vApply() {
   const curYear = todayStr().slice(0, 4);
   const yearEnd = curYear + "-12-31";
   const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
+  // Warn as soon as the dates are chosen, not on submit — being told at the last
+  // step, after filling everything in, is the complaint this fixes.
+  const clash = (f.start && f.end) ? selfOverlap(f, vp.editId) : null;
   return `
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
     <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
@@ -1049,6 +1095,9 @@ function vApply() {
         ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
       </div>
       ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day${days === 1 ? "" : "s"} but only ${fmtD(b.avail)} available</div>` : ""}
+      ${clash ? `<div class="callout warn" style="margin:0 0 12px">⚠ <b>These dates overlap leave you've already applied for.</b><br>
+        ${esc(lt(clash.type).en)} · ${fmtRange(clash.start, clash.end)} · <span class="pill st-${clash.status}">${stName(clash.status)}</span><br>
+        <span class="meta">Pick different dates, or withdraw/cancel that application first.</span></div>` : ""}
       ${nextYearBlocked ? `<div class="callout warn" style="margin:0 0 12px">📅 <b>Next year is view-only for now.</b> Leave dated in ${Number(curYear) + 1} opens for applications on 1 Jan ${Number(curYear) + 1} (that's when next year's balance is granted). You can already preview ${Number(curYear) + 1} public holidays in the <b>Calendar</b> tab.</div>` : ""}
       <div class="field"><label>Remarks<span class="req">*</span></label><textarea data-f="reason" rows="2" placeholder="Provide a brief reason for your leave request.">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
@@ -1056,7 +1105,7 @@ function vApply() {
         <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
         <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "You may attach supporting documents (e.g., a flight itinerary or booking confirmation) if they help provide additional context for your request. Only you, your approver, and HR can view the attachment."}</span></div>
       <div class="actions">
-        <button class="btn" data-act="submit" ${days <= 0 || over || nextYearBlocked ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
+        <button class="btn" data-act="submit" ${days <= 0 || over || nextYearBlocked || clash ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
         ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
       </div>
     </div>`;
@@ -1074,9 +1123,8 @@ async function doSubmit() {
   if (!f.reason.trim()) return toast("Please add a brief reason for your leave.");
   if (t.mc && !f.att) return toast("Please attach a photo or PDF of your MC for this leave type.");
   if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("Your MC needs to be a photo or a PDF.");
-  const overlap = db.applications.some(a => a.empId === me.id && a.id !== vp.editId &&
-    ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
-  if (overlap) return toast("These dates overlap with an application you've already submitted.");
+  const clash = selfOverlap(f, vp.editId);
+  if (clash) return toast(`These dates overlap your ${lt(clash.type).en}, ${fmtRange(clash.start, clash.end)}.`);
   if (submitting) return;               // a submit is already in flight — ignore the extra click
   submitting = true;
   const btn = document.querySelector('[data-act="submit"]'), label = btn ? btn.textContent : "";
@@ -1143,7 +1191,9 @@ function vCalendar() {
     const dow = new Date(Y, M - 1, d).getDay();
     const isPH = db.publicHolidays.includes(ds);
     const off = dow === 0 || dow === 6 || isPH;
-    const chips = leaves.filter(a => a.start <= ds && ds <= a.end).map(a => {
+    // Filter by the schedule of whoever OWNS the leave, not the viewer's: once some
+    // staff work Saturdays, a Saturday chip is right for them and wrong for others.
+    const chips = leaves.filter(a => a.start <= ds && ds <= a.end && isWorkingDayFor(ds, a.worksSat)).map(a => {
       const approved = a.status !== "pending";
       return `<span class="lvchip ${approved ? "ap" : "pd"}" title="${esc(a.name)} — ${approved ? "Approved" : "Pending approval"}">${esc(a.name)}</span>`;
     }).join("");
@@ -1267,17 +1317,34 @@ function detailModal(id) {
   const t = lt(a.type), e = emp(a.empId);
   const evs = db.events.filter(x => x.appId === id).sort((x, y) => x.ts - y.ts);
   const own = a.empId === me.id;
-  const canCancel = own && a.status === "approved" && a.start > todayStr();
+  // No date test: approved leave can be cancelled even once it has started. The old
+  // `a.start > todayStr()` silently removed the button mid-leave, which read as the
+  // feature not existing. Cancelling refunds the FULL application; the employee then
+  // re-applies for the days actually taken (see the re-apply prompt below).
+  const canCancel = own && a.status === "approved";
+  const started = a.start <= todayStr();
+  const canReapply = own && a.status === "cancelled" && started;
   return `<div class="modalback" data-act="closemodal">
     <div class="modal" data-stop="1">
       <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
         <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
       <dl class="kv">
         <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day${a.days === 1 ? "" : "s"}${halfSummary(a)}</dd>
+        ${halfDayRows(a)}
         <dt>Reason</dt><dd>${esc(a.reason)}</dd>
         ${a.att ? `<dt>Attachment</dt><dd><div id="attprev" data-path="${esc(a.att)}" data-name="${esc(a.att.split("/").pop().replace(/^\d+_/, ""))}">${attLink(a.att)}</div></dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
       </dl>
+      ${own && !canCancel && !canReapply && ["cancel_requested","cancelled","rejected","withdrawn"].includes(a.status)
+        ? `<p class="meta" style="margin:6px 0 0">${{
+            cancel_requested: "You've asked to cancel this. It's with your approver — nothing more to do for now.",
+            cancelled: "This leave was cancelled and the days were returned to your balance.",
+            rejected: "This application was declined. Apply again with different dates if you still need the leave.",
+            withdrawn: "You withdrew this application before it was decided."
+          }[a.status]}</p>` : ""}
+      ${canReapply ? `<div class="callout warn" style="margin:8px 0">You were refunded <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} in full.
+        If you actually took part of this leave, <b>re-apply for those dates</b> so your balance stays correct —
+        set the end date to your last day away.</div>` : ""}
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
       ${stepsView(a)}
       <h3 style="margin-top:14px">Timeline</h3>
@@ -1286,6 +1353,7 @@ function detailModal(id) {
         ${own && a.status === "pending" ? `<button class="btn sec" data-act="withdraw" data-id="${a.id}">Withdraw</button>` : ""}
         ${own && a.status === "returned" ? `<button class="btn" data-act="edit" data-id="${a.id}">Amend & resubmit</button>` : ""}
         ${canCancel ? `<button class="btn ghost" data-act="cancelreq" data-id="${a.id}">Cancel this leave</button>` : ""}
+        ${canReapply ? `<button class="btn" data-act="reapply" data-id="${a.id}">Re-apply for days taken</button>` : ""}
         <button class="btn sec" data-act="closemodal">Close</button>
       </div>
     </div></div>`;
@@ -1901,6 +1969,20 @@ document.addEventListener("click", async ev => {
     }
     case "withdraw": { if (await withdrawApp(id)) { delete vp.detail; render(); toast("Application withdrawn"); } break; }
     case "edit": vp = { editId: id }; view = "apply"; render(); break;
+    // Cancelling refunds the whole application, so anyone who had already taken part
+    // of it must re-book those days. Pre-fill the form rather than compute a partial
+    // refund: the system does no clever arithmetic, the human states the real dates.
+    case "reapply": {
+      const a = db.applications.find(x => x.id === id);
+      if (!a) return;
+      vp.form = { type: a.type, start: a.start, end: a.end,
+        half: Object.fromEntries((a.halfDays || []).map(x => [x.d, x.part])),
+        reason: a.reason || "", att: a.att || "" };
+      delete vp.editId; delete vp.detail;
+      view = "apply"; render();
+      toast("Set the end date to your last day away, then submit");
+      break;
+    }
     case "cancelreq": {
       if (await requestCancel(id)) {
         delete vp.detail;
