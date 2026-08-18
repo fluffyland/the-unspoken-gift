@@ -280,6 +280,31 @@ where a.status in ('pending','approved','cancel_requested') and e.active
 grant select on leave_calendar to authenticated;
 revoke select on leave_calendar from anon;
 
+-- ---------- 8. 保险被触发时的记录表 ----------
+-- 为什么单独建表：application_events 只有 select 策略，写入一律由 security definer
+-- 函数完成 —— 这是刻意的，给它开放 insert 会让任何人都能伪造审计记录。
+-- 而对账保险一旦触发就整笔回滚，连事件行也会跟着消失，失败将不留任何痕迹。
+-- 所以失败记录写到这张独立的小表，前端在**回滚之后**另发一次请求写入。
+create table if not exists ledger_guard_failures (
+  id         bigint generated always as identity primary key,
+  at         timestamptz not null default now(),
+  emp_id     uuid references employees(id) on delete set null,
+  app_id     uuid,
+  message    text
+);
+comment on table ledger_guard_failures is
+  'Recorded when a balance guard in confirm_cancel blocks a refund. Written by the frontend after the rollback, because anything written inside the transaction is rolled back too.';
+
+alter table ledger_guard_failures enable row level security;
+drop policy if exists lgf_insert on ledger_guard_failures;
+drop policy if exists lgf_read   on ledger_guard_failures;
+-- 任何在职员工都能写（只写自己遇到的失败），但只有 HR 能看
+create policy lgf_insert on ledger_guard_failures for insert to authenticated
+  with check (emp_id = current_emp_id());
+create policy lgf_read on ledger_guard_failures for select to authenticated
+  using (is_hr());
+grant insert, select on ledger_guard_failures to authenticated;
+
 -- ---------- 验证 ----------
 -- 1) 权威函数存在且行为正确（周日永远 false；周六看设置；公共假期永远 false）
 select 'is_working_day exists' as check, is_working_day(null::uuid, date '2026-08-16') as sunday_should_be_false;

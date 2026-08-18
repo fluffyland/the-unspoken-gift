@@ -79,7 +79,29 @@ Deno.serve(async (req) => {
       if (!target.auth_user_id) return json({ error: "This person has no login yet — use ‘Create login’ first." }, 400);
       const { error: uErr } = await admin.auth.admin.updateUserById(target.auth_user_id, { password: DEFAULT_PASSWORD });
       if (uErr) return json({ error: uErr.message }, 400);
+      // 告知本人密码被改过。失败绝不能影响重设本身 —— 因为一封邮件发不出去
+      // 就把人锁在门外，比少一封通知糟糕得多。
+      try {
+        await admin.functions.invoke("send-notification", {
+          body: { kind: "password_changed", to: target.email, by: "HR", at: new Date().toISOString() },
+        });
+      } catch (_e) { /* fire and forget */ }
       return json({ ok: true, reset: true, email: target.email, password: DEFAULT_PASSWORD });
+    }
+
+    // ===== 改登录邮箱（HR 在应用里改了员工 email 时调用）=====
+    // 为什么需要：档案和登录是靠 auth_user_id 关联的，不是靠邮箱字符串。
+    // 只改 employees.email 的话，本人仍然只能用**旧邮箱**登录，
+    // 自助重设密码时用新邮箱收不到码、用旧邮箱码发去了可能已停用的信箱。
+    if (action === "change-email") {
+      if (!target.auth_user_id) return json({ ok: true, changed: false, note: "No login to update." });
+      const newMail = mail || String(target.email || "").trim().toLowerCase();
+      if (!newMail) return json({ error: "Email is required." }, 400);
+      const { error: eErr } = await admin.auth.admin.updateUserById(target.auth_user_id, {
+        email: newMail, email_confirm: true,
+      });
+      if (eErr) return json({ error: eErr.message }, 400);
+      return json({ ok: true, changed: true, email: newMail });
     }
 
     // ===== 创建登录 =====
