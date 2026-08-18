@@ -1480,7 +1480,7 @@ function annualCalc(joinDate, base) {
     const cap = db && db.org ? db.org.prorateCap : null;
     const capped = (cap != null && cap !== "" && days > Number(cap));
     if (capped) days = Number(cap);
-    return { days, note: `pro-rated for their start date — ${fmtD(days)} day${days === 1 ? "" : "s"} this year${capped ? ` (capped at ${fmtD(Number(cap))})` : ""}` };
+    return { days, prorated: true, base, note: `pro-rated — ${monthsLeft} month${monthsLeft === 1 ? "" : "s"} of 12${capped ? `, capped at ${fmtD(Number(cap))}` : ""}` };
   }
   const extra = Math.max(0, y - jy - 1);
   return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year${(y - jy) === 1 ? "" : "s"} of service = ${fmtD(base + extra)} day${(base + extra) === 1 ? "" : "s"}` };
@@ -1612,7 +1612,12 @@ function empModal() {
         <option value="no"  ${f.worksSat === false ? "selected" : ""}>No — never</option>
       </select>
       <span class="hint">Changes what leave costs: with Saturdays worked, Mon–Sat is 6 days, not 5.</span></div>` : ""}
-    ${isAdd ? `<div class="callout acc">This year's annual leave is added automatically: <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> — ${esc(calc.note)}.<br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
+    ${isAdd ? `<div class="callout acc"><b>Annual leave: ${fmtD(numOr(f.annualBase, 14))} days/year.</b>
+        ${calc.prorated
+          ? `Joining ${esc(fmtDate(f.joinDate))}, they receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> for the rest of ${new Date().getFullYear()} (${esc(calc.note)}).
+             <br>From 1 Jan ${new Date().getFullYear() + 1} they receive the full ${fmtD(numOr(f.annualBase, 14))} days.`
+          : `They receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> this year — ${esc(calc.note)}.`}
+        <br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
@@ -1798,10 +1803,47 @@ function hrBalances() {
       ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num">${fmtD(b.avail)} / ${fmtD(b.granted)}</td>`; }).join("")}
     </tr>`).join("")}</tbody></table></div></div>`;
 }
+/* What this adjustment does to the balance, shown before it is made. Without this
+   there was nothing on screen to deduct against. */
+function ledBalAfter(f) {
+  if (!f || !f.empId || !f.type) return null;
+  const b = bal(f.empId, f.type);
+  const before = b.avail;
+  const delta = Number(f.delta) || 0;
+  return { before, delta, after: before + delta };
+}
+function ledGoesNegative(f) { const r = ledBalAfter(f); return !!(r && r.after < 0); }
+
+function ledPreview(f) {
+  const r = ledBalAfter(f);
+  if (!r || !Number(f.delta)) return "";
+  const e = emp(f.empId), t = lt(f.type);
+  const neg = r.after < 0;
+  return `<div class="callout ${neg ? "warn" : "acc"}" style="margin:10px 0">
+    <b>${esc((e || {}).name || "")}</b> · ${esc((t || {}).en || f.type)}:
+    <b>${fmtD(r.before)}</b> now → <b>${fmtD(r.after)}</b> after
+    (${r.delta > 0 ? "+" : ""}${fmtD(r.delta)})
+    ${neg ? `<br>⚠ <b>This takes the balance below zero.</b> That is allowed — for clawing back
+      an over-grant, or where leave is earned monthly — but it is rarely what you meant.
+      <div class="actions" style="margin-top:6px"><label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" data-act="lednegok" ${vp.ledNegOk ? "checked" : ""}> Yes, allow a negative balance
+      </label></div>` : ""}</div>`;
+}
+
 function hrLedger() {
   const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
   vp.ledForm = f;
-  const recent = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
+  // Every entry, not the newest 30. The old `.slice(0, 30)` ran BEFORE the column
+  // sort below, so sorting by Employee or Days silently re-ordered just those 30 —
+  // the top row was not the largest number or the first name. A truncated list is
+  // one thing; a wrong answer that looks sorted is another.
+  const q = (vp.ledSearch || "").toLowerCase();
+  const recent = db.ledger.slice().filter(l => {
+    if (!q) return true;
+    const e = emp(l.empId), t = lt(l.type);
+    return (e && e.name.toLowerCase().includes(q)) || (t && t.en.toLowerCase().includes(q))
+        || (l.reason || "").toLowerCase().includes(q);
+  });
   const s = vp.ledSort || { col: "ts", dir: -1 };
   const keyOf = { ts: l => l.ts, emp: l => ((emp(l.empId) || {}).name || "").toLowerCase(),
     type: l => ((lt(l.type) || {}).en || l.type || "").toLowerCase(), delta: l => l.delta,
@@ -1817,9 +1859,14 @@ function hrLedger() {
       <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
     </div>
     <div class="field"><label>Reason<span class="req">*</span></label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
-    <button class="btn" data-act="ledadd">Add to ledger</button>
+    ${ledPreview(f)}
+    <button class="btn" data-act="ledadd" ${ledGoesNegative(f) && !vp.ledNegOk ? "disabled" : ""}>Add to ledger</button>
   </div>
-  <div class="card"><h3>Recent adjustments (last 30) — a balance is always the sum of all its entries</h3>
+  <div class="card"><h3>All adjustments (${recent.length}${q ? ` of ${db.ledger.length}` : ""}) — a balance is always the sum of all its entries</h3>
+    <div class="frow" style="align-items:flex-end;margin-bottom:8px">
+      <div class="field" style="max-width:280px"><label>Search</label>
+        <input type="search" id="ledsearch" data-f="ledSearch" value="${esc(vp.ledSearch || "")}" placeholder="Name, leave type or reason…"></div>
+    </div>
     <p class="meta" style="margin:0 0 8px">Click any column heading to sort; click again to reverse.</p>
     <div class="tablebox"><table><thead><tr>${H("ts", "Time", "num")}${H("emp", "Employee")}${H("type", "Type")}${H("delta", "±Days", "num")}${H("reason", "Reason")}${H("by", "By")}</tr></thead><tbody>
     ${led.map(l => `<tr><td class="num meta">${fmtTs(l.ts)}</td><td>${esc((emp(l.empId) || {}).name || "—")}</td><td>${esc((lt(l.type) || {}).en || l.type)}</td>
@@ -2222,16 +2269,19 @@ document.addEventListener("click", async ev => {
     case "ledsort": {
       const c = el.dataset.col, s = vp.ledSort || { col: "ts", dir: -1 };
       if (s.col === c) s.dir = -s.dir; else { s.col = c; s.dir = (c === "ts" || c === "delta") ? -1 : 1; }
-      vp.ledSort = s; render(); break;
+      vp.ledSort = s; rerender(); break;
     }
     case "ledadd": {
       const f = vp.ledForm;
       if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
       if (!f.delta) return toast("Please enter a number of days that isn't zero.");
+      if (ledGoesNegative(f) && !vp.ledNegOk) return toast("This would take the balance below zero — tick the box to confirm.");
       const { error } = await sb.from("leave_ledger").insert({ emp_id: f.empId, leave_type: f.type,
         delta_days: Number(f.delta), reason: "Manual adjustment: " + f.reason.trim(), created_by: me.id });
       if (error) return rpcErr(error);
-      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" }; await reload(); toast("Adjustment saved.");
+      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" };
+      vp.ledNegOk = false;
+      await reload(); toast("Adjustment saved.");
       break;
     }
     case "phadd": {
@@ -2335,6 +2385,7 @@ document.addEventListener("change", async ev => {
   if (el.dataset.act === "typeattach") { setType(el.dataset.c, "mc", el.checked); rerender(); return; }
   // Department default for Saturday working. Saved immediately, like the leave-type
   // ticks above. The per-employee override (null = follow team) resolves at read time.
+  if (el.dataset.act === "lednegok") { vp.ledNegOk = el.checked; rerender(); return; }
   if (el.dataset.act === "deptsat") {
     const name = el.dataset.name, on = el.checked;
     const { error } = await sb.from("departments").update({ works_saturday: on }).eq("name", name);
@@ -2360,7 +2411,12 @@ document.addEventListener("change", async ev => {
   if (!f) return;
   if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
   if (f === "empDept") { vp.empDept = el.value; render(); return; }
-  if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("led.")) {
+    vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+    if (f === "led.empId" || f === "led.type") vp.ledNegOk = false;   // new target, re-confirm
+    rerender();   // keeps focus/caret; the balance preview must track what you type
+    return;
+  }
   if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); rerender(); return; }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
@@ -2409,7 +2465,7 @@ document.addEventListener("input", ev => {
   const el = ev.target;
   if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
   const f = el.dataset.f || "";
-  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch" };
+  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch", ledSearch: "ledsearch" };
   if (liveSearch[f]) {
     // Live filter; re-render then restore focus/caret so typing isn't interrupted
     vp[f] = el.value; render();
@@ -2420,6 +2476,11 @@ document.addEventListener("input", ev => {
   // Sync modal text fields live so the save click (which blurs the field) never loses input
   if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") {
     vp.empModal.form[f.slice(3)] = el.value;
+    // The joining-leave callout is computed from these two. Without a re-render it
+    // kept showing the figure from when the modal opened — telling HR "6 days" while
+    // the database correctly granted 6.5. A screen that disagrees with the data is
+    // worse than a visible error. rerender() keeps the caret where it is.
+    if (f === "em.annualBase" || f === "em.joinDMY" || f === "em.joinDate") rerender();
     if (f === "em.email") vp.empModal.emailTouched = true;
     if (f === "em.name" && vp.empModal.mode === "add" && !vp.empModal.emailTouched) {
       // Auto-suggest email from the name (ASCII only — Chinese names are typed manually)
