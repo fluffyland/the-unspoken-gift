@@ -390,6 +390,9 @@ async function loadAll() {
   // Feature detection so the UI stays safe before the v8 database migration is applied.
   db.empExtra   = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
   db.ltHalf     = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
+  // v12 adds works_saturday to departments/employees. Until the migration is run,
+  // hide the controls and omit the field rather than failing every save.
+  db.hasSat     = !!(deptR.data && deptR.data[0] && ("works_saturday" in deptR.data[0]));
   db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
@@ -1420,10 +1423,12 @@ function hrEmployees() {
     <div class="callout acc" style="margin-bottom:14px">This tab configures the approval workflow for each employee. By default, a request needs one approver. Add a 2nd level approver if a second approval is required. In-flight applications keep their original route.</div>
     <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
       <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
-      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th><th></th></tr></thead><tbody>
+      <p class="meta" style="margin:8px 0 0">Ticking <b>Works Sat</b> makes Saturday a normal working day for that team — a Mon–Sat leave then costs 6 days instead of 5. Individuals can override it on their own profile. Public holidays are still excluded for everyone.</p>
+      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th>${db.hasSat ? `<th title="Everyone in this team works Saturdays unless their own profile overrides it">Works Sat</th>` : ""}<th></th></tr></thead><tbody>
         ${db.departments.map(d => `<tr>
           <td><input type="text" value="${esc(d)}" data-act="deptname" data-old="${esc(d)}" style="width:100%"></td>
           <td class="num">${deptCount(d)}</td>
+          ${db.hasSat ? `<td><input type="checkbox" data-act="deptsat" data-name="${esc(d)}" ${(db.deptSat || {})[d] ? "checked" : ""}></td>` : ""}
           <td>${deptCount(d) === 0 ? `<button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button>` : `<span class="meta">in use</span>`}</td>
         </tr>`).join("")}</tbody></table></div>
       <div class="actions" style="margin-top:8px">
@@ -1523,6 +1528,13 @@ function empModal() {
     ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
     <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}></div>
+    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays</label>
+      <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
+        <option value="" ${f.worksSat === null || f.worksSat === undefined ? "selected" : ""}>Follow team${f.dept ? ` (${(db.deptSat || {})[f.dept] ? "yes" : "no"})` : ""}</option>
+        <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes — always</option>
+        <option value="no"  ${f.worksSat === false ? "selected" : ""}>No — never</option>
+      </select>
+      <span class="hint">Changes what leave costs: with Saturdays worked, Mon–Sat is 6 days, not 5.</span></div>` : ""}
     ${isAdd ? `<div class="callout acc">This year's annual leave is added automatically: <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> — ${esc(calc.note)}.<br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
@@ -1825,8 +1837,8 @@ document.addEventListener("click", async ev => {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: null } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: e.worksSat ?? null } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -1894,7 +1906,8 @@ document.addEventListener("click", async ev => {
         if (login && login.password) { vp.loginResult = { name: nm, email: row.email, password: login.password }; render(); }
         else toast(addedMsg + " Their login wasn't auto-created" + (login && login.error ? " (" + login.error + ")" : "") + " — open their Edit form and click ‘Create login’.");
       } else {
-        const { error } = await sb.from("employees").update(row).eq("id", m.id);
+        if (db.hasSat) row.works_saturday = f.worksSat ?? null;   // column added by v12
+      const { error } = await sb.from("employees").update(row).eq("id", m.id);
         if (error) return rpcErr(error);
         delete vp.empModal; await reload(); toast("Saved " + f.name.trim() + "'s profile");
       }
@@ -2107,6 +2120,17 @@ document.addEventListener("change", async ev => {
     setType(el.dataset.c, "half", el.checked); rerender(); return;
   }
   if (el.dataset.act === "typeattach") { setType(el.dataset.c, "mc", el.checked); rerender(); return; }
+  // Department default for Saturday working. Saved immediately, like the leave-type
+  // ticks above. The per-employee override (null = follow team) resolves at read time.
+  if (el.dataset.act === "deptsat") {
+    const name = el.dataset.name, on = el.checked;
+    const { error } = await sb.from("departments").update({ works_saturday: on }).eq("name", name);
+    if (error) { el.checked = !on; return toast(error.message || "Could not save — has the v12 database update been run?"); }
+    db.deptSat = Object.assign({}, db.deptSat, { [name]: on });
+    keepScrollOnce = true; render();
+    toast(`${name}: Saturday is now ${on ? "a working day" : "a non-working day"}`);
+    return;
+  }
   // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
   if (el.dataset.act === "deptname") {
     const oldName = el.dataset.old, newName = el.value.trim();
@@ -2132,6 +2156,10 @@ document.addEventListener("change", async ev => {
       if (iso) { vp.empModal.form.joinDate = iso; vp.empModal.form.joinDMY = fmtDMY(iso); render(); }
       else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
       return;
+    }
+    if (k === "worksSat") {   // "" = follow team; keep null distinct from an explicit false
+      vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : null;
+      render(); return;
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
     if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
