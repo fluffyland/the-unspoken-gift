@@ -227,6 +227,33 @@ as yours."*
 
 ---
 
+## Annual leave: the maximum, and how it's credited
+
+**HR Console → Company settings → Company defaults**
+
+**Maximum annual leave.** Annual leave rises by 1 day for each year of service. Left
+blank it rises **for ever** — someone with 20 years on a base of 14 reaches 33 days.
+Set a maximum (21 is common) and the growth stops there.
+
+> Blank is the existing behaviour, so nothing changes until you set a number.
+> Setting one affects future grants, not leave already credited.
+
+**Credit annual leave — all at once, or monthly.**
+
+| Mode | What happens |
+|---|---|
+| **All at once (1 Jan)** | the whole year's entitlement lands on 1 January |
+| **Monthly, as it is earned** | 1/12 each month |
+
+Under monthly, someone who takes more than they have earned so far will show a
+**negative balance**. That is correct, not a fault — they've used leave they haven't
+accrued yet. The twelve instalments always add up to exactly the annual figure; a
+mid-year joiner accrues from their joining month.
+
+> **Don't switch mode part-way through a year** without checking the ledger. Each
+> mode refuses to run while the other is active, so you can't double-credit by
+> accident, but a year that's been part-credited one way needs reconciling by hand.
+
 ## Yearly allowances
 
 **HR Console → Company settings → Yearly leave allowances**

@@ -363,7 +363,9 @@ async function loadAll() {
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
     defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
-    prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)) };
+    prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)),
+    annualCap:  (o.annual_cap  == null ? null : Number(o.annual_cap)),
+    accrualMode: o.accrual_mode || "annual" };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -408,6 +410,8 @@ async function loadAll() {
   // fail every manual holiday add/edit, so gate the writes on it being present.
   db.hasPhWhen  = !!(phR.data && phR.data[0] && ("updated_at" in phR.data[0]));
   db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
+  // v14: cap on long-service growth, and monthly vs one-shot crediting
+  db.orgV14     = !!(orgR.data && ("accrual_mode" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -603,7 +607,7 @@ function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assig
 function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
 function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
 function ePick(e, k) { const dv = vp.draft && vp.draft.emps[e.id]; return dv && (k in dv) ? dv[k] : ({ approver1: e.approver1, approver2: e.approver2, annualBase: e.annualBase }[k]); }
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "prorateCap" ? (o.prorateCap ?? "") : (o.defaultAnnualBase ?? 14); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "prorateCap" ? (o.prorateCap ?? "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -647,6 +651,11 @@ async function saveDraft() {
     if (!String(company).trim()) { toast("Company name can't be empty."); return false; }
     const patch = { company_name: String(company).trim(), email_domain: String(domain).trim(), default_annual_base: numOr(base, 14) };
     if (db.orgProrate) { const pc = ("prorateCap" in d.org) ? d.org.prorateCap : db.org.prorateCap; patch.prorate_cap = (pc === "" || pc == null) ? null : numOr(pc, null); }
+    if (db.orgV14) {
+      const ac = ("annualCap" in d.org) ? d.org.annualCap : db.org.annualCap;
+      patch.annual_cap = (ac === "" || ac == null) ? null : numOr(ac, null);
+      patch.accrual_mode = (("accrualMode" in d.org) ? d.org.accrualMode : db.org.accrualMode) || "annual";
+    }
     const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
     if (error) { rpcErr(error); return false; }
   }
@@ -1750,6 +1759,15 @@ function hrSettings() {
         <span class="hint">Add employee auto-fills name@this-domain</span></div>
       <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
         <span class="hint">Pre-filled when adding a new employee</span></div>
+      ${db.orgV14 ? `<div class="field" style="max-width:240px"><label>Maximum annual leave</label>
+        <input type="number" step="0.5" min="0" data-f="org.annualCap" value="${oPick("annualCap")}" placeholder="no maximum">
+        <span class="hint">Annual leave rises by 1 day per year of service. This caps that growth — blank means it keeps rising for ever (someone with 20 years on a base of 14 would reach 33).</span></div>
+      <div class="field" style="max-width:260px"><label>Credit annual leave</label>
+        <select data-f="org.accrualMode">
+          <option value="annual" ${oPick("accrualMode") === "annual" ? "selected" : ""}>All at once (1 Jan)</option>
+          <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
+        </select>
+        <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>` : ""}
       ${db.orgProrate ? `<div class="field" style="max-width:240px"><label>Cap pro-rated annual leave at</label><input type="number" step="0.5" min="0" data-f="org.prorateCap" value="${oPick("prorateCap")}" placeholder="no cap">
         <span class="hint">Most a new joiner gets in their first (partial) year. Blank = no cap.</span></div>` : ""}
     </div>
