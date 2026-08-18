@@ -128,8 +128,32 @@ use **Balance adjustments** if people need topping up.
 
 ## Someone forgot their password
 
+**They can now do it themselves** — sign-in page → *Forgot your password?* → a
+6-digit code by email → set a new one. Point them at that first; you're no longer
+the bottleneck.
+
+**You still need to step in when** they can't reach their work email at all, or
+share a mailbox with someone else.
+
 **Their Edit form → Reset password.** Puts it back to `Ssu123@`; tell them to
 change it after signing in.
+
+> ⚠️ Every reset sets the **same** password, `Ssu123@`, which everyone in the
+> company knows. Until that person changes it, their account is open to any
+> colleague who tries it. Nudge them to change it immediately, and prefer
+> self-service where you can.
+
+Everyone gets an email whenever their password changes, whether they did it or you
+did. If someone reports one they didn't trigger, treat it seriously.
+
+## Someone changed their email address
+
+Just edit it on their profile — the system now updates their **sign-in** email at
+the same time, so they use the new address from then on.
+
+> If you see *"Profile saved, but the sign-in email could not be updated"*, stop and
+> get it fixed. That person is stuck signing in with the **old** address, and
+> self-service reset won't work for them. It is not cosmetic.
 
 Alternative, without the app: Supabase Dashboard → **Authentication → Users** →
 find them → **Generate link (recovery)** → send them that link.
@@ -158,6 +182,22 @@ Their records stay for reporting.
 Use **Offboard** for real departures. The other two destroy history you may need.
 
 ---
+
+## Staff who work Saturdays
+
+**HR Console → Employees & approval routes → Teams / departments** — tick
+**Works Sat** for a team, and Saturday becomes a normal working day for everyone in
+it.
+
+**Individual exceptions:** their Edit form → **Works Saturdays** → *Follow team* /
+*Yes* / *No*. "Follow team" is the default; use Yes or No only for someone who
+differs from their team.
+
+> ⚠️ **This changes what leave costs.** For a Saturday worker, Mon–Sat is **6 days**,
+> not 5. Set it before people apply for leave, not after — existing applications keep
+> whatever they were worked out at, and are deliberately not recalculated.
+
+Public holidays are still excluded for everyone, including on a Saturday.
 
 ## Public holidays
 

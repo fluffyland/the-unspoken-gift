@@ -34,7 +34,7 @@ website in their browser, they cannot see or change data they aren't entitled to
 | 2 | https://github.com | hosting the website + backup keep-alive | free | **yes** |
 | 3 | https://cron-job.org | keep-alive keeper #1 | free | **yes** |
 | 4 | https://uptimerobot.com | monitoring + phone alerts | free | **strongly recommended** |
-| 5 | https://resend.com | outgoing notification emails | free tier | optional |
+| 5 | https://resend.com | password-reset codes + notification emails | free tier | **yes** |
 
 > **Use a company email you will still have in five years** for all of these —
 > not a personal address, and not one tied to an employee who might leave.
@@ -76,6 +76,7 @@ Wait for "Success" before starting the next.
 | 1 | `schema.sql` | every table, view, function and security rule |
 | 2 | `keepalive_ping_v2.sql` | the anti-sleep heartbeat |
 | 3 | `bootstrap_owner.sql` | creates your first Owner account |
+| 4 | `migration_app_v12.sql` | one working-day authority, Saturday support, cancellation safeguards |
 
 **Before running `bootstrap_owner.sql`**, open it and edit the name and email
 near the top to your own. That account becomes the Owner / Super Admin.
@@ -343,7 +344,37 @@ add someone. Pass it to the employee and have them change it on first sign-in.
 
 ---
 
-## Part 5 — Optional: notification emails
+## Part 5 — Email (REQUIRED — password resets depend on it)
+
+> ⚠️ **Supabase's built-in email sender cannot be used.** It is capped at **2
+> messages per hour** and only delivers to your own team's addresses — it physically
+> cannot email your staff. Custom SMTP is mandatory, not a nicety.
+> ([docs](https://supabase.com/docs/guides/auth/auth-smtp))
+
+**5a. Resend + custom SMTP**
+1. Sign up at https://resend.com, add your company domain, add the **SPF and DKIM
+   DNS records** they give you, wait for "Verified". *This is the slow part — DNS,
+   not code. Start it early.*
+2. Supabase → **Project Settings → Authentication → SMTP Settings** → enable custom
+   SMTP with the Resend credentials. Sender must be on the verified domain.
+3. **Authentication → Rate Limits** → raise the email limit (the 2/hour cap only
+   applies to the built-in sender).
+
+**5b. Password-reset codes**
+4. **Authentication → Providers → Email** → make sure email OTP is on.
+5. Set the **OTP expiry to ~600 seconds (10 minutes)**. The default is up to an hour,
+   and a 6-digit code is only a million guesses — this is the weakest point in the
+   flow if you leave it long.
+6. **Authentication → Email Templates → Magic Link** — ⚠️ **the one that catches
+   everyone:** the stock template sends `{{ .ConfirmationURL }}`, i.e. a *link*.
+   Edit it to include **`{{ .Token }}`** or your staff receive an email with no code
+   in it. Reword it as a password-reset code message.
+
+**Test it before you move on:** sign-in page → *Forgot your password?* → the email
+must arrive with a **6-digit number, not a link**. If it has a link, step 6 wasn't
+done.
+
+## Part 5c — Optional: approval notification emails
 
 1. Sign up at https://resend.com (free tier ~100 emails/day), verify your sending
    domain, copy the API key.
@@ -373,6 +404,9 @@ Don't call it done until **every** line passes.
 - [ ] Public sign-up is **off**
 - [ ] `attachments` bucket exists and is **Private**
 - [ ] `create-login` deployed (named exactly `create-login`)
+- [ ] `migration_app_v12.sql` ran — working-day authority, Saturday columns, safer cancellation
+- [ ] Resend verified, custom SMTP on, OTP expiry ~10 min
+- [ ] A reset code actually arrives, and it is a **6-digit number, not a link**
 - [ ] `sync-holidays` returns `{"ok":true}` and `holiday_sync_log` has a row
 - [ ] pg_cron jobs scheduled (`select * from cron.job;` lists three)
 

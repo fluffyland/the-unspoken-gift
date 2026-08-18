@@ -13,7 +13,24 @@ usually `Ssu123@`.
 
 **Change it straight away:** 🔑 **Password** button, top right.
 
-Forgotten it later? Ask HR to reset it. There's no self-service reset.
+## Forgotten your password?
+
+You can reset it yourself — no need to wait for HR.
+
+1. On the sign-in page, tap **Forgot your password?**
+2. Type your work email, tap **Send code**
+3. Check your email for a **6-digit code** (check spam if it's not there)
+4. Type the code, tap **Verify**
+5. Choose a new password, twice, and you're in
+
+The code expires after about 10 minutes, so use it promptly. If it runs out, just
+ask for another.
+
+**Still stuck?** If you can't get into your work email either, ask HR — they can
+reset it for you the old way.
+
+> You'll get an email whenever your password changes. If one arrives and it wasn't
+> you, tell HR straight away.
 
 ---
 
@@ -87,11 +104,30 @@ normal, not a fault.
 
 ## Changing your mind
 
-**Before it's approved** — open it in **My applications** and withdraw it. No
-approval needed.
+There are two different things, depending on whether it's been approved yet:
 
-**After it's approved** — request cancellation. Your approver confirms, and the
-days go back to your balance.
+| Situation | Button | What happens |
+|---|---|---|
+| Not approved yet | **Withdraw** | Gone immediately. No approval needed. |
+| Already approved | **Cancel this leave** | Goes to your approver to confirm |
+
+Both are in the popup — open the application from **My applications** first.
+
+### Cancelling leave you've already started
+
+You can. Cancelling gives you back **the whole application's days** — including any
+you already took.
+
+So if you took part of it and came back early, you then need to **re-apply for the
+days you actually took**. The system offers you a **Re-apply for days taken** button
+straight after, with the form already filled in — just change the end date to your
+last day away and submit.
+
+*Example:* you booked 23 Jul – 20 Aug and came back on the 18th. Cancel it (all 16
+days return), then re-apply for 23 Jul – 17 Aug. Your balance ends up correct.
+
+> If you skip the re-application, you'll be holding days you actually used. Your
+> approver and HR can both see it, so it will come out — do the second step.
 
 **Returned to you** — open it, read the comment, fix it, resubmit. It keeps its
 history; you're not starting again.
@@ -127,7 +163,8 @@ Not until 1 January, when next year's balance is granted. Next year's public
 holidays are already visible in **Calendar**.
 
 **I forgot my password.**
-Ask HR. There's no self-service reset.
+Reset it yourself from the sign-in page — see above. Ask HR only if you can't get
+into your work email either.
 
 **Do carried-forward days expire?**
 Yes. Use them before this year's allowance — the system already does that for

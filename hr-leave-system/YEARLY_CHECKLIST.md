@@ -242,6 +242,12 @@ pause.
 - [ ] Joiners and leavers recorded
 - [ ] `select last_ping_at, ping_count from public.keepalive_heartbeat;` — recent?
 - [ ] CSV export if it's quarter end
+- [ ] **Request a password-reset code for yourself and check it arrives.** Resend is
+      an external service that can fail quietly — and a broken reset only shows up
+      when someone is already locked out.
+- [ ] Any rows in `ledger_guard_failures`? Empty is normal. Rows mean a balance
+      safeguard blocked a refund and needs looking at:
+      `select at, app_id, message from ledger_guard_failures order by at desc limit 10;`
 
 ---
 
