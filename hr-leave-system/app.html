@@ -327,7 +327,7 @@ async function loadAll() {
   // `source` column only exists after the v7 migration — fall back to holiday,name
   // when it isn't there yet, so login/loadAll never breaks pre-migration.
   const phP = (async () => {
-    const r = await sb.from("public_holidays").select("holiday,name,source");
+    const r = await sb.from("public_holidays").select("*");
     return r.error ? sb.from("public_holidays").select("holiday,name") : r;
   })();
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
@@ -345,7 +345,18 @@ async function loadAll() {
   const publicHolidays = (phR.data || []).map(x => x.holiday).sort();
   const phNames = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.name || "Public holiday"]));
   const phSource = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.source || "manual"]));
+  // v13 adds updated_at (last change from ANY source). Manual rows have no synced_at,
+  // so this is the only column that can answer "when was this added by hand".
+  const phWhen = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.updated_at || x.synced_at || null]));
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
+  // When did the holiday sync last RUN? Per-row timestamps only move when a date is in
+  // the feed, so a sync that ran and found nothing leaves every row looking stale. This
+  // is the signal that the job is alive at all — same idea as the keep-alive heartbeat.
+  let phLastCheck = null;
+  try {
+    const r = await sb.from("holiday_sync_log").select("ran_at,status").order("ran_at", { ascending: false }).limit(1).maybeSingle();
+    if (r.data) phLastCheck = r.data;
+  } catch (e) { /* non-HR or table absent — the line simply won't show */ }
   // Keep `departments` a plain list of names — dropdowns everywhere depend on that.
   // The Saturday flag rides alongside as a lookup instead of changing the shape.
   const deptSat = Object.fromEntries((deptR.data || []).map(x => [x.name, !!x.works_saturday]));
@@ -386,13 +397,16 @@ async function loadAll() {
   const calR = await sb.from("leave_calendar").select("*");
   const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status, worksSat: !!c.works_saturday }));
 
-  db = { org, departments, deptSat, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  db = { org, departments, deptSat, employees, leaveTypes, publicHolidays, phNames, phSource, phWhen, phLastCheck, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
   // Feature detection so the UI stays safe before the v8 database migration is applied.
   db.empExtra   = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
   db.ltHalf     = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
   // v12 adds works_saturday to departments/employees. Until the migration is run,
   // hide the controls and omit the field rather than failing every save.
   db.hasSat     = !!(deptR.data && deptR.data[0] && ("works_saturday" in deptR.data[0]));
+  // v13 adds public_holidays.updated_at. Sending it before the migration has run would
+  // fail every manual holiday add/edit, so gate the writes on it being present.
+  db.hasPhWhen  = !!(phR.data && phR.data[0] && ("updated_at" in phR.data[0]));
   db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
@@ -1688,6 +1702,32 @@ function ltModal() {
       <button class="btn sec" data-act="closemodal">Cancel</button>
     </div></div></div>`;
 }
+/* Only send updated_at once v13 has added the column — otherwise every manual
+   holiday add/edit would fail against an older database. */
+function phStamp() { return db.hasPhWhen ? { updated_at: new Date().toISOString() } : {}; }
+
+/* Proof the monthly sync is still running. A sync that finds no changes touches no
+   rows, so without this an alive job and a dead one look identical. */
+function phLastCheckLine() {
+  const c = db.phLastCheck;
+  if (!c) return `<div class="callout warn" style="margin:6px 0">⚠ <b>No record of the holiday sync ever running.</b> Check the schedule, or add dates by hand below.</div>`;
+  const when = Date.parse(c.ran_at);
+  const daysAgo = Math.floor((Date.now() - when) / 86400000);
+  const stale = daysAgo > 45;   // it runs monthly; 45 days means it has missed one
+  return `<div class="${stale ? "callout warn" : "meta"}" style="margin:6px 0">
+    ${stale ? "⚠ " : ""}Last checked against MOM: <b>${fmtTs(when)}</b>${daysAgo >= 0 ? ` · ${daysAgo} day${daysAgo === 1 ? "" : "s"} ago` : ""}${c.status && c.status !== "ok" ? ` · <b>status: ${esc(c.status)}</b>` : ""}
+    ${stale ? "<br>The monthly sync appears to have stopped — nothing else will tell you this." : ""}</div>`;
+}
+
+/* One cell answering both "where did this date come from" and "when did it last
+   change". Manual rows have no synced_at at all, which is why v13 adds updated_at. */
+function phSourceCell(p) {
+  const auto = (db.phSource || {})[p] === "data.gov.sg";
+  const when = (db.phWhen || {})[p];
+  const stamp = when ? fmtTs(Date.parse(when)) : "—";
+  return `${auto ? "🔄 Sync" : "✋ Manual"} · ${stamp}`;
+}
+
 function hrSettings() {
   const o = db.org || {};
   const y = new Date().getFullYear();
@@ -1710,12 +1750,14 @@ function hrSettings() {
     </div>
     <p class="hint" style="margin:2px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
-  <div class="card"><h3>Public holidays — ${thisYear.length} in ${y}</h3>
-    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> (rows marked <span class="meta">· auto</span>); you can still <b>add, edit (✎) or remove (✕)</b> any date by hand.</p>
-    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
+  <div class="card"><h3>Public holidays — Total ${thisYear.length} Days in ${y}</h3>
+    ${phLastCheckLine()}
+    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> — the <b>Source</b> column shows whether each date came from the sync or was added by hand, and when it last changed. You can <b>add, edit (✎) or remove (✕)</b> any date yourself, and <b>the sync will never rename or delete a date you added</b>.</p>
+    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Source</th><th></th></tr></thead><tbody>
       ${phSorted.map(p => `<tr>
         <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td>
-        <td>${esc(db.phNames[p] || "—")}${db.phSource && db.phSource[p] === "data.gov.sg" ? ` <span class="meta" style="font-size:11px">· auto</span>` : ""}</td>
+        <td>${esc(db.phNames[p] || "—")}</td>
+        <td class="meta" style="white-space:nowrap">${phSourceCell(p)}</td>
         <td style="white-space:nowrap">
           <button class="btn ghost" style="padding:3px 9px" data-act="phedit" data-d="${p}" data-n="${esc(db.phNames[p] || "")}" title="Edit">✎</button>
           <button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}" title="Remove">✕</button></td></tr>`).join("")}
@@ -2198,7 +2240,7 @@ document.addEventListener("click", async ev => {
       if (!d) return toast("Pick a date first");
       if (!nm) return toast("Please type the holiday's name (e.g. Vesak Day)");
       if (db.publicHolidays.includes(d)) return toast("Already in the list");
-      const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm, source: "manual" });
+      const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
       if (error) return rpcErr(error);
       await reload(); toast("Holiday added");
       break;
@@ -2212,11 +2254,11 @@ document.addEventListener("click", async ev => {
       if (!nm) return toast("Please type the holiday's name");
       if (d !== m.orig && db.publicHolidays.includes(d)) return toast("That date is already in the list");
       if (m.orig && d === m.orig) {
-        const { error } = await sb.from("public_holidays").update({ name: nm, source: "manual", synced_at: null }).eq("holiday", m.orig);
+        const { error } = await sb.from("public_holidays").update(Object.assign({ name: nm, source: "manual", synced_at: null }, phStamp())).eq("holiday", m.orig);
         if (error) return rpcErr(error);
       } else {
         if (m.orig) { const { error: de } = await sb.from("public_holidays").delete().eq("holiday", m.orig); if (de) return rpcErr(de); }
-        const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm, source: "manual" });
+        const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
         if (error) return rpcErr(error);
       }
       delete vp.phModal; await reload(); toast(m.orig ? "Holiday updated" : "Holiday added");

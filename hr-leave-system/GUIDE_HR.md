@@ -203,9 +203,23 @@ Public holidays are still excluded for everyone, including on a Saturday.
 
 **HR Console → Company settings → Public holidays**
 
-The list auto-syncs monthly from MOM's official data. Auto-loaded dates are
-marked **· auto**. You can still add, edit (✎) or remove (✕) any date by hand,
-and the sync won't overwrite your manual entries.
+The list auto-syncs monthly from MOM's official data. The **Source** column shows
+where each date came from and when it last changed:
+
+| | |
+|---|---|
+| 🔄 Sync · 01/08/2026 09:17 | came from MOM, confirmed on that date |
+| ✋ Manual · 15/07/2026 14:03 | you added or edited it then |
+
+Above the table, **"Last checked against MOM"** tells you when the sync last *ran*.
+That's the one to watch: a sync that runs and finds nothing changes no rows, so
+without this line a working sync and a dead one look identical. If it's more than
+about 45 days old the system warns you — the schedule has stopped.
+
+**Your manual entries are protected.** The sync will never delete a date you added,
+and never renames one. If you add a date that MOM later publishes too, it stays
+yours and HR gets told: *"1 date you added by hand also appears in MOM's list — kept
+as yours."*
 
 > **Check this every January.** The sync is the single most likely thing to fail
 > quietly — see [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md) for exactly how to
