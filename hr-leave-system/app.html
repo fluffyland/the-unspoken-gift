@@ -1654,7 +1654,8 @@ function empModal() {
                 : `<span class="hint">⚠ <b>Changing this will change their login ID</b> — they must sign in with the new address from now on.</span>`}</div>
     </div>
     <div class="frow">
-      <div class="field"><label>Team / department</label><select data-f="em.dept">
+      <div class="field"><label>Team / department<span class="req">*</span></label><select data-f="em.dept">
+        ${f.dept ? "" : `<option value="" disabled selected>— Select —</option>`}
         ${db.departments.map(d => `<option value="${esc(d)}" ${f.dept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}
         <option value="__new" ${f.dept === "__new" ? "selected" : ""}>＋ New team…</option></select></div>
       ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
@@ -1669,10 +1670,13 @@ function empModal() {
       <div class="field"><label>Mobile</label><input type="text" data-f="em.mobile" value="${esc(f.mobile || "")}" placeholder="e.g. 9885 7721"></div>
     </div>
     <div class="frow">
-      <div class="field"><label>Gender</label><select data-f="em.gender">
+      <div class="field"><label>Gender<span class="req">*</span></label><select data-f="em.gender">
+        ${f.gender ? "" : `<option value="" disabled selected>— Select —</option>`}
         <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
-        <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
-      <div class="field"><label>Account type</label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
+        <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select>
+        <span class="hint">Decides which leave types apply (maternity / paternity).</span></div>
+      <div class="field"><label>Account type<span class="req">*</span></label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
+        ${f.role ? "" : `<option value="" disabled selected>— Select —</option>`}
         ${roleOpts.map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
         <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : (!isOwner ? "Only an Owner can grant Owner / Super Admin." : "Sets system permissions. Job titles go in Occupation.")}</span></div>
       <div class="field"><label>Hire date</label><input type="text" data-f="em.joinDMY" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${f.joinDate ? fmtDMY(f.joinDate) : esc(f.joinDMY || "")}"><span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
@@ -1686,11 +1690,11 @@ function empModal() {
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
     <div class="field" style="max-width:260px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
       ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}</div>
-    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays</label>
+    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays<span class="req">*</span></label>
       <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
-        <option value="" ${f.worksSat === null || f.worksSat === undefined ? "selected" : ""}>Follow team${f.dept ? ` (${(db.deptSat || {})[f.dept] ? "yes" : "no"})` : ""}</option>
-        <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes — always</option>
-        <option value="no"  ${f.worksSat === false ? "selected" : ""}>No — never</option>
+        ${(f.worksSat === true || f.worksSat === false) ? "" : `<option value="" disabled selected>— Select —</option>`}
+        <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes</option>
+        <option value="no"  ${f.worksSat === false ? "selected" : ""}>No</option>
       </select>
       <span class="hint">Changes what leave costs: with Saturdays worked, Mon–Sat is 6 days, not 5.</span></div>` : ""}
     ${isAdd ? `<div class="callout acc"><b>Annual leave: ${fmtD(numOr(f.annualBase, 14))} days/year.</b>
@@ -2150,8 +2154,8 @@ document.addEventListener("click", async ev => {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: null } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: e.worksSat ?? null } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: undefined } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -2185,6 +2189,17 @@ document.addEventListener("click", async ev => {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
       if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
       if (f.approver1 && f.approver2 && f.approver2 === f.approver1) return toast("The 2nd level approver must be different from the 1st.");
+      // Complain in the order the fields appear on the form, so the message points at the
+      // first thing the eye lands on. (The post-resolution `if (!dept)` below stays as the
+      // guard for "＋ New team…" with an empty name.)
+      if (!f.dept) return toast("Please choose a team");
+      // Team / gender / account type / Saturdays are decisions, not defaults. They used to
+      // arrive pre-filled (first team alphabetically, Female, Employee), so clicking through
+      // filed someone silently — and gender in particular drives which leave types they are
+      // offered, via eligible(). A pre-filled wrong answer looks answered; nothing to notice.
+      if (!f.gender) return toast("Please choose Female or Male — it decides which leave types apply.");
+      if (!f.role) return toast("Please choose an account type");
+      if (db.hasSat && f.worksSat !== true && f.worksSat !== false) return toast("Please choose whether this person works Saturdays");
       let dept = f.dept;
       if (dept === "__new") {
         dept = (f.newDept || "").trim();
@@ -2220,7 +2235,7 @@ document.addEventListener("click", async ev => {
         if (login && login.password) { vp.loginResult = { name: nm, email: row.email, password: login.password }; render(); }
         else toast(addedMsg + " Their login wasn't auto-created" + (login && login.error ? " (" + login.error + ")" : "") + " — open their Edit form and click ‘Create login’.");
       } else {
-        if (db.hasSat) row.works_saturday = f.worksSat ?? null;   // column added by v12
+        if (db.hasSat) row.works_saturday = (f.worksSat === true || f.worksSat === false) ? f.worksSat : null;   // column added by v12
       // The profile and the login are linked by auth_user_id, not by matching email
       // text — so changing employees.email alone leaves the person still signing in
       // with the OLD address, and unable to self-reset with the new one.
@@ -2535,8 +2550,8 @@ document.addEventListener("change", async ev => {
       else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
       return;
     }
-    if (k === "worksSat") {   // "" = follow team; keep null distinct from an explicit false
-      vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : null;
+    if (k === "worksSat") {   // Yes / No only now; "" is the unchosen placeholder
+      vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : undefined;
       render(); return;
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
