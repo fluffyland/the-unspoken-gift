@@ -1150,11 +1150,12 @@ function vApply() {
   const days = wdCountHalf(f.start, f.end, half);
   const over = !t.noDeduct && days > b.avail;
   const backdated = f.start < todayStr();
-  // Per-year balance breakdown (the ledger is cumulative across years → filter to this year)
-  const cyNum = new Date().getFullYear();
-  const grantedCY = db.ledger.filter(l => l.empId === me.id && l.type === f.type && l.delta > 0 && new Date(l.ts).getFullYear() === cyNum).reduce((s, l) => s + l.delta, 0);
-  const usedCY = db.applications.filter(a => a.empId === me.id && a.type === f.type && a.status === "approved" && String(a.start).slice(0, 4) === String(cyNum)).reduce((s, a) => s + a.days, 0);
-  const carried = f.type === "annual" && db.annualCarry ? Number(db.annualCarry.carry_in) : 0;
+  // The breakdown comes from bal() and nowhere else. It used to be recomputed here from
+  // different sources — granted from ledger rows dated this year, used from APPROVED
+  // APPLICATIONS only — so every balance adjustment, expiry write-off and correction was
+  // invisible to it. Live symptom: "Available 444 (Current Year: 951 · Used: 0)" on this
+  // page while My leave entitlement correctly showed 951 / 507 / 444 for the same person.
+  // One quantity, one implementation; the two screens now render the same statement.
   const curYear = todayStr().slice(0, 4);
   const yearEnd = curYear + "-12-31";
   const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
@@ -1172,7 +1173,7 @@ function vApply() {
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
               : "Recorded for HR's records only — it doesn't use any leave balance.")
-          : `Available Balance: <b>${fmtD(b.avail)}</b> days (Current Year: ${fmtD(grantedCY)}${carried > 0 ? " · Carried Forward: " + fmtD(carried) : ""} · Used: ${fmtD(usedCY)} · Pending: ${fmtD(b.pending)})`}</span>
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (Allowance: ${fmtD(b.granted)} · Used: ${fmtD(b.used)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
@@ -2439,8 +2440,9 @@ document.addEventListener("change", async ev => {
   }
   const f = el.dataset.f;
   if (!f) return;
-  if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
-  if (f === "empDept") { vp.empDept = el.value; render(); return; }
+  // Filters, not navigation → rerender() so the page stays where the user is looking.
+  if (f === "stFilter") { vp.stFilter = el.value; rerender(); return; }
+  if (f === "empDept") { vp.empDept = el.value; rerender(); return; }
   if (f.startsWith("led.")) {
     vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
     if (f === "led.empId" || f === "led.type") vp.ledNegOk = false;   // new target, re-confirm
@@ -2497,10 +2499,21 @@ document.addEventListener("input", ev => {
   const f = el.dataset.f || "";
   const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch", ledSearch: "ledsearch" };
   if (liveSearch[f]) {
-    // Live filter; re-render then restore focus/caret so typing isn't interrupted
-    vp[f] = el.value; render();
+    // Live filter. TWO things must survive the re-render, and only one of them used to:
+    //   · scroll position — render() resets it to 0 by design, so every keystroke threw
+    //     the page back to the top. rerender() is the helper that keeps it. Filtering a
+    //     list is not navigation; only changing page/tab should scroll to the top.
+    //   · the caret — restored explicitly below rather than by render()'s own focus
+    //     logic, because focusKey() keys off data-act and these inputs carry data-f.
+    // Keep the real caret offsets: forcing it to value.length sent the cursor to the
+    // end whenever someone edited the middle of what they had typed.
+    const at = el.selectionStart, to = el.selectionEnd;
+    vp[f] = el.value; rerender();
     const s = document.getElementById(liveSearch[f]);
-    if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    // preventScroll matters as much as rerender() here: a bare focus() scrolls the input
+    // back into view, which undoes the scroll we just restored. render() already uses the same
+    // flag for the control it re-focuses (see its focus-restore block).
+    if (s) { s.focus({ preventScroll: true }); try { s.setSelectionRange(at, to); } catch (e) { /* type=search may refuse */ } }
     return;
   }
   // Sync modal text fields live so the save click (which blurs the field) never loses input
