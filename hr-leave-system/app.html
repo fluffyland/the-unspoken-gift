@@ -1049,7 +1049,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}${vp.confirmModal ? confirmModal() : ""}${vp.resultModal ? resultModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -1090,6 +1090,42 @@ function phModal() {
     <div class="actions">
       <button class="btn" data-act="phsave">Save</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+
+/* ---- Confirm / result dialogs -------------------------------------------------------
+   One pair of components, shared by every irreversible-ish action (cancelling leave,
+   withdrawing an application, writing to the ledger). Deliberately NOT window.confirm():
+   its buttons are "OK" and "Cancel", and offering a *Cancel* button to abort a
+   *cancellation* is ambiguous in exactly the place it must not be.
+
+   vp.confirmModal = { title, lines:[…], warn:"", okLabel, cancelLabel, act, id }
+     `act` is a data-act name dispatched when the user confirms, so the real work stays
+     in the existing handlers rather than being duplicated in here.
+   vp.resultModal  = { title, lines:[…], warn:"", act, actLabel }
+     `act` is an optional follow-on button (e.g. "Apply for days taken"). */
+function confirmModal() {
+  const m = vp.confirmModal || {};
+  return `<div class="modalback" data-act="confirmno"><div class="modal" style="max-width:460px" data-stop="1">
+    <div class="hd"><h3>${esc(m.title || "Are you sure?")}</h3>
+      <button class="iconbtn" data-act="confirmno" aria-label="Close">✕</button></div>
+    ${(m.lines || []).map(l => `<p style="margin:6px 0">${l}</p>`).join("")}
+    ${m.warn ? `<div class="callout warn" style="margin:10px 0">⚠ ${m.warn}</div>` : ""}
+    <div class="actions">
+      <button class="btn sec" data-act="confirmno">${esc(m.cancelLabel || "Go back")}</button>
+      <button class="btn" data-act="confirmyes">${esc(m.okLabel || "Confirm")}</button>
+    </div></div></div>`;
+}
+function resultModal() {
+  const m = vp.resultModal || {};
+  return `<div class="modalback" data-act="resultclose"><div class="modal" style="max-width:460px" data-stop="1">
+    <div class="hd"><h3>${esc(m.title || "Done")}</h3>
+      <button class="iconbtn" data-act="resultclose" aria-label="Close">✕</button></div>
+    ${(m.lines || []).map(l => `<p style="margin:6px 0">${l}</p>`).join("")}
+    ${m.warn ? `<div class="callout warn" style="margin:10px 0">${m.warn}</div>` : ""}
+    <div class="actions">
+      ${m.act ? `<button class="btn" data-act="${esc(m.act)}" data-id="${esc(m.actId || "")}">${esc(m.actLabel || "Continue")}</button>` : ""}
+      <button class="btn sec" data-act="resultclose">Close</button>
     </div></div></div>`;
 }
 
@@ -1216,6 +1252,8 @@ function vApply() {
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
     <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
     ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
+    ${(!editing && vp.reapplyFrom) ? `<div class="callout warn" style="margin-bottom:14px"><b>${fmtD(vp.reapplyFrom.days)} day${vp.reapplyFrom.days === 1 ? "" : "s"} went back into your balance</b> when you cancelled ${esc(vp.reapplyFrom.type)} (${vp.reapplyFrom.range}).
+      The dates below are the ones you originally booked — <b>change the end date to your last day away</b> and submit, so you are only charged for the days you actually took.</div>` : ""}
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
         <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}</option>`).join("")}</select>
@@ -1494,9 +1532,9 @@ function detailModal(id) {
             rejected: "This application was declined. Apply again with different dates if you still need the leave.",
             withdrawn: "You withdrew this application before it was decided."
           }[a.status]}</p>` : ""}
-      ${canReapply ? `<div class="callout warn" style="margin:8px 0">You were refunded <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} in full.
-        If you actually took part of this leave, <b>re-apply for those dates</b> so your balance stays correct —
-        set the end date to your last day away.</div>` : ""}
+      ${canReapply ? `<div class="callout warn" style="margin:8px 0"><b>You were already away from ${fmtDate(a.start)}.</b>
+        All <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} have been returned to your balance, including the days you actually took.
+        Apply again for those days, or your balance will be higher than it should be.</div>` : ""}
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
       ${stepsView(a)}
       <h3 style="margin-top:14px">Timeline</h3>
@@ -1922,12 +1960,12 @@ function ledGoesNegative(f) { const r = ledBalAfter(f); return !!(r && r.after <
 function ledPreview(f) {
   const r = ledBalAfter(f);
   if (!r || !Number(f.delta)) return "";
-  const e = emp(f.empId), t = lt(f.type);
   const neg = r.after < 0;
+  const sign = r.delta > 0 ? "+" : "";       // fmtD already carries the minus for deductions
+  const col = r.delta > 0 ? "var(--good)" : "var(--bad)";
   return `<div class="callout ${neg ? "warn" : "acc"}" style="margin:10px 0">
-    <b>${esc((e || {}).name || "")}</b> · ${esc((t || {}).en || f.type)}:
-    <b>${fmtD(r.before)}</b> now → <b>${fmtD(r.after)}</b> after
-    (${r.delta > 0 ? "+" : ""}${fmtD(r.delta)})
+    <div>Adjustment Preview: <b style="color:${col}">${sign}${fmtD(r.delta)} days</b></div>
+    <div style="margin-top:2px">Current: <b>${fmtD(r.before)}</b> days ➔ New Total: <b>${fmtD(r.after)}</b> days</div>
     ${neg ? `<br>⚠ <b>This takes the balance below zero.</b> That is allowed — for clawing back
       an over-grant, or where leave is earned monthly — but it is rarely what you meant.
       <div class="actions" style="margin-top:6px"><label style="display:flex;gap:6px;align-items:center;cursor:pointer">
@@ -1936,7 +1974,11 @@ function ledPreview(f) {
 }
 
 function hrLedger() {
-  const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
+  // Nothing is pre-selected. It used to open on the first active employee with Off-in-Lieu
+  // and 1 day, so an adjustment saved without touching the dropdowns landed on whoever
+  // sorts first, under the wrong leave type — the mechanism behind "I deducted 2 days of
+  // AL and the balance didn't change". A blank form cannot be wrong by accident.
+  const f = vp.ledForm || { empId: "", type: "", delta: "", reason: "" };
   vp.ledForm = f;
   // Every entry, not the newest 30. The old `.slice(0, 30)` ran BEFORE the column
   // sort below, so sorting by Employee or Days silently re-ordered just those 30 —
@@ -1959,9 +2001,13 @@ function hrLedger() {
   return `<div class="stack"><div class="card"><h3>Add or correct a balance (off-in-lieu, adjustments, expiry)</h3>
     <p class="meta" style="margin:4px 0 10px">Use this to <b>credit off-in-lieu (OIL)</b> when someone works a weekend or public holiday, or to make one-off corrections. Positive = credit days, negative = deduct.</p>
     <div class="frow">
-      <div class="field"><label>Employee</label><select data-f="led.empId">${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
-      <div class="field"><label>Leave type</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
-      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
+      <div class="field"><label>Employee<span class="req">*</span></label><select data-f="led.empId">
+        ${f.empId ? "" : `<option value="" disabled selected>— Select —</option>`}
+        ${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Leave type<span class="req">*</span></label><select data-f="led.type">
+        ${f.type ? "" : `<option value="" disabled selected>— Select —</option>`}
+        ${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
+      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta === "" || f.delta == null ? "" : f.delta}" data-f="led.delta" placeholder="e.g. 1 or -2"></div>
     </div>
     <div class="field"><label>Reason<span class="req">*</span></label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
     ${ledPreview(f)}
@@ -2069,9 +2115,18 @@ document.addEventListener("mousedown", ev => { pressOnBackdrop = ev.target.class
 document.addEventListener("click", async ev => {
   const el = ev.target.closest("[data-act]");
   if (!el) return;
-  const act = el.dataset.act, id = el.dataset.id;
+  const act = el.dataset.act;
   if (act === "closemodal" && el.classList.contains("modalback") && (ev.target !== el || !pressOnBackdrop)) return;
   if (act === "dologin") { ev.preventDefault(); return doLogin(); }
+  return runAction(el);
+});
+
+/* Every data-act lives here rather than inline in the listener, so the confirm dialog
+   can re-enter the SAME handler with the action it was standing in for. The dialog then
+   stays a pure question and no action logic is duplicated to sit behind it.
+   `el` is either a real element or a synthetic { dataset: {...} }. */
+async function runAction(el) {
+  const act = el.dataset.act, id = el.dataset.id;
   switch (act) {
     case "logout": signOut(); break;
     case "nav": if (draftDirty()) { vp.leaveTo = { kind: "nav", v: el.dataset.v }; render(); break; } view = el.dataset.v; vp = {}; render(); break;
@@ -2088,7 +2143,7 @@ document.addEventListener("click", async ev => {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; delete vp.loginResult; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; render(); break;
     case "createlogin": {
       const email = el.dataset.email, eid = el.dataset.id;
       toast("Creating login…");
@@ -2323,7 +2378,43 @@ document.addEventListener("click", async ev => {
       await reload(); toast("Company settings saved ✓");
       break;
     }
-    case "withdraw": { if (await withdrawApp(id)) { delete vp.detail; render(); toast("Application withdrawn"); } break; }
+    // ---- generic confirm / result dialogs ----
+    case "confirmno": delete vp.confirmModal; render(); break;
+    case "confirmyes": {
+      const m = vp.confirmModal; delete vp.confirmModal;
+      if (!m) { render(); break; }
+      render();
+      // Re-enter the dispatcher with the action the dialog was standing in for, so the
+      // real work lives in one place and the dialog stays a pure question.
+      await runAction({ dataset: { act: m.act, id: m.id || "" } });
+      break;
+    }
+    case "resultclose": delete vp.resultModal; render(); break;
+
+    // ---- withdraw (pending) ----
+    case "withdraw": {
+      const a = db.applications.find(x => x.id === id); if (!a) break;
+      vp.confirmModal = {
+        title: "Withdraw this application?",
+        lines: [`<b>${esc(lt(a.type).en)}</b>, ${fmtRange(a.start, a.end)} (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}).`,
+                "It will be cancelled and no days are deducted from your balance."],
+        okLabel: "Withdraw application", act: "withdrawgo", id
+      };
+      render(); break;
+    }
+    case "withdrawgo": {
+      const a = db.applications.find(x => x.id === id);
+      const snap = a ? { type: lt(a.type).en, range: fmtRange(a.start, a.end) } : null;
+      if (await withdrawApp(id)) {
+        delete vp.detail;
+        vp.resultModal = { title: "Leave Cancelled",
+          lines: snap ? [`Your request for <b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been cancelled.`,
+                         "No days were deducted from your balance."]
+                      : ["Your request has been cancelled. No days were deducted from your balance."] };
+        render();
+      }
+      break;
+    }
     case "edit": vp = { editId: id }; view = "apply"; render(); break;
     // Cancelling refunds the whole application, so anyone who had already taken part
     // of it must re-book those days. Pre-fill the form rather than compute a partial
@@ -2368,21 +2459,60 @@ document.addEventListener("click", async ev => {
       vp.form = { type: a.type, start: a.start, end: a.end,
         half: Object.fromEntries((a.halfDays || []).map(x => [x.d, x.part])),
         reason: a.reason || "", att: a.att || "" };
-      delete vp.editId; delete vp.detail;
+      delete vp.editId; delete vp.detail; delete vp.resultModal;
+      vp.reapplyFrom = { days: a.days, type: lt(a.type).en, range: fmtRange(a.start, a.end) };
       view = "apply"; render();
-      toast("Set the end date to your last day away, then submit");
       break;
     }
     case "cancelreq": {
+      const a = db.applications.find(x => x.id === id); if (!a) break;
+      const started = a.start <= todayStr();
+      vp.confirmModal = {
+        title: "Cancel Leave Request?",
+        lines: [`Are you sure you want to cancel your leave request for <b>${esc(lt(a.type).en)}</b> from <b>${fmtDate(a.start)}</b> to <b>${fmtDate(a.end)}</b> (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"})?`],
+        warn: started ? `This leave started on <b>${fmtDate(a.start)}</b>. All ${fmtD(a.days)} day${a.days === 1 ? "" : "s"} come back, so you will need to apply again for the days you were actually away.` : "",
+        okLabel: "Confirm Cancellation", act: "cancelreqgo", id
+      };
+      render(); break;
+    }
+    case "cancelreqgo": {
+      const before = db.applications.find(x => x.id === id);
+      if (!before) break;
+      // Snapshot before the reload: after it, the row's status has moved on.
+      const snap = { type: lt(before.type).en, range: fmtRange(before.start, before.end),
+                     days: before.days, start: before.start,
+                     approver: before.steps.length ? ((emp(before.steps[0].approverId) || {}).name || "your approver") : null };
       if (await requestCancel(id)) {
         delete vp.detail;
         const a = db.applications.find(x => x.id === id);
-        render(); toast(a && a.status === "cancelled" ? "Leave cancelled — days refunded" : "Cancellation request sent to your approver");
+        const done = a && a.status === "cancelled";   // no approver → confirmed on the spot
+        const started = snap.start <= todayStr();
+        vp.resultModal = done
+          ? { title: "Leave Cancelled",
+              lines: [`<b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been cancelled.`,
+                      `<b>${fmtD(snap.days)}</b> day${snap.days === 1 ? "" : "s"} ${snap.days === 1 ? "has" : "have"} been returned to your balance.`],
+              warn: started ? `<b>You were already away from ${fmtDate(snap.start)}.</b> All ${fmtD(snap.days)} day${snap.days === 1 ? "" : "s"} have been returned, including the days you actually took. Apply again for those days, or your balance will be higher than it should be.` : "",
+              act: started ? "reapply" : null, actId: id, actLabel: "Apply for days taken" }
+          : { title: "Cancellation Request Submitted",
+              lines: [`Your request to cancel approved leave <b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been sent to <b>${esc(snap.approver || "your approver")}</b> for review.`,
+                      "Your balance will not change until it is approved."] };
+        render();
       }
       break;
     }
-    case "cancelok": { if (await confirmCancel(id, true, "")) { render(); toast("Cancellation confirmed — days refunded"); } break; }
-    case "cancelno": { if (await confirmCancel(id, false, "")) { render(); toast("Cancellation declined"); } break; }
+    case "cancelok": {
+      const a = db.applications.find(x => x.id === id);
+      const who = a ? ((emp(a.empId) || {}).name || "them") : "them";
+      const d = a ? a.days : 0;
+      if (await confirmCancel(id, true, "")) { render(); toast(`Cancellation confirmed — ${fmtD(d)} day${d === 1 ? "" : "s"} returned to ${who}`); }
+      break;
+    }
+    case "cancelno": {
+      const a = db.applications.find(x => x.id === id);
+      const who = a ? ((emp(a.empId) || {}).name || "their") + "'s" : "their";
+      if (await confirmCancel(id, false, "")) { render(); toast(`Cancellation declined — ${who} leave stands`); }
+      break;
+    }
     case "ledsort": {
       const c = el.dataset.col, s = vp.ledSort || { col: "ts", dir: -1 };
       if (s.col === c) s.dir = -s.dir; else { s.col = c; s.dir = (c === "ts" || c === "delta") ? -1 : 1; }
@@ -2390,15 +2520,43 @@ document.addEventListener("click", async ev => {
     }
     case "ledadd": {
       const f = vp.ledForm;
-      if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
+      // Order follows the form, so the message points at the first gap the eye reaches.
+      if (!f.empId) return toast("Please choose an employee");
+      if (!f.type) return toast("Please choose a leave type");
       if (!f.delta) return toast("Please enter a number of days that isn't zero.");
+      if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
       if (ledGoesNegative(f) && !vp.ledNegOk) return toast("This would take the balance below zero — tick the box to confirm.");
+      // Ledger writes are append-only and permanent — a wrong entry can only be undone by a
+      // second, compensating entry — so state the whole thing back before it is written.
+      const r = ledBalAfter(f);
+      const kind = (f.type === "oil" && Number(f.delta) > 0) ? "OIL Credit" : "Manual Adjustment";
+      vp.confirmModal = {
+        title: "Confirm Balance Adjustment",
+        lines: [`You are about to update <b>${esc((emp(f.empId) || {}).name || "")}</b>'s <b>${esc((lt(f.type) || {}).en || f.type)}</b> balance:`,
+                `<b>Type:</b> ${kind}`,
+                `<b>Change:</b> <b style="color:${Number(f.delta) > 0 ? "var(--good)" : "var(--bad)"}">${Number(f.delta) > 0 ? "+" : ""}${fmtD(Number(f.delta))} days</b> (Was ${fmtD(r.before)} days ➔ Now ${fmtD(r.after)} days)`,
+                `<b>Reason:</b> ${esc(f.reason.trim())}`],
+        warn: r.after < 0 ? "This leaves the balance below zero." : "",
+        cancelLabel: "Cancel", okLabel: "Confirm & Save", act: "ledaddgo"
+      };
+      render(); break;
+    }
+    case "ledaddgo": {
+      const f = vp.ledForm;
       const { error } = await sb.from("leave_ledger").insert({ emp_id: f.empId, leave_type: f.type,
         delta_days: Number(f.delta), reason: "Manual adjustment: " + f.reason.trim(), created_by: me.id });
       if (error) return rpcErr(error);
-      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" };
+      const snap = { who: (emp(f.empId) || {}).name || "", type: (lt(f.type) || {}).en || f.type, delta: Number(f.delta) };
+      // Back to a blank form: keeping the last employee selected is how the wrong-target
+      // mistake happened in the first place.
+      vp.ledForm = { empId: "", type: "", delta: "", reason: "" };
       vp.ledNegOk = false;
-      await reload(); toast("Adjustment saved.");
+      await reload();
+      const after = bal(f.empId, f.type).avail;
+      vp.resultModal = { title: "Balance Adjusted",
+        lines: [`<b>${esc(snap.who)}</b>'s <b>${esc(snap.type)}</b> balance has been updated by <b>${snap.delta > 0 ? "+" : ""}${fmtD(snap.delta)} days</b>.`,
+                `New total: <b>${fmtD(after)}</b> days.`] };
+      render();
       break;
     }
     case "phadd": {
@@ -2472,7 +2630,7 @@ document.addEventListener("click", async ev => {
       break;
     }
   }
-});
+}
 
 document.addEventListener("change", async ev => {
   const el = ev.target;
