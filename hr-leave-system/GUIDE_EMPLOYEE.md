@@ -153,6 +153,18 @@ Your balance shows:
 
 **Available** is what you can actually book today.
 
+### Why your annual leave might go up every month
+
+Some companies credit the whole year's annual leave on 1 January. Others credit it
+**monthly, as you earn it** — so in March you would have roughly three months' worth,
+not the full year. Both are normal; ask HR which one applies here.
+
+**On the monthly method your Available can show a minus figure**, for example
+**−1.5 days**. That is not a fault. It means you have taken more than you have earned
+so far, and the next months' credits will bring it back up. You are not being charged
+for it — but you may not be able to book more leave until it recovers, and if you
+leave the company with a negative balance it is normally settled in your final pay.
+
 ---
 
 ## Common questions

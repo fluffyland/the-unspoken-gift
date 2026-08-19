@@ -76,7 +76,21 @@ Wait for "Success" before starting the next.
 | 1 | `schema.sql` | every table, view, function and security rule |
 | 2 | `keepalive_ping_v2.sql` | the anti-sleep heartbeat |
 | 3 | `bootstrap_owner.sql` | creates your first Owner account |
-| 4 | `migration_app_v12.sql` | one working-day authority, Saturday support, cancellation safeguards |
+| 4 | `migration_app_v9.sql` | cap on a new joiner's first-year pro-rate (blank = no cap) |
+| 5 | `migration_app_v12.sql` | one working-day authority, Saturday support, cancellation safeguards |
+| 6 | `migration_app_v13.sql` | holiday sync stops taking over manually added dates |
+| 7 | `migration_app_v14.sql` | annual-leave maximum, and monthly accrual as an option |
+| 8 | `migration_app_v15.sql` | cancelling leave that has no approver confirms immediately |
+
+⚠️ **v9 is easy to skip and it bites later.** It is the only place
+`org_settings.prorate_cap` is created, and v14 rewrites a function that reads that
+column — so a database missing v9 fails v14 with
+`ERROR: 42703: column "prorate_cap" does not exist`. v14 now adds the column
+defensively, so either order works, but running v9 keeps the history honest.
+
+**v12–v15 are all idempotent** — running one twice changes nothing the second time,
+and each ends with verification queries. If you are unsure whether one ran, run it
+again rather than guessing.
 
 **Before running `bootstrap_owner.sql`**, open it and edit the name and email
 near the top to your own. That account becomes the Owner / Super Admin.
@@ -404,7 +418,12 @@ Don't call it done until **every** line passes.
 - [ ] Public sign-up is **off**
 - [ ] `attachments` bucket exists and is **Private**
 - [ ] `create-login` deployed (named exactly `create-login`)
+- [ ] `migration_app_v9.sql` ran — `prorate_cap` column exists
 - [ ] `migration_app_v12.sql` ran — working-day authority, Saturday columns, safer cancellation
+- [ ] `migration_app_v13.sql` ran — `public_holidays.updated_at` exists, manual dates survive a sync
+- [ ] `migration_app_v14.sql` ran — `annual_cap` and `accrual_mode` exist in Company defaults
+- [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
+- [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min
 - [ ] A reset code actually arrives, and it is a **6-digit number, not a link**
 - [ ] `sync-holidays` returns `{"ok":true}` and `holiday_sync_log` has a row

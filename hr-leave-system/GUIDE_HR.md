@@ -108,8 +108,18 @@ Typical uses:
 - a balance is wrong after a data fix → correct it
 - expiring days → deduct them
 
+As you type, the form shows **what the balance is now and what it will become** —
+so you never have to guess how much is safe to deduct.
+
+**Going below zero is allowed, but it asks first.** If the result would be negative
+you get a warning and a tick box to confirm. Clawing back an over-grant is a real
+need, so it isn't blocked — but it can't happen by accident either. Under monthly
+accrual a negative balance is normal and expected; under yearly crediting it usually
+means something is wrong, so read the warning before ticking.
+
 A balance is always the sum of its entries, so every change is traceable. The
-**Recent adjustments** table shows the last 30 — click any column to sort.
+**Adjustments** table shows **every** entry ever made, with a search box — click any
+column to sort, and the page stays where it is instead of jumping to the top.
 
 ---
 
@@ -291,6 +301,13 @@ asleep or down. Supabase dashboard → **Restore**.
 switch them off, and don't change the keep-alive repo from private to public.
 
 **Export a CSV backup regularly.** Balances and All records. Cheap insurance.
+
+**People with no approver are approved — and cancelled — instantly.** Anyone whose
+approver is blank (typically the Managing Director) has their leave auto-approved on
+submit, and a cancellation confirmed on the spot, because there is nobody to route it
+to. Nothing appears in anyone's Approvals inbox. If you ever see a cancellation
+request sitting in your inbox marked as having no approver, confirm it yourself —
+it means the routing found no one else.
 
 ---
 

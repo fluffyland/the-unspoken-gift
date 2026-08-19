@@ -176,7 +176,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `HANDOVER.md` | this file |
 | `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
-| `supabase/migration_app_v1..v11.sql` | incremental history; user has applied through v11 EXCEPT v9 |
+| `supabase/migration_app_v1..v15.sql` | incremental history. Applied on the live database: **v1–v15, including v9** (v9 was skipped for a long time and only went in with v14 on 2026-08-19 — see below) |
 | `supabase/bootstrap_owner.sql` | create first Owner (edit name/email inside) |
 | `supabase/reset_all_data.sql` | wipe all people/records/logins, keep types+holidays |
 | `supabase/reset_all_passwords.sql` | set every login's password to `Ssu123@` |
@@ -298,7 +298,19 @@ SOP manual + bootstrap/reset scripts.
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 
-- **v9 not applied** → pro-rate cap UI hidden. Harmless. Apply only if wanted.
+- ~~**v9 not applied**~~ — applied 2026-08-19. It stayed unapplied so long that a
+  later migration (v14) referenced `prorate_cap` and failed with
+  `42703: column does not exist`. **Lesson: this file said "through v11 EXCEPT v9"
+  and that was ignored.** Never write a migration that assumes an earlier one ran —
+  re-add the column with `if not exists`, or feature-detect. §5 is not decoration.
+- **The auto-approve path is a second code path, and it is easy to forget.**
+  Anyone with `approver1 = null` (the Managing Director) is auto-approved on submit
+  and gets **no `approval_steps` row at all**. Every feature that routes work to an
+  approver — inbox filters, permission checks in SQL, "waiting for X" copy — must
+  answer "what if there is no approver?" This was missed once (cancellation, v15:
+  requests sat in `cancel_requested` forever, invisible to every user) and it
+  reached production. When touching approvals, test as the MD, not just as a
+  normal employee.
 - **Storage orphans**: deleting/clearing an employee does NOT remove their
   uploaded MC files from the `attachments` bucket. Manual cleanup; a cleanup
   routine was offered, not requested.

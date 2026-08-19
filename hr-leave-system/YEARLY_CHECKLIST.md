@@ -41,8 +41,17 @@ loses a day.
 
 **HR Console → Company settings → Public holidays**
 
-The heading says how many are loaded for the year. Auto-loaded dates are marked
-**· auto**.
+The heading reads **"Public holidays — Total N Days in YYYY"**, and that N is counted
+from the rows on screen, so it cannot drift out of step with the list.
+
+The **Source** column tells you where each date came from and when it last changed —
+🔄 *Sync* with the last sync time, or ✋ *Manual* with when you added it.
+
+Under the heading is a **"Last checked against MOM"** line. Read that one carefully:
+the per-row timestamps only move when a date is actually in MOM's feed, so a sync
+that ran and found nothing new correctly leaves every row looking stale. **The
+"Last checked" line is the one that tells you the sync is alive.** Months old = the
+schedule has stopped, even if every row looks fine.
 
 **Singapore has 11 gazetted public holidays a year.** When one falls on a Sunday
 the following Monday is also a holiday, so the list may show a few more —
@@ -152,6 +161,33 @@ select grant_annual_entitlements(2027);
 > **Order matters:** rollover first, then grant. Rollover carries unused days
 > forward (capped, expiring); grant issues the new year's allowance.
 
+### If you switched to monthly accrual, this section works differently
+
+Check which mode you are on: **Company settings → Company defaults → "Credit annual
+leave"**. In SQL: `select accrual_mode from org_settings where id = 1;`
+
+**On `monthly`, `grant_annual_entitlements` deliberately does nothing** — it refuses
+to run so the two methods can never both credit the same year. Leave arrives in
+twelve instalments instead, one per month:
+
+```sql
+select accrue_monthly_leave(2027, 1);   -- year, month
+```
+
+Each run credits *"what you should have by now, minus what you've already had"*, so
+running it twice for the same month adds nothing, and a missed month is repaired by
+the next run. **December always lands exactly on the full annual figure** — that is
+the property to check, not each month's arithmetic.
+
+**The January check is therefore different.** Balances will show roughly **one
+twelfth**, not the full year. That is correct — it is not a failed grant. What to
+verify instead: last year's **December** figure equals each person's full
+entitlement. If it does not, a month was missed and never repaired.
+
+⚠️ **Never switch modes part-way through a year without reconciling by hand.** Both
+functions refuse to double-credit, but the halves of the year do not add up on their
+own — you would need a manual adjustment to bridge them. Switch at 1 January.
+
 ### Spot-check three people
 
 Automation is easiest to trust when you've looked at actual numbers. Pick:
@@ -245,6 +281,10 @@ pause.
 - [ ] **Request a password-reset code for yourself and check it arrives.** Resend is
       an external service that can fail quietly — and a broken reset only shows up
       when someone is already locked out.
+- [ ] **On monthly accrual only:** did this month's instalment land?
+      `select created_at, reason from leave_ledger where reason like '%monthly accrual%' order by created_at desc limit 5;`
+      Nothing this month → run `select accrue_monthly_leave(<year>, <month>);`
+      (safe to repeat; it credits only what is missing).
 - [ ] Any rows in `ledger_guard_failures`? Empty is normal. Rows mean a balance
       safeguard blocked a refund and needs looking at:
       `select at, app_id, message from ledger_guard_failures order by at desc limit 10;`
