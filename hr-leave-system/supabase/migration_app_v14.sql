@@ -15,6 +15,15 @@
 --    所有读取路径都得跟着改，且这条不变量就没了。
 -- =============================================================
 
+-- ---------- 0. 前置：确保 prorate_cap 存在 ----------
+-- 下面重写的 annual_entitlement_for 会引用 org_settings.prorate_cap（首年折算封顶）。
+-- 这一列是 v9 加的；如果那次迁移没跑过，这里会报
+--   ERROR: 42703: column "prorate_cap" does not exist
+-- 所以在这里补加一次。NULL = 不封顶 = 与原来完全一致，不会改动任何人的额度。
+alter table org_settings add column if not exists prorate_cap numeric(5,1);
+comment on column org_settings.prorate_cap is
+  'Cap on a NEW JOINER''s first-year pro-rated annual leave. NULL = no cap. Different from annual_cap, which caps long-service increments.';
+
 alter table org_settings add column if not exists annual_cap numeric(5,1);
 comment on column org_settings.annual_cap is
   'Maximum annual leave after long-service increments. NULL = no maximum (previous behaviour). Does not affect a new joiner first-year pro-rate, which uses prorate_cap.';
