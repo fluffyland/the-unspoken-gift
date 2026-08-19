@@ -298,7 +298,8 @@ const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
 const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
   empNo: r.emp_no || "", alias: r.alias || "", mobile: r.mobile || "", hasLogin: !!r.auth_user_id,
-  twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null });
+  twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null,
+  worksSat: r.works_saturday });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
   gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days),
   allowHalf: r.allow_half_day, sort: r.sort, note: r.note || "" });
@@ -326,14 +327,14 @@ async function loadAll() {
   // `source` column only exists after the v7 migration — fall back to holiday,name
   // when it isn't there yet, so login/loadAll never breaks pre-migration.
   const phP = (async () => {
-    const r = await sb.from("public_holidays").select("holiday,name,source");
+    const r = await sb.from("public_holidays").select("*");
     return r.error ? sb.from("public_holidays").select("holiday,name") : r;
   })();
   const [empR, typeR, phR, deptR, orgR] = await Promise.all([
     rosterP,
     sb.from("leave_types").select("*"),
     phP,
-    sb.from("departments").select("name"),
+    sb.from("departments").select("*"),
     sb.from("org_settings").select("*").maybeSingle()
   ]);
   const firstErr = [empR, typeR, phR, deptR, orgR].map(r => r.error).find(Boolean);
@@ -344,11 +345,27 @@ async function loadAll() {
   const publicHolidays = (phR.data || []).map(x => x.holiday).sort();
   const phNames = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.name || "Public holiday"]));
   const phSource = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.source || "manual"]));
+  // v13 adds updated_at (last change from ANY source). Manual rows have no synced_at,
+  // so this is the only column that can answer "when was this added by hand".
+  const phWhen = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.updated_at || x.synced_at || null]));
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
+  // When did the holiday sync last RUN? Per-row timestamps only move when a date is in
+  // the feed, so a sync that ran and found nothing leaves every row looking stale. This
+  // is the signal that the job is alive at all — same idea as the keep-alive heartbeat.
+  let phLastCheck = null;
+  try {
+    const r = await sb.from("holiday_sync_log").select("ran_at,status").order("ran_at", { ascending: false }).limit(1).maybeSingle();
+    if (r.data) phLastCheck = r.data;
+  } catch (e) { /* non-HR or table absent — the line simply won't show */ }
+  // Keep `departments` a plain list of names — dropdowns everywhere depend on that.
+  // The Saturday flag rides alongside as a lookup instead of changing the shape.
+  const deptSat = Object.fromEntries((deptR.data || []).map(x => [x.name, !!x.works_saturday]));
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
     defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
-    prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)) };
+    prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)),
+    annualCap:  (o.annual_cap  == null ? null : Number(o.annual_cap)),
+    accrualMode: o.accrual_mode || "annual" };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -380,13 +397,21 @@ async function loadAll() {
   // Company-wide calendar comes from a dedicated view (everyone can read it),
   // separate from `applications` which RLS limits to your own + those you approve.
   const calR = await sb.from("leave_calendar").select("*");
-  const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status }));
+  const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status, worksSat: !!c.works_saturday }));
 
-  db = { org, departments, employees, leaveTypes, publicHolidays, phNames, phSource, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  db = { org, departments, deptSat, employees, leaveTypes, publicHolidays, phNames, phSource, phWhen, phLastCheck, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
   // Feature detection so the UI stays safe before the v8 database migration is applied.
   db.empExtra   = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
   db.ltHalf     = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
+  // v12 adds works_saturday to departments/employees. Until the migration is run,
+  // hide the controls and omit the field rather than failing every save.
+  db.hasSat     = !!(deptR.data && deptR.data[0] && ("works_saturday" in deptR.data[0]));
+  // v13 adds public_holidays.updated_at. Sending it before the migration has run would
+  // fail every manual holiday add/edit, so gate the writes on it being present.
+  db.hasPhWhen  = !!(phR.data && phR.data[0] && ("updated_at" in phR.data[0]));
   db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
+  // v14: cap on long-service growth, and monthly vs one-shot crediting
+  db.orgV14     = !!(orgR.data && ("accrual_mode" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -426,14 +451,41 @@ function wdCount(start, end, sh, eh, phList) {
   return n;
 }
 /* Working days (ISO strings) in a range, excluding weekends + SG public holidays */
-function workingDaysList(start, end) {
-  const ph = db.publicHolidays;
+/* Mirrors SQL emp_works_saturday(): personal override wins, else the department
+   default, else no. `null` means "inherit" and must stay distinct from `false`. */
+function empWorksSat(e) {
+  if (!e) return false;
+  if (e.worksSat === true || e.worksSat === false) return e.worksSat;
+  return !!((db.deptSat || {})[e.dept]);
+}
+/* Frontend mirror of the SQL authority is_working_day(emp, date). Keep the two in
+   step: Sunday never counts, Saturday only for Saturday workers, a public holiday
+   never counts for anyone. Do NOT re-derive this rule anywhere else — three
+   divergent copies are what put weekends on the calendar as leave. */
+function isWorkingDayFor(ds, worksSat) {
+  if (db.publicHolidays.includes(ds)) return false;
+  const d = new Date(ds + "T00:00:00").getDay();   // 0 = Sun … 6 = Sat
+  if (d === 0) return false;
+  if (d === 6) return !!worksSat;
+  return true;
+}
+/* Does this draft clash with the applicant's own existing leave? Used BOTH while the
+   dates are being picked (so the warning is immediate) and again at submit. The
+   database enforces it independently — this is UX, not the guard. */
+function selfOverlap(f, exceptId) {
+  return db.applications.find(a => a.empId === me.id && a.id !== exceptId &&
+    ["pending", "approved", "cancel_requested"].includes(a.status) &&
+    !(f.end < a.start || f.start > a.end));
+}
+function workingDaysList(start, end, forEmp) {
   const s = new Date(start + "T00:00:00"), e = new Date(end + "T00:00:00");
   const list = [];
   if (!(s <= e)) return list;
+  // Defer to the one mirror of the SQL rule rather than re-testing weekends here —
+  // this function having its own copy is how the calendar drifted out of step.
+  const sat = empWorksSat(forEmp || me);
   for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-    const wd = d.getDay();
-    if (wd !== 0 && wd !== 6 && !ph.includes(iso(d))) list.push(iso(d));
+    if (isWorkingDayFor(iso(d), sat)) list.push(iso(d));
   }
   return list;
 }
@@ -445,12 +497,24 @@ function wdCountHalf(start, end, half) {
   if (n <= 0 && list.length) n = 0.5;
   return n;
 }
-/* Human-readable half-day summary for an application (handles legacy sh/eh records) */
+/* Legacy sh/eh records only — a per-day half map gets its own table row (halfDayRows).
+   Cramming eight half-days onto the Dates line made it unreadable. */
 function halfSummary(a) {
-  const hd = a.halfDays || [];
-  if (hd.length) return " · half: " + hd.map(x => fmtDate(x.d) + " " + String(x.part).toUpperCase()).join(", ");
+  if ((a.halfDays || []).length) return "";
   if (a.sh || a.eh) return (a.sh ? " · first day ½" : "") + (a.eh ? " · last day ½" : "");
   return "";
+}
+/* Half-days, one per line, with the weekday — an approver checking a pattern of
+   half-days shouldn't have to parse a comma-separated run-on sentence. */
+function halfDayRows(a) {
+  const hd = (a.halfDays || []).slice().sort((x, y) => x.d < y.d ? -1 : x.d > y.d ? 1 : 0);
+  if (!hd.length) return "";
+  const dow = ds => new Date(ds + "T00:00:00").toLocaleDateString("en-SG", { weekday: "short" });
+  const part = p => String(p).toUpperCase() === "AM" ? "Morning (AM)" : "Afternoon (PM)";
+  return `<dt>Half days</dt><dd><div class="tablebox" style="max-width:320px"><table>
+    <thead><tr><th>Date</th><th>Day</th><th>Half</th></tr></thead><tbody>
+    ${hd.map(x => `<tr><td class="num">${fmtDate(x.d)}</td><td class="meta">${dow(x.d)}</td><td>${part(x.part)}</td></tr>`).join("")}
+    </tbody></table></div></dd>`;
 }
 // Half-days as small chips (easier to scan than one long comma line)
 function halfChips(a) {
@@ -543,7 +607,7 @@ function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assig
 function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
 function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
 function ePick(e, k) { const dv = vp.draft && vp.draft.emps[e.id]; return dv && (k in dv) ? dv[k] : ({ approver1: e.approver1, approver2: e.approver2, annualBase: e.annualBase }[k]); }
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "prorateCap" ? (o.prorateCap ?? "") : (o.defaultAnnualBase ?? 14); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "prorateCap" ? (o.prorateCap ?? "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -587,6 +651,11 @@ async function saveDraft() {
     if (!String(company).trim()) { toast("Company name can't be empty."); return false; }
     const patch = { company_name: String(company).trim(), email_domain: String(domain).trim(), default_annual_base: numOr(base, 14) };
     if (db.orgProrate) { const pc = ("prorateCap" in d.org) ? d.org.prorateCap : db.org.prorateCap; patch.prorate_cap = (pc === "" || pc == null) ? null : numOr(pc, null); }
+    if (db.orgV14) {
+      const ac = ("annualCap" in d.org) ? d.org.annualCap : db.org.annualCap;
+      patch.annual_cap = (ac === "" || ac == null) ? null : numOr(ac, null);
+      patch.accrual_mode = (("accrualMode" in d.org) ? d.org.accrualMode : db.org.accrualMode) || "annual";
+    }
     const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
     if (error) { rpcErr(error); return false; }
   }
@@ -717,8 +786,37 @@ async function requestCancel(appId) {
 }
 async function confirmCancel(appId, ok, comment) {
   const { error } = await sb.rpc("confirm_cancel", { p_app: appId, p_ok: ok, p_comment: comment || null });
-  if (error) { rpcErr(error); return false; }
+  if (error) {
+    const msg = String(error.message || "");
+    // The balance guards in confirm_cancel roll the WHOLE transaction back, so the
+    // refund and the status change both revert and the request stays pending. Say
+    // that plainly — the raw exception names figures that are right for a log and
+    // wrong for a person.
+    if (/reconciliation failed/i.test(msg)) {
+      toast("Couldn't complete the cancellation — nothing was changed and the balance is untouched. Please try again; if it keeps failing, contact HR.");
+      console.error("confirm_cancel reconciliation guard fired:", msg);
+      logGuardFailure(appId, msg);
+      return false;
+    }
+    if (/already been refunded/i.test(msg)) {
+      toast("This leave has already been refunded — no second refund was made.");
+      await loadAll();
+      return false;
+    }
+    rpcErr(error); return false;
+  }
   await loadAll(); return true;
+}
+
+/* A blocked refund rolls back everything, including any event row written inside the
+   transaction — so without this the failure would leave no trace anywhere and a
+   recurring fault would be invisible. Logged in a SEPARATE call so it survives. */
+function logGuardFailure(appId, msg) {
+  try {
+    sb.from("ledger_guard_failures").insert({
+      emp_id: me?.id || null, app_id: appId, message: msg.slice(0, 500)
+    }).then(() => {}, () => {});
+  } catch (e) { /* best effort only — never block the UI on an audit write */ }
 }
 
 /* ============ Queries ============ */
@@ -833,13 +931,47 @@ function loginPage() {
       If you've just joined, ask HR to add you using this email, then sign in again.
       If you've left the company, your access has ended.
       <div class="actions" style="justify-content:center"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
+    ${vp.reset ? resetPane() : `
     <form id="loginform" autocomplete="on">
       <div class="field"><label>Work email<span class="req">*</span></label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
       <div class="field"><label>Password<span class="req">*</span></label><input type="password" id="li-pass" autocomplete="current-password" required></div>
       <button class="btn" type="submit" data-act="dologin" style="width:100%;margin-top:6px">Sign in</button>
-    </form>`}
-    <p class="footnote" style="text-align:center">Each person signs in with their own work email. Forgot your password? Ask HR to reset it.</p>
+      <p style="text-align:center;margin:10px 0 0"><button type="button" class="btn ghost" data-act="resetopen">Forgot your password?</button></p>
+    </form>`}`}
+    ${vp.reset ? "" : `<p class="footnote" style="text-align:center">Each person signs in with their own work email. Still stuck? Ask HR.</p>`}
   </div></div>`;
+}
+
+/* Self-service password reset, all on the sign-in page — no links, no redirects.
+   Deliberately three steps in one place: a reset LINK can be consumed by corporate
+   mail scanners before the employee clicks it, and this app has no URL routing. */
+function resetPane() {
+  const r = vp.reset || {};
+  const back = `<p style="text-align:center;margin:12px 0 0"><button type="button" class="btn ghost" data-act="resetback">← Back to sign in</button></p>`;
+
+  if (r.step === "code") {
+    return `<div class="callout acc" style="margin-bottom:14px">If <b>${esc(r.email)}</b> is registered, a 6-digit code is on its way. It expires shortly, so use it soon.</div>
+      <div class="field"><label>6-digit code<span class="req">*</span></label>
+        <input type="text" id="rs-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="letter-spacing:4px;font-size:18px"></div>
+      <button class="btn" data-act="resetverify" style="width:100%">Verify</button>
+      <p class="footnote" style="text-align:center;margin-top:10px">
+        Didn't get it? Check spam, then
+        <button type="button" class="btn ghost" data-act="resetresend" ${r.cooldown ? "disabled" : ""}>${r.cooldown ? `resend in ${r.cooldown}s` : "send another"}</button>
+      </p>${back}`;
+  }
+
+  if (r.step === "newpw") {
+    return `<div class="callout acc" style="margin-bottom:14px">Code accepted. Choose a new password.</div>
+      <div class="field"><label>New password<span class="req">*</span></label><input type="password" id="rs-p1" autocomplete="new-password">
+        <span class="hint">At least 8 characters. A mix of letters and numbers is stronger.</span></div>
+      <div class="field"><label>Repeat new password<span class="req">*</span></label><input type="password" id="rs-p2" autocomplete="new-password"></div>
+      <button class="btn" data-act="resetsave" style="width:100%">Set password</button>`;
+  }
+
+  return `<p class="tag" style="margin-top:-6px">Enter your work email and we'll send you a 6-digit code.</p>
+    <div class="field"><label>Work email<span class="req">*</span></label>
+      <input type="email" id="rs-email" placeholder="you@company.com" autocomplete="username" value="${esc(r.email || "")}"></div>
+    <button class="btn" data-act="resetsend" style="width:100%">Send code</button>${back}`;
 }
 
 function shell() {
@@ -1019,6 +1151,9 @@ function vApply() {
   const curYear = todayStr().slice(0, 4);
   const yearEnd = curYear + "-12-31";
   const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
+  // Warn as soon as the dates are chosen, not on submit — being told at the last
+  // step, after filling everything in, is the complaint this fixes.
+  const clash = (f.start && f.end) ? selfOverlap(f, vp.editId) : null;
   return `
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
     <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
@@ -1049,6 +1184,9 @@ function vApply() {
         ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
       </div>
       ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day${days === 1 ? "" : "s"} but only ${fmtD(b.avail)} available</div>` : ""}
+      ${clash ? `<div class="callout warn" style="margin:0 0 12px">⚠ <b>These dates overlap leave you've already applied for.</b><br>
+        ${esc(lt(clash.type).en)} · ${fmtRange(clash.start, clash.end)} · <span class="pill st-${clash.status}">${stName(clash.status)}</span><br>
+        <span class="meta">Pick different dates, or withdraw/cancel that application first.</span></div>` : ""}
       ${nextYearBlocked ? `<div class="callout warn" style="margin:0 0 12px">📅 <b>Next year is view-only for now.</b> Leave dated in ${Number(curYear) + 1} opens for applications on 1 Jan ${Number(curYear) + 1} (that's when next year's balance is granted). You can already preview ${Number(curYear) + 1} public holidays in the <b>Calendar</b> tab.</div>` : ""}
       <div class="field"><label>Remarks<span class="req">*</span></label><textarea data-f="reason" rows="2" placeholder="Provide a brief reason for your leave request.">${esc(f.reason)}</textarea></div>
       ${t.mc ? `<div class="callout warn" style="margin:0 0 12px">📄 <b>MC required:</b> attach a photo or PDF of your MC below, and submit the <b>original hardcopy to HR within 3 working days</b>.</div>` : ""}
@@ -1056,7 +1194,7 @@ function vApply() {
         <input type="file" data-f="attfile"${t.mc ? ` accept="image/*,.pdf" capture="environment"` : ""}>${f.att ? `<span class="hint">Selected: ${esc(f.att.split("/").pop().replace(/^\d+_/, ""))}</span>` : ""}
         <span class="hint">${t.mc ? "Only you, your approver and HR can open this file." : "You may attach supporting documents (e.g., a flight itinerary or booking confirmation) if they help provide additional context for your request. Only you, your approver, and HR can view the attachment."}</span></div>
       <div class="actions">
-        <button class="btn" data-act="submit" ${days <= 0 || over || nextYearBlocked ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
+        <button class="btn" data-act="submit" ${days <= 0 || over || nextYearBlocked || clash ? "disabled" : ""}>${editing ? "Resubmit" : "Submit application"}</button>
         ${editing ? `<button class="btn sec" data-act="nav" data-v="myapps">Discard changes</button>` : ""}
       </div>
     </div>`;
@@ -1074,9 +1212,8 @@ async function doSubmit() {
   if (!f.reason.trim()) return toast("Please add a brief reason for your leave.");
   if (t.mc && !f.att) return toast("Please attach a photo or PDF of your MC for this leave type.");
   if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("Your MC needs to be a photo or a PDF.");
-  const overlap = db.applications.some(a => a.empId === me.id && a.id !== vp.editId &&
-    ["pending", "approved", "cancel_requested"].includes(a.status) && !(f.end < a.start || f.start > a.end));
-  if (overlap) return toast("These dates overlap with an application you've already submitted.");
+  const clash = selfOverlap(f, vp.editId);
+  if (clash) return toast(`These dates overlap your ${lt(clash.type).en}, ${fmtRange(clash.start, clash.end)}.`);
   if (submitting) return;               // a submit is already in flight — ignore the extra click
   submitting = true;
   const btn = document.querySelector('[data-act="submit"]'), label = btn ? btn.textContent : "";
@@ -1143,7 +1280,9 @@ function vCalendar() {
     const dow = new Date(Y, M - 1, d).getDay();
     const isPH = db.publicHolidays.includes(ds);
     const off = dow === 0 || dow === 6 || isPH;
-    const chips = leaves.filter(a => a.start <= ds && ds <= a.end).map(a => {
+    // Filter by the schedule of whoever OWNS the leave, not the viewer's: once some
+    // staff work Saturdays, a Saturday chip is right for them and wrong for others.
+    const chips = leaves.filter(a => a.start <= ds && ds <= a.end && isWorkingDayFor(ds, a.worksSat)).map(a => {
       const approved = a.status !== "pending";
       return `<span class="lvchip ${approved ? "ap" : "pd"}" title="${esc(a.name)} — ${approved ? "Approved" : "Pending approval"}">${esc(a.name)}</span>`;
     }).join("");
@@ -1267,17 +1406,34 @@ function detailModal(id) {
   const t = lt(a.type), e = emp(a.empId);
   const evs = db.events.filter(x => x.appId === id).sort((x, y) => x.ts - y.ts);
   const own = a.empId === me.id;
-  const canCancel = own && a.status === "approved" && a.start > todayStr();
+  // No date test: approved leave can be cancelled even once it has started. The old
+  // `a.start > todayStr()` silently removed the button mid-leave, which read as the
+  // feature not existing. Cancelling refunds the FULL application; the employee then
+  // re-applies for the days actually taken (see the re-apply prompt below).
+  const canCancel = own && a.status === "approved";
+  const started = a.start <= todayStr();
+  const canReapply = own && a.status === "cancelled" && started;
   return `<div class="modalback" data-act="closemodal">
     <div class="modal" data-stop="1">
       <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
         <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
       <dl class="kv">
         <dt>Dates</dt><dd>${fmtRange(a.start, a.end)} · <b>${fmtD(a.days)}</b> working day${a.days === 1 ? "" : "s"}${halfSummary(a)}</dd>
+        ${halfDayRows(a)}
         <dt>Reason</dt><dd>${esc(a.reason)}</dd>
         ${a.att ? `<dt>Attachment</dt><dd><div id="attprev" data-path="${esc(a.att)}" data-name="${esc(a.att.split("/").pop().replace(/^\d+_/, ""))}">${attLink(a.att)}</div></dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
       </dl>
+      ${own && !canCancel && !canReapply && ["cancel_requested","cancelled","rejected","withdrawn"].includes(a.status)
+        ? `<p class="meta" style="margin:6px 0 0">${{
+            cancel_requested: "You've asked to cancel this. It's with your approver — nothing more to do for now.",
+            cancelled: "This leave was cancelled and the days were returned to your balance.",
+            rejected: "This application was declined. Apply again with different dates if you still need the leave.",
+            withdrawn: "You withdrew this application before it was decided."
+          }[a.status]}</p>` : ""}
+      ${canReapply ? `<div class="callout warn" style="margin:8px 0">You were refunded <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} in full.
+        If you actually took part of this leave, <b>re-apply for those dates</b> so your balance stays correct —
+        set the end date to your last day away.</div>` : ""}
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
       ${stepsView(a)}
       <h3 style="margin-top:14px">Timeline</h3>
@@ -1286,6 +1442,7 @@ function detailModal(id) {
         ${own && a.status === "pending" ? `<button class="btn sec" data-act="withdraw" data-id="${a.id}">Withdraw</button>` : ""}
         ${own && a.status === "returned" ? `<button class="btn" data-act="edit" data-id="${a.id}">Amend & resubmit</button>` : ""}
         ${canCancel ? `<button class="btn ghost" data-act="cancelreq" data-id="${a.id}">Cancel this leave</button>` : ""}
+        ${canReapply ? `<button class="btn" data-act="reapply" data-id="${a.id}">Re-apply for days taken</button>` : ""}
         <button class="btn sec" data-act="closemodal">Close</button>
       </div>
     </div></div>`;
@@ -1332,7 +1489,7 @@ function annualCalc(joinDate, base) {
     const cap = db && db.org ? db.org.prorateCap : null;
     const capped = (cap != null && cap !== "" && days > Number(cap));
     if (capped) days = Number(cap);
-    return { days, note: `pro-rated for their start date — ${fmtD(days)} day${days === 1 ? "" : "s"} this year${capped ? ` (capped at ${fmtD(Number(cap))})` : ""}` };
+    return { days, prorated: true, base, note: `pro-rated — ${monthsLeft} month${monthsLeft === 1 ? "" : "s"} of 12${capped ? `, capped at ${fmtD(Number(cap))}` : ""}` };
   }
   const extra = Math.max(0, y - jy - 1);
   return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year${(y - jy) === 1 ? "" : "s"} of service = ${fmtD(base + extra)} day${(base + extra) === 1 ? "" : "s"}` };
@@ -1352,10 +1509,12 @@ function hrEmployees() {
     <div class="callout acc" style="margin-bottom:14px">This tab configures the approval workflow for each employee. By default, a request needs one approver. Add a 2nd level approver if a second approval is required. In-flight applications keep their original route.</div>
     <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
       <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
-      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th><th></th></tr></thead><tbody>
+      <p class="meta" style="margin:8px 0 0">Ticking <b>Works Sat</b> makes Saturday a normal working day for that team — a Mon–Sat leave then costs 6 days instead of 5. Individuals can override it on their own profile. Public holidays are still excluded for everyone.</p>
+      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th>${db.hasSat ? `<th title="Everyone in this team works Saturdays unless their own profile overrides it">Works Sat</th>` : ""}<th></th></tr></thead><tbody>
         ${db.departments.map(d => `<tr>
           <td><input type="text" value="${esc(d)}" data-act="deptname" data-old="${esc(d)}" style="width:100%"></td>
           <td class="num">${deptCount(d)}</td>
+          ${db.hasSat ? `<td><input type="checkbox" data-act="deptsat" data-name="${esc(d)}" ${(db.deptSat || {})[d] ? "checked" : ""}></td>` : ""}
           <td>${deptCount(d) === 0 ? `<button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button>` : `<span class="meta">in use</span>`}</td>
         </tr>`).join("")}</tbody></table></div>
       <div class="actions" style="margin-top:8px">
@@ -1455,7 +1614,19 @@ function empModal() {
     ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
     <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}></div>
-    ${isAdd ? `<div class="callout acc">This year's annual leave is added automatically: <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> — ${esc(calc.note)}.<br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
+    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays</label>
+      <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
+        <option value="" ${f.worksSat === null || f.worksSat === undefined ? "selected" : ""}>Follow team${f.dept ? ` (${(db.deptSat || {})[f.dept] ? "yes" : "no"})` : ""}</option>
+        <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes — always</option>
+        <option value="no"  ${f.worksSat === false ? "selected" : ""}>No — never</option>
+      </select>
+      <span class="hint">Changes what leave costs: with Saturdays worked, Mon–Sat is 6 days, not 5.</span></div>` : ""}
+    ${isAdd ? `<div class="callout acc"><b>Annual leave: ${fmtD(numOr(f.annualBase, 14))} days/year.</b>
+        ${calc.prorated
+          ? `Joining ${esc(fmtDate(f.joinDate))}, they receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> for the rest of ${new Date().getFullYear()} (${esc(calc.note)}).
+             <br>From 1 Jan ${new Date().getFullYear() + 1} they receive the full ${fmtD(numOr(f.annualBase, 14))} days.`
+          : `They receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> this year — ${esc(calc.note)}.`}
+        <br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
@@ -1545,6 +1716,32 @@ function ltModal() {
       <button class="btn sec" data-act="closemodal">Cancel</button>
     </div></div></div>`;
 }
+/* Only send updated_at once v13 has added the column — otherwise every manual
+   holiday add/edit would fail against an older database. */
+function phStamp() { return db.hasPhWhen ? { updated_at: new Date().toISOString() } : {}; }
+
+/* Proof the monthly sync is still running. A sync that finds no changes touches no
+   rows, so without this an alive job and a dead one look identical. */
+function phLastCheckLine() {
+  const c = db.phLastCheck;
+  if (!c) return `<div class="callout warn" style="margin:6px 0">⚠ <b>No record of the holiday sync ever running.</b> Check the schedule, or add dates by hand below.</div>`;
+  const when = Date.parse(c.ran_at);
+  const daysAgo = Math.floor((Date.now() - when) / 86400000);
+  const stale = daysAgo > 45;   // it runs monthly; 45 days means it has missed one
+  return `<div class="${stale ? "callout warn" : "meta"}" style="margin:6px 0">
+    ${stale ? "⚠ " : ""}Last checked against MOM: <b>${fmtTs(when)}</b>${daysAgo >= 0 ? ` · ${daysAgo} day${daysAgo === 1 ? "" : "s"} ago` : ""}${c.status && c.status !== "ok" ? ` · <b>status: ${esc(c.status)}</b>` : ""}
+    ${stale ? "<br>The monthly sync appears to have stopped — nothing else will tell you this." : ""}</div>`;
+}
+
+/* One cell answering both "where did this date come from" and "when did it last
+   change". Manual rows have no synced_at at all, which is why v13 adds updated_at. */
+function phSourceCell(p) {
+  const auto = (db.phSource || {})[p] === "data.gov.sg";
+  const when = (db.phWhen || {})[p];
+  const stamp = when ? fmtTs(Date.parse(when)) : "—";
+  return `${auto ? "🔄 Sync" : "✋ Manual"} · ${stamp}`;
+}
+
 function hrSettings() {
   const o = db.org || {};
   const y = new Date().getFullYear();
@@ -1562,17 +1759,28 @@ function hrSettings() {
         <span class="hint">Add employee auto-fills name@this-domain</span></div>
       <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
         <span class="hint">Pre-filled when adding a new employee</span></div>
+      ${db.orgV14 ? `<div class="field" style="max-width:240px"><label>Maximum annual leave</label>
+        <input type="number" step="0.5" min="0" data-f="org.annualCap" value="${oPick("annualCap")}" placeholder="no maximum">
+        <span class="hint">Annual leave rises by 1 day per year of service. This caps that growth — blank means it keeps rising for ever (someone with 20 years on a base of 14 would reach 33).</span></div>
+      <div class="field" style="max-width:260px"><label>Credit annual leave</label>
+        <select data-f="org.accrualMode">
+          <option value="annual" ${oPick("accrualMode") === "annual" ? "selected" : ""}>All at once (1 Jan)</option>
+          <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
+        </select>
+        <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>` : ""}
       ${db.orgProrate ? `<div class="field" style="max-width:240px"><label>Cap pro-rated annual leave at</label><input type="number" step="0.5" min="0" data-f="org.prorateCap" value="${oPick("prorateCap")}" placeholder="no cap">
         <span class="hint">Most a new joiner gets in their first (partial) year. Blank = no cap.</span></div>` : ""}
     </div>
     <p class="hint" style="margin:2px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
-  <div class="card"><h3>Public holidays — ${thisYear.length} in ${y}</h3>
-    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> (rows marked <span class="meta">· auto</span>); you can still <b>add, edit (✎) or remove (✕)</b> any date by hand.</p>
-    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
+  <div class="card"><h3>Public holidays — Total ${thisYear.length} Days in ${y}</h3>
+    ${phLastCheckLine()}
+    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> — the <b>Source</b> column shows whether each date came from the sync or was added by hand, and when it last changed. You can <b>add, edit (✎) or remove (✕)</b> any date yourself, and <b>the sync will never rename or delete a date you added</b>.</p>
+    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Source</th><th></th></tr></thead><tbody>
       ${phSorted.map(p => `<tr>
         <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td>
-        <td>${esc(db.phNames[p] || "—")}${db.phSource && db.phSource[p] === "data.gov.sg" ? ` <span class="meta" style="font-size:11px">· auto</span>` : ""}</td>
+        <td>${esc(db.phNames[p] || "—")}</td>
+        <td class="meta" style="white-space:nowrap">${phSourceCell(p)}</td>
         <td style="white-space:nowrap">
           <button class="btn ghost" style="padding:3px 9px" data-act="phedit" data-d="${p}" data-n="${esc(db.phNames[p] || "")}" title="Edit">✎</button>
           <button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}" title="Remove">✕</button></td></tr>`).join("")}
@@ -1613,10 +1821,47 @@ function hrBalances() {
       ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num">${fmtD(b.avail)} / ${fmtD(b.granted)}</td>`; }).join("")}
     </tr>`).join("")}</tbody></table></div></div>`;
 }
+/* What this adjustment does to the balance, shown before it is made. Without this
+   there was nothing on screen to deduct against. */
+function ledBalAfter(f) {
+  if (!f || !f.empId || !f.type) return null;
+  const b = bal(f.empId, f.type);
+  const before = b.avail;
+  const delta = Number(f.delta) || 0;
+  return { before, delta, after: before + delta };
+}
+function ledGoesNegative(f) { const r = ledBalAfter(f); return !!(r && r.after < 0); }
+
+function ledPreview(f) {
+  const r = ledBalAfter(f);
+  if (!r || !Number(f.delta)) return "";
+  const e = emp(f.empId), t = lt(f.type);
+  const neg = r.after < 0;
+  return `<div class="callout ${neg ? "warn" : "acc"}" style="margin:10px 0">
+    <b>${esc((e || {}).name || "")}</b> · ${esc((t || {}).en || f.type)}:
+    <b>${fmtD(r.before)}</b> now → <b>${fmtD(r.after)}</b> after
+    (${r.delta > 0 ? "+" : ""}${fmtD(r.delta)})
+    ${neg ? `<br>⚠ <b>This takes the balance below zero.</b> That is allowed — for clawing back
+      an over-grant, or where leave is earned monthly — but it is rarely what you meant.
+      <div class="actions" style="margin-top:6px"><label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" data-act="lednegok" ${vp.ledNegOk ? "checked" : ""}> Yes, allow a negative balance
+      </label></div>` : ""}</div>`;
+}
+
 function hrLedger() {
   const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
   vp.ledForm = f;
-  const recent = db.ledger.slice().sort((a, b) => b.ts - a.ts).slice(0, 30);
+  // Every entry, not the newest 30. The old `.slice(0, 30)` ran BEFORE the column
+  // sort below, so sorting by Employee or Days silently re-ordered just those 30 —
+  // the top row was not the largest number or the first name. A truncated list is
+  // one thing; a wrong answer that looks sorted is another.
+  const q = (vp.ledSearch || "").toLowerCase();
+  const recent = db.ledger.slice().filter(l => {
+    if (!q) return true;
+    const e = emp(l.empId), t = lt(l.type);
+    return (e && e.name.toLowerCase().includes(q)) || (t && t.en.toLowerCase().includes(q))
+        || (l.reason || "").toLowerCase().includes(q);
+  });
   const s = vp.ledSort || { col: "ts", dir: -1 };
   const keyOf = { ts: l => l.ts, emp: l => ((emp(l.empId) || {}).name || "").toLowerCase(),
     type: l => ((lt(l.type) || {}).en || l.type || "").toLowerCase(), delta: l => l.delta,
@@ -1632,9 +1877,14 @@ function hrLedger() {
       <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
     </div>
     <div class="field"><label>Reason<span class="req">*</span></label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
-    <button class="btn" data-act="ledadd">Add to ledger</button>
+    ${ledPreview(f)}
+    <button class="btn" data-act="ledadd" ${ledGoesNegative(f) && !vp.ledNegOk ? "disabled" : ""}>Add to ledger</button>
   </div>
-  <div class="card"><h3>Recent adjustments (last 30) — a balance is always the sum of all its entries</h3>
+  <div class="card"><h3>All adjustments (${recent.length}${q ? ` of ${db.ledger.length}` : ""}) — a balance is always the sum of all its entries</h3>
+    <div class="frow" style="align-items:flex-end;margin-bottom:8px">
+      <div class="field" style="max-width:280px"><label>Search</label>
+        <input type="search" id="ledsearch" data-f="ledSearch" value="${esc(vp.ledSearch || "")}" placeholder="Name, leave type or reason…"></div>
+    </div>
     <p class="meta" style="margin:0 0 8px">Click any column heading to sort; click again to reverse.</p>
     <div class="tablebox"><table><thead><tr>${H("ts", "Time", "num")}${H("emp", "Employee")}${H("type", "Type")}${H("delta", "±Days", "num")}${H("reason", "Reason")}${H("by", "By")}</tr></thead><tbody>
     ${led.map(l => `<tr><td class="num meta">${fmtTs(l.ts)}</td><td>${esc((emp(l.empId) || {}).name || "—")}</td><td>${esc((lt(l.type) || {}).en || l.type)}</td>
@@ -1653,6 +1903,66 @@ async function doLogin() {
   if (error) return toast(error.message || "We couldn't sign you in. Please check your email and password.");
   await afterAuth();
 }
+let resetTimer = null;
+function startResetCooldown() {
+  clearInterval(resetTimer);
+  resetTimer = setInterval(() => {
+    if (!vp.reset || vp.reset.step !== "code") { clearInterval(resetTimer); return; }
+    vp.reset.cooldown = Math.max(0, (vp.reset.cooldown || 0) - 1);
+    // Update the button in place. A full render() here would blow away the code the
+    // employee is halfway through typing, once every second.
+    const btn = document.querySelector('[data-act="resetresend"]');
+    if (btn) {
+      btn.disabled = vp.reset.cooldown > 0;
+      btn.textContent = vp.reset.cooldown > 0 ? `resend in ${vp.reset.cooldown}s` : "send another";
+    }
+    if (vp.reset.cooldown === 0) clearInterval(resetTimer);
+  }, 1000);
+}
+
+/* ---- Self-service password reset (email OTP) ----
+   Always answer identically whether or not the address exists: revealing that is
+   free reconnaissance for anyone probing the sign-in page. */
+const RESET_SENT_MSG = "If that email is registered, we've sent a 6-digit code.";
+
+async function sendResetCode(email) {
+  // shouldCreateUser:false is NOT optional — the default is true, which would let
+  // anyone type any address and mint themselves an account on the HR system.
+  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+  if (error && /rate|limit|seconds/i.test(error.message || "")) {
+    toast("Please wait a moment before asking for another code");
+    return false;
+  }
+  // Any other error (including "user not found") is swallowed on purpose.
+  toast(RESET_SENT_MSG);
+  return true;
+}
+
+async function verifyResetCode(email, token) {
+  const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+  if (error) { toast("That code isn't right, or it has expired. Try again or send a new one."); return false; }
+  return true;
+}
+
+async function setNewPassword(p1, p2) {
+  if (p1.length < 8) { toast("Please use at least 8 characters"); return false; }
+  if (p1 !== p2) { toast("The two passwords don't match"); return false; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if (error) { toast(error.message || "Could not set the password"); return false; }
+  notifyPasswordChanged();   // fire-and-forget; must never block the change
+  return true;
+}
+
+/* Tell the account holder their password changed. Supabase sends nothing itself, so
+   without this an unauthorised reset would be completely silent to the real person. */
+function notifyPasswordChanged() {
+  try {
+    sb.functions.invoke("send-notification", {
+      body: { kind: "password_changed", at: new Date().toISOString() }
+    }).catch(() => {});
+  } catch (e) { /* never let a notification failure strand someone mid-reset */ }
+}
+
 async function afterAuth() {
   const linked = await loadMe();
   if (!linked) { render(); return; } // unlinked account message
@@ -1757,8 +2067,8 @@ document.addEventListener("click", async ev => {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14 } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14 } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: null } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: e.worksSat ?? null } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -1826,7 +2136,22 @@ document.addEventListener("click", async ev => {
         if (login && login.password) { vp.loginResult = { name: nm, email: row.email, password: login.password }; render(); }
         else toast(addedMsg + " Their login wasn't auto-created" + (login && login.error ? " (" + login.error + ")" : "") + " — open their Edit form and click ‘Create login’.");
       } else {
-        const { error } = await sb.from("employees").update(row).eq("id", m.id);
+        if (db.hasSat) row.works_saturday = f.worksSat ?? null;   // column added by v12
+      // The profile and the login are linked by auth_user_id, not by matching email
+      // text — so changing employees.email alone leaves the person still signing in
+      // with the OLD address, and unable to self-reset with the new one.
+      const prev = emp(m.id);
+      const emailChanged = prev && prev.email && prev.email.toLowerCase() !== row.email.toLowerCase();
+      const { error } = await sb.from("employees").update(row).eq("id", m.id);
+      if (!error && emailChanged && prev.hasLogin) {
+        const r = await sb.functions.invoke("create-login", { body: { action: "change-email", emp_id: m.id, email: row.email } });
+        const failed = r.error || (r.data && r.data.error);
+        if (failed) {
+          // Surface it — a half-changed identity is worse than a failed save, because
+          // it is invisible until the person next tries to sign in or reset.
+          toast("Profile saved, but the sign-in email could not be updated — they must still use the old address. Please tell HR/IT.");
+        }
+      }
         if (error) return rpcErr(error);
         delete vp.empModal; await reload(); toast("Saved " + f.name.trim() + "'s profile");
       }
@@ -1901,6 +2226,54 @@ document.addEventListener("click", async ev => {
     }
     case "withdraw": { if (await withdrawApp(id)) { delete vp.detail; render(); toast("Application withdrawn"); } break; }
     case "edit": vp = { editId: id }; view = "apply"; render(); break;
+    // Cancelling refunds the whole application, so anyone who had already taken part
+    // of it must re-book those days. Pre-fill the form rather than compute a partial
+    // refund: the system does no clever arithmetic, the human states the real dates.
+    case "resetopen": vp.reset = { step: "email", email: "" }; render(); break;
+    case "resetback": delete vp.reset; render(); break;
+
+    case "resetsend": case "resetresend": {
+      const email = (document.getElementById("rs-email")?.value || vp.reset?.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast("Please enter a valid work email");
+      if (!(await sendResetCode(email))) return;
+      vp.reset = { step: "code", email, cooldown: 60 };
+      render();
+      startResetCooldown();
+      break;
+    }
+
+    case "resetverify": {
+      const code = (document.getElementById("rs-code")?.value || "").trim();
+      if (!/^\d{6}$/.test(code)) return toast("Enter the 6-digit code from the email");
+      if (!(await verifyResetCode(vp.reset.email, code))) return;
+      // Verifying signs them in — the same trust model as any reset link. Setting a
+      // password is the next step, not a gate (see the plan: no forced sign-out).
+      vp.reset = { step: "newpw", email: vp.reset.email };
+      render();
+      break;
+    }
+
+    case "resetsave": {
+      const p1 = document.getElementById("rs-p1")?.value || "";
+      const p2 = document.getElementById("rs-p2")?.value || "";
+      if (!(await setNewPassword(p1, p2))) return;
+      delete vp.reset;
+      toast("Password updated — you're signed in");
+      await afterAuth();
+      break;
+    }
+
+    case "reapply": {
+      const a = db.applications.find(x => x.id === id);
+      if (!a) return;
+      vp.form = { type: a.type, start: a.start, end: a.end,
+        half: Object.fromEntries((a.halfDays || []).map(x => [x.d, x.part])),
+        reason: a.reason || "", att: a.att || "" };
+      delete vp.editId; delete vp.detail;
+      view = "apply"; render();
+      toast("Set the end date to your last day away, then submit");
+      break;
+    }
     case "cancelreq": {
       if (await requestCancel(id)) {
         delete vp.detail;
@@ -1914,16 +2287,19 @@ document.addEventListener("click", async ev => {
     case "ledsort": {
       const c = el.dataset.col, s = vp.ledSort || { col: "ts", dir: -1 };
       if (s.col === c) s.dir = -s.dir; else { s.col = c; s.dir = (c === "ts" || c === "delta") ? -1 : 1; }
-      vp.ledSort = s; render(); break;
+      vp.ledSort = s; rerender(); break;
     }
     case "ledadd": {
       const f = vp.ledForm;
       if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
       if (!f.delta) return toast("Please enter a number of days that isn't zero.");
+      if (ledGoesNegative(f) && !vp.ledNegOk) return toast("This would take the balance below zero — tick the box to confirm.");
       const { error } = await sb.from("leave_ledger").insert({ emp_id: f.empId, leave_type: f.type,
         delta_days: Number(f.delta), reason: "Manual adjustment: " + f.reason.trim(), created_by: me.id });
       if (error) return rpcErr(error);
-      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" }; await reload(); toast("Adjustment saved.");
+      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" };
+      vp.ledNegOk = false;
+      await reload(); toast("Adjustment saved.");
       break;
     }
     case "phadd": {
@@ -1932,7 +2308,7 @@ document.addEventListener("click", async ev => {
       if (!d) return toast("Pick a date first");
       if (!nm) return toast("Please type the holiday's name (e.g. Vesak Day)");
       if (db.publicHolidays.includes(d)) return toast("Already in the list");
-      const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm, source: "manual" });
+      const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
       if (error) return rpcErr(error);
       await reload(); toast("Holiday added");
       break;
@@ -1946,11 +2322,11 @@ document.addEventListener("click", async ev => {
       if (!nm) return toast("Please type the holiday's name");
       if (d !== m.orig && db.publicHolidays.includes(d)) return toast("That date is already in the list");
       if (m.orig && d === m.orig) {
-        const { error } = await sb.from("public_holidays").update({ name: nm, source: "manual", synced_at: null }).eq("holiday", m.orig);
+        const { error } = await sb.from("public_holidays").update(Object.assign({ name: nm, source: "manual", synced_at: null }, phStamp())).eq("holiday", m.orig);
         if (error) return rpcErr(error);
       } else {
         if (m.orig) { const { error: de } = await sb.from("public_holidays").delete().eq("holiday", m.orig); if (de) return rpcErr(de); }
-        const { error } = await sb.from("public_holidays").insert({ holiday: d, name: nm, source: "manual" });
+        const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
         if (error) return rpcErr(error);
       }
       delete vp.phModal; await reload(); toast(m.orig ? "Holiday updated" : "Holiday added");
@@ -2025,6 +2401,18 @@ document.addEventListener("change", async ev => {
     setType(el.dataset.c, "half", el.checked); rerender(); return;
   }
   if (el.dataset.act === "typeattach") { setType(el.dataset.c, "mc", el.checked); rerender(); return; }
+  // Department default for Saturday working. Saved immediately, like the leave-type
+  // ticks above. The per-employee override (null = follow team) resolves at read time.
+  if (el.dataset.act === "lednegok") { vp.ledNegOk = el.checked; rerender(); return; }
+  if (el.dataset.act === "deptsat") {
+    const name = el.dataset.name, on = el.checked;
+    const { error } = await sb.from("departments").update({ works_saturday: on }).eq("name", name);
+    if (error) { el.checked = !on; return toast(error.message || "Could not save — has the v12 database update been run?"); }
+    db.deptSat = Object.assign({}, db.deptSat, { [name]: on });
+    keepScrollOnce = true; render();
+    toast(`${name}: Saturday is now ${on ? "a working day" : "a non-working day"}`);
+    return;
+  }
   // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
   if (el.dataset.act === "deptname") {
     const oldName = el.dataset.old, newName = el.value.trim();
@@ -2041,7 +2429,12 @@ document.addEventListener("change", async ev => {
   if (!f) return;
   if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
   if (f === "empDept") { vp.empDept = el.value; render(); return; }
-  if (f.startsWith("led.")) { vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
+  if (f.startsWith("led.")) {
+    vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+    if (f === "led.empId" || f === "led.type") vp.ledNegOk = false;   // new target, re-confirm
+    rerender();   // keeps focus/caret; the balance preview must track what you type
+    return;
+  }
   if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); rerender(); return; }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
@@ -2050,6 +2443,10 @@ document.addEventListener("change", async ev => {
       if (iso) { vp.empModal.form.joinDate = iso; vp.empModal.form.joinDMY = fmtDMY(iso); render(); }
       else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
       return;
+    }
+    if (k === "worksSat") {   // "" = follow team; keep null distinct from an explicit false
+      vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : null;
+      render(); return;
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
     if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
@@ -2086,7 +2483,7 @@ document.addEventListener("input", ev => {
   const el = ev.target;
   if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
   const f = el.dataset.f || "";
-  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch" };
+  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch", ledSearch: "ledsearch" };
   if (liveSearch[f]) {
     // Live filter; re-render then restore focus/caret so typing isn't interrupted
     vp[f] = el.value; render();
@@ -2097,6 +2494,11 @@ document.addEventListener("input", ev => {
   // Sync modal text fields live so the save click (which blurs the field) never loses input
   if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") {
     vp.empModal.form[f.slice(3)] = el.value;
+    // The joining-leave callout is computed from these two. Without a re-render it
+    // kept showing the figure from when the modal opened — telling HR "6 days" while
+    // the database correctly granted 6.5. A screen that disagrees with the data is
+    // worse than a visible error. rerender() keeps the caret where it is.
+    if (f === "em.annualBase" || f === "em.joinDMY" || f === "em.joinDate") rerender();
     if (f === "em.email") vp.empModal.emailTouched = true;
     if (f === "em.name" && vp.empModal.mode === "add" && !vp.empModal.emailTouched) {
       // Auto-suggest email from the name (ASCII only — Chinese names are typed manually)
