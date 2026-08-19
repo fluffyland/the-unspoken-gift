@@ -113,6 +113,11 @@ There are two different things, depending on whether it's been approved yet:
 
 Both are in the popup — open the application from **My applications** first.
 
+**If you have no approver** (the Managing Director, or anyone whose leave is approved
+automatically), there is nobody to send the request to — so the cancellation is
+**confirmed on the spot** and the days come straight back. The timeline records it as
+*"Cancelled automatically — no approver needed"*.
+
 ### Cancelling leave you've already started
 
 You can. Cancelling gives you back **the whole application's days** — including any

@@ -311,7 +311,8 @@ const mapAction = c => ({
   step_approved: "Approved (a level)", step_approved_overlap_ack: "Approved (overlap acknowledged)",
   approved: "Approved", approved_overlap_ack: "Approved (overlap acknowledged)",
   rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", auto_approved: "Auto-approved",
-  cancel_requested: "Cancellation requested", cancelled: "Cancellation confirmed", cancel_denied: "Cancellation declined"
+  cancel_requested: "Cancellation requested", cancelled: "Cancellation confirmed", cancel_denied: "Cancellation declined",
+  auto_cancelled: "Cancelled automatically — no approver needed"
 }[c] || c);
 
 async function loadAll() {
@@ -822,7 +823,13 @@ function logGuardFailure(appId, msg) {
 /* ============ Queries ============ */
 function inbox(u) {
   const todo = db.applications.filter(a => a.status === "pending" && a.steps.length && a.steps[a.cur].approverId === u.id);
-  const cancels = db.applications.filter(a => a.status === "cancel_requested" && a.steps.length && a.steps[0].approverId === u.id);
+  // Cancellation requests go to the 1st-level approver. An application with NO approver has
+  // nobody to route to — before SQL v15 those sat in this state forever, invisible to everyone,
+  // because this filter requires steps[0]. v15 confirms them at request time so they should
+  // never appear, but route any that do to HR rather than letting them vanish again.
+  const cancels = db.applications.filter(a => a.status === "cancel_requested" &&
+    (a.steps.length ? a.steps[0].approverId === u.id
+                    : (u.role === "hr" || u.role === "admin")));
   return { todo, cancels, count: todo.length + cancels.length };
 }
 /* "Department" for the overlap warning = the applicant's immediate team:
@@ -1426,7 +1433,12 @@ function detailModal(id) {
       </dl>
       ${own && !canCancel && !canReapply && ["cancel_requested","cancelled","rejected","withdrawn"].includes(a.status)
         ? `<p class="meta" style="margin:6px 0 0">${{
-            cancel_requested: "You've asked to cancel this. It's with your approver — nothing more to do for now.",
+            // A no-approver application is confirmed the moment it is requested (SQL v15), so it
+            // never rests in this state. Keep the fallback wording honest anyway: promising an
+            // approver to someone who has none is exactly the bug this replaced.
+            cancel_requested: a.steps.length
+              ? "You've asked to cancel this. It's with your approver — nothing more to do for now."
+              : "You've asked to cancel this, but no approver is set on it. Contact HR — they can confirm the cancellation.",
             cancelled: "This leave was cancelled and the days were returned to your balance.",
             rejected: "This application was declined. Apply again with different dates if you still need the leave.",
             withdrawn: "You withdrew this application before it was decided."
