@@ -53,6 +53,16 @@ HR Console has six tabs:
 Fill in name, work email, hire date (`DD/MM/YYYY`) and job title. Set **approver 1**;
 tick two-level approval and set **approver 2** where a second sign-off is needed.
 
+**The email builds itself.** Type the name and the part before the `@` fills in from
+it — `Lee Jian Wei` → `leejianwei`. Beside the box, greyed out, sits your company
+domain, and it can't be typed over. Edit the prefix freely; once you do, it stops
+following the name.
+
+> The domain comes from **Company settings → Company details → Email domain**. If that
+> box is empty there is nothing to lock to, so the form falls back to a plain email
+> field and you type the whole address. Fill the domain in once and the auto-fill works
+> for every hire after it.
+
 **Four fields start on "— Select —" and must be chosen.** They used to arrive
 pre-filled, which meant clicking through filed someone silently:
 
@@ -246,10 +256,22 @@ Public holidays are still excluded for everyone, including on a Saturday.
 
 **HR Console → Company settings → Public holidays**
 
+**One year at a time.** The heading shows the year you're looking at, with **◀** and
+**▶** either side of it — ◀ for the earlier year, ▶ for the later one, the same as the
+Calendar tab. The count in the heading always describes the rows underneath it, so 2026
+and 2027 can never be mixed together in one list.
+
 The list auto-syncs monthly from MOM's official data, and there's a **🔄 Sync now**
 button if you don't want to wait. It tells you exactly what changed — how many dates
 were added, renamed or removed, and how many of your own manual entries also appear in
 MOM's list and were kept as yours. If it can't run, it says so; it never fails quietly.
+
+> **⚠️ Automatic updates are not switched on for this system yet.** Press **🔄 Sync now**
+> and it says so in as many words. Until someone switches it on, add each year's dates
+> with **+ Add holiday**, or paste
+> [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into
+> Supabase → SQL Editor, which loads all 12 of MOM's 2027 dates in one go and leaves
+> 2026 untouched.
 
 **Where the data comes from:** data.gov.sg collection 691, published by the **Ministry
 of Manpower** — their own machine-readable feed, not a copy of the mom.gov.sg web page

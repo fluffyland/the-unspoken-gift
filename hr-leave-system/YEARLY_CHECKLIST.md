@@ -41,8 +41,12 @@ loses a day.
 
 **HR Console → Company settings → Public holidays**
 
-The heading reads **"Public holidays — Total N Days in YYYY"**, and that N is counted
-from the rows on screen, so it cannot drift out of step with the list.
+The heading reads **"◀ Public holidays — Total N Days in YYYY ▶"**. Use the arrows to
+move between years — ◀ earlier, ▶ later. Only one year is listed at a time, and N is
+counted from the rows on screen, so the count cannot drift out of step with the list.
+
+**Check next year with ▶.** That is the year that will be missing if the sync has
+stopped, and the one you need before anyone books January leave.
 
 The **Source** column tells you where each date came from and when it last changed —
 🔄 *Sync* with the last sync time, or ✋ *Manual* with when you added it.
@@ -104,6 +108,13 @@ limit 5;
 **🔄 Sync now**. It reports what changed — added, renamed, removed, and how many of
 your manual dates were kept as yours — or says plainly why it couldn't run. Re-check
 1b afterwards and you're done.
+
+> **As of August 2026 this button cannot work yet** — it says *"Holiday sync isn't
+> switched on yet"*, because the updater has never been deployed to this Supabase
+> project. That is a one-off setup job, not a fault in your data. Until it's done,
+> load each year by hand: **+ Add holiday**, or paste
+> [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into the SQL
+> Editor for 2027. Both routes are as correct as the sync; they just aren't automatic.
 
 **If you'd rather do it from outside the app**, replace `<project-ref>`:
 

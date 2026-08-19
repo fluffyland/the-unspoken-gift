@@ -29,6 +29,15 @@ one/two-level approval state machine.
   report what you actually observed.
 - They notice UI sloppiness (clumped text, Chinese leftovers) and call it
   out hard. Test the UI consequences of every change.
+- **When they give you a sentence, ship that sentence.** They have twice supplied
+  exact wording and twice got something "improved" back, with the reply *"dont add
+  your own word if i given you some sentence just follow because you always make it
+  worst"*. If their text needs a change to fit (a template already prefixing ⚠, a
+  tense that would contradict the line above it), make the template fit their words —
+  or use a shorter subset of their own words. Never substitute your own.
+- **They hate jargon in user-facing copy.** "Edge Function", "deployed",
+  "sync-holidays" in a dialog got *"what the fuck is this"*. Error messages must say
+  what happened, what it means, and what to do — in words an HR clerk uses.
 - Preferred password for everything: default `Ssu123@` (their choice).
 
 ## 3. Architecture (two repos + one Supabase project)
@@ -157,7 +166,7 @@ unless the user wants the cap feature.
 | Function | State |
 |---|---|
 | `create-login` | ✅ deployed, LATEST version (probe: returns "Only HR can manage logins.") — handles create / `action:"reset"` / `action:"remove"`, default pw `Ssu123@`, Owner-target protection |
-| `sync-holidays` | written in repo; deployment to Supabase **unverified** — pg_cron schedule also unverified |
+| `sync-holidays` | ❌ **NOT deployed** — confirmed 2026-08-19: pressing 🔄 Sync now returns *"Failed to send a request to the Edge Function"*. The DB half (`apply_holiday_sync`, v13) and the audit log both exist; only the function is missing. pg_cron schedule therefore also dead |
 | `send-notification` | written in repo; **NOT set up** (needs Resend key + DB webhook; email flow never configured) |
 
 **Auth model**: Supabase Auth users are linked to `employees.auth_user_id`
@@ -187,6 +196,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `supabase/migration_app_v1..v15.sql` | incremental history. Applied on the live database: **v1–v15, including v9** (v9 was skipped for a long time and only went in with v14 on 2026-08-19 — see below) |
 | `supabase/bootstrap_owner.sql` | create first Owner (edit name/email inside) |
 | `supabase/reset_all_data.sql` | wipe all people/records/logins, keep types+holidays |
+| `supabase/insert_holidays_2027.sql` | MOM's 12 public holidays for 2027, for pasting into the SQL Editor while `sync-holidays` is undeployed |
 | `supabase/reset_all_passwords.sql` | set every login's password to `Ssu123@` |
 | `supabase/delete_employee_fully.sql` / `clear_employee_records.sql` | standalone SQL-editor equivalents of the app's Delete/Clear buttons (needed because SQL editor runs as postgres where `is_hr()` is false) |
 | `supabase/seed.sql` | demo data (early phase; superseded by real usage) |
@@ -339,15 +349,32 @@ SOP manual + bootstrap/reset scripts.
 - **Storage orphans**: deleting/clearing an employee does NOT remove their
   uploaded MC files from the `attachments` bucket. Manual cleanup; a cleanup
   routine was offered, not requested.
-- **sync-holidays has never actually run against this project.** Every
-  `public_holidays` row is `manual`. The function and the v13 reconciliation are
-  written and tested; nothing has invoked them. A **🔄 Sync now** button now exists in
-  Company settings — pressing it is both the fix and the test, and it reports failure
-  plainly if the function was never deployed.
+- **sync-holidays is not deployed — this is now confirmed, not suspected.** The user
+  pressed 🔄 Sync now on 2026-08-19 and got *"Failed to send a request to the Edge
+  Function"*. Every `public_holidays` row is still `manual`. The function and the v13
+  reconciliation are written and tested; nothing has ever invoked them.
+  The failure dialog now distinguishes **"isn't switched on yet"** (a setup job) from
+  **"didn't finish"** (a passing fault), because reporting both as one message told the
+  reader nothing they could act on.
+  Stop-gap shipped instead: **`supabase/insert_holidays_2027.sql`** — MOM's 12 dates for
+  2027, `source = 'data.gov.sg'` so a future real sync recognises them as its own,
+  `on conflict do nothing` so 2026 is untouched. Verified on a throwaway Postgres:
+  12 inserted, 2026 still 14, idempotent on a second run.
+  To actually fix it: Supabase Dashboard → Edge Functions → deploy
+  `supabase/functions/sync-holidays/index.ts` (127 lines, pasteable), then re-check
+  `cron.job` for `sync-holidays-monthly`.
   Data source, verified 2026-08: data.gov.sg collection 691, metadata naming the
   Ministry of Manpower as `sources` and `managedBy`. **2026 → 14 dates** (matching
-  what is already in the system), **2027 → 12 dates, already published** — so a first
-  sync should add 12 and leave 2026 alone. pg_cron scheduling still unverified.
+  what is already in the system), **2027 → 12 dates, already published**.
+- **A modal that dismisses on the backdrop dismisses on its own body too.** The confirm
+  and result dialogs put `data-act` on `.modalback`; the click delegator resolves
+  `ev.target.closest("[data-act]")`, and the inner `.modal` carried no `data-act` — so a
+  click on the dialog's own heading or text walked past it and hit the backdrop's close
+  action. A confirmation dialog that vanishes when you click it is worse than no
+  dialog. The guard is now keyed on `el.classList.contains("modalback")` rather than on
+  the action name, so every future modal inherits it; confirm/result carry no backdrop
+  action at all. `data-stop="1"` was never read by any JS — it looked like protection
+  and was decoration.
 - **Email notifications**: never configured (needs Resend + webhook).
 - **Offered, user never confirmed**: "Login ✓/✗" column in the Employees
   list; email-invite flow instead of default password.

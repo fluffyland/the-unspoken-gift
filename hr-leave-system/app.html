@@ -1108,11 +1108,11 @@ function phModal() {
      `act` is an optional follow-on button (e.g. "Apply for days taken"). */
 function confirmModal() {
   const m = vp.confirmModal || {};
-  return `<div class="modalback" data-act="confirmno"><div class="modal" style="max-width:460px" data-stop="1">
+  return `<div class="modalback"><div class="modal" style="max-width:460px">
     <div class="hd"><h3>${esc(m.title || "Are you sure?")}</h3>
       <button class="iconbtn" data-act="confirmno" aria-label="Close">✕</button></div>
     ${(m.lines || []).map(l => `<p style="margin:6px 0">${l}</p>`).join("")}
-    ${m.warn ? `<div class="callout warn" style="margin:10px 0">⚠ ${m.warn}</div>` : ""}
+    ${m.warn ? `<div class="callout warn" style="margin:10px 0">⚠️ ${m.warn}</div>` : ""}
     <div class="actions">
       <button class="btn sec" data-act="confirmno">${esc(m.cancelLabel || "Go back")}</button>
       <button class="btn" data-act="confirmyes">${esc(m.okLabel || "Confirm")}</button>
@@ -1120,7 +1120,7 @@ function confirmModal() {
 }
 function resultModal() {
   const m = vp.resultModal || {};
-  return `<div class="modalback" data-act="resultclose"><div class="modal" style="max-width:460px" data-stop="1">
+  return `<div class="modalback"><div class="modal" style="max-width:460px">
     <div class="hd"><h3>${esc(m.title || "Done")}</h3>
       <button class="iconbtn" data-act="resultclose" aria-label="Close">✕</button></div>
     ${(m.lines || []).map(l => `<p style="margin:6px 0">${l}</p>`).join("")}
@@ -1684,14 +1684,24 @@ function empModal() {
   const adminLocked = !!stored && stored.role === "admin" && !isOwner;
   const roleOpts = (isOwner || f.role === "admin") ? ["employee", "approver", "hr", "admin"] : ["employee", "approver", "hr"];
   const calc = annualCalc(f.joinDate, numOr(f.annualBase, 14));
+  // Blank until someone fills in Company settings -> Email domain. With no domain there
+  // is nothing to lock the address to, so the field falls back to a plain email box
+  // rather than silently inventing "@company.com" the way the auto-fill used to.
+  const emailDomain = ((db.org || {}).emailDomain || "").trim();
   return `<div class="modalback" data-act="closemodal"><div class="modal">
     <div class="hd"><h3>${isAdd ? "Add employee" : "Edit employee — " + esc(f.name)}</h3>
       <button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <div class="frow">
       <div class="field"><label>Name<span class="req">*</span></label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
-      <div class="field"><label>Email<span class="req">*</span></label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
-        ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>`
-                : `<span class="hint">⚠ <b>Changing this will change their login ID</b> — they must sign in with the new address from now on.</span>`}</div>
+      ${(isAdd && emailDomain) ? `<div class="field"><label>Email<span class="req">*</span></label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="text" data-f="em.emailPrefix" value="${esc(f.emailPrefix || "")}" placeholder="name" style="flex:1;min-width:0">
+          <span class="meta" style="white-space:nowrap"><b>@${esc(emailDomain)}</b></span>
+        </div>
+        <span class="hint">The email username is pre-filled based on the employee's full name. You can customize the prefix, but the domain is locked to your company settings (@${esc(emailDomain)}).</span></div>`
+      : `<div class="field"><label>Email<span class="req">*</span></label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@company.com">
+        ${isAdd ? `<span class="hint">Set an <b>Email domain</b> in Company settings and this fills in from the name on its own.</span>`
+                : `<span class="hint">⚠ <b>Changing this will change their login ID</b> — they must sign in with the new address from now on.</span>`}</div>`}
     </div>
     <div class="frow">
       <div class="field"><label>Team / department<span class="req">*</span></label><select data-f="em.dept">
@@ -1863,7 +1873,15 @@ function hrSettings() {
   const y = new Date().getFullYear();
   const gy = numOr(vp.grantYear, y); // HR-selected target year for entitlements (default: current year)
   const phSorted = db.publicHolidays.slice().sort();
-  const thisYear = phSorted.filter(p => p.startsWith(String(y)));
+  // One year on screen at a time. The heading used to count the CURRENT year while the
+  // table listed EVERY year, so the moment next year's dates arrived the count and the
+  // rows disagreed. Both now read the same `phY`, so they cannot drift apart again.
+  const phYears = [...new Set(phSorted.map(p => p.slice(0, 4)).concat(String(y)))].sort();
+  const phY = phYears.includes(String(vp.phYear)) ? String(vp.phYear) : String(y);
+  const phAt = phYears.indexOf(phY);
+  const phPrev = phAt > 0 ? phYears[phAt - 1] : "";
+  const phNext = phAt < phYears.length - 1 ? phYears[phAt + 1] : "";
+  const phRows = phSorted.filter(p => p.startsWith(phY));
   const dow = p => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p + "T00:00:00").getDay()];
   return `<div class="stack">
   <div class="card"><h3>Company details</h3>
@@ -1900,7 +1918,10 @@ function hrSettings() {
     </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
     <p class="hint" style="margin:10px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
-  <div class="card"><h3>Public holidays — Total ${thisYear.length} Days in ${y}</h3>
+  <div class="card"><h3 style="display:flex;align-items:center;gap:8px">
+      <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phPrev}" ${phPrev ? "" : "disabled"} title="${phPrev || "No earlier year"}">◀</button>
+      <span>Public holidays — Total ${phRows.length} Days in ${phY}</span>
+      <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phNext}" ${phNext ? "" : "disabled"} title="${phNext || "No later year"}">▶</button></h3>
     <div class="actions" style="margin:0 0 8px">
       <button class="btn sec" data-act="phsync">🔄 Sync now</button>
       <span class="meta" style="align-self:center">Check MOM's published list straight away, instead of waiting for the monthly run.</span>
@@ -1908,7 +1929,7 @@ function hrSettings() {
     ${phLastCheckLine()}
     <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> — the <b>Source</b> column shows whether each date came from the sync or was added by hand, and when it last changed. You can <b>add, edit (✎) or remove (✕)</b> any date yourself, and <b>the sync will never rename or delete a date you added</b>.</p>
     <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Source</th><th></th></tr></thead><tbody>
-      ${phSorted.map(p => `<tr>
+      ${phRows.map(p => `<tr>
         <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td>
         <td>${esc(db.phNames[p] || "—")}</td>
         <td class="meta" style="white-space:nowrap">${phSourceCell(p)}</td>
@@ -1916,6 +1937,7 @@ function hrSettings() {
           <button class="btn ghost" style="padding:3px 9px" data-act="phedit" data-d="${p}" data-n="${esc(db.phNames[p] || "")}" title="Edit">✎</button>
           <button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}" title="Remove">✕</button></td></tr>`).join("")}
     </tbody></table></div>
+    ${phRows.length ? "" : `<p class="meta" style="margin:8px 0">No holidays recorded for <b>${phY}</b> yet — add them below.</p>`}
     <div class="actions" style="margin-top:10px">
       <input type="text" id="newph" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" style="max-width:150px">
       <input type="text" id="newphname" placeholder="Holiday name, e.g. Vesak Day" style="max-width:240px">
@@ -2122,7 +2144,10 @@ document.addEventListener("click", async ev => {
   const el = ev.target.closest("[data-act]");
   if (!el) return;
   const act = el.dataset.act;
-  if (act === "closemodal" && el.classList.contains("modalback") && (ev.target !== el || !pressOnBackdrop)) return;
+  // Keyed on the ELEMENT, not the action name, so every present and future modal
+  // inherits it. Keyed on "closemodal" it protected only the modals that happened to
+  // use that action, and the confirm dialog closed on a click anywhere in its own body.
+  if (el.classList.contains("modalback") && (ev.target !== el || !pressOnBackdrop)) return;
   if (act === "dologin") { ev.preventDefault(); return doLogin(); }
   return runAction(el);
 });
@@ -2215,7 +2240,7 @@ async function runAction(el) {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: undefined } }; render(); break;
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", emailPrefix: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: undefined } }; render(); break;
     case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
@@ -2476,7 +2501,7 @@ async function runAction(el) {
       vp.confirmModal = {
         title: "Cancel Leave Request?",
         lines: [`Are you sure you want to cancel your leave request for <b>${esc(lt(a.type).en)}</b> from <b>${fmtDate(a.start)}</b> to <b>${fmtDate(a.end)}</b> (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"})?`],
-        warn: started ? `This leave started on <b>${fmtDate(a.start)}</b>. All ${fmtD(a.days)} day${a.days === 1 ? "" : "s"} come back, so you will need to apply again for the days you were actually away.` : "",
+        warn: started ? `All ${fmtD(a.days)} day${a.days === 1 ? "" : "s"} will be fully restored. Please re-submit a new request for any days actually taken.` : "",
         okLabel: "Confirm Cancellation", act: "cancelreqgo", id
       };
       render(); break;
@@ -2497,7 +2522,7 @@ async function runAction(el) {
           ? { title: "Leave Cancelled",
               lines: [`<b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been cancelled.`,
                       `<b>${fmtD(snap.days)}</b> day${snap.days === 1 ? "" : "s"} ${snap.days === 1 ? "has" : "have"} been returned to your balance.`],
-              warn: started ? `<b>You were already away from ${fmtDate(snap.start)}.</b> All ${fmtD(snap.days)} day${snap.days === 1 ? "" : "s"} have been returned, including the days you actually took. Apply again for those days, or your balance will be higher than it should be.` : "",
+              warn: started ? "⚠️ Please re-submit a new request for any days actually taken." : "",
               act: started ? "reapply" : null, actId: id, actLabel: "Apply for days taken" }
           : { title: "Cancellation Request Submitted",
               lines: [`Your request to cancel approved leave <b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been sent to <b>${esc(snap.approver || "your approver")}</b> for review.`,
@@ -2590,11 +2615,21 @@ async function runAction(el) {
       const payload = r && r.data;
       const failed = (r && r.error) || (payload && payload.ok === false);
       if (failed) {
-        const why = (payload && (payload.error || payload.reason)) || (r.error && r.error.message) || "no reason given";
-        vp.resultModal = { title: "Holiday sync failed",
-          lines: ["Couldn't complete the sync, so <b>nothing was changed</b>.",
-                  `Reason: ${esc(String(why))}`],
-          warn: "If this says the function was not found, <b>sync-holidays</b> has not been deployed to this project yet — that is a one-off setup step, not a fault in your data." };
+        const why = String((payload && (payload.error || payload.reason)) || (r.error && r.error.message) || "");
+        // Two genuinely different situations, and telling them apart is the whole point.
+        // "Not switched on" is a one-off setup job; anything else is a passing fault and
+        // pressing the button again tomorrow may well work. Reporting both as one message
+        // (naming an Edge Function, at that) told the reader nothing they could act on.
+        const notSetUp = /failed to send a request|not found|404/i.test(why);
+        vp.resultModal = notSetUp
+          ? { title: "Holiday sync isn't switched on yet",
+              lines: ["<b>Nothing was changed.</b>",
+                      "Automatic holiday updates have not been switched on for this system yet, so there is nothing to check against.",
+                      "Add the dates yourself with <b>+ Add holiday</b> below — that works exactly the same way."] }
+          : { title: "Holiday sync didn't finish",
+              lines: ["<b>Nothing was changed.</b>",
+                      "The check couldn't be completed just now. Try again later, or add the dates yourself with <b>+ Add holiday</b> below.",
+                      why ? `<span class="meta">Details: ${esc(why)}</span>` : ""].filter(Boolean) };
         render(); break;
       }
       const res = (payload && payload.result) || {};
@@ -2608,6 +2643,9 @@ async function runAction(el) {
                 `Last checked: ${fmtTs(Date.now())}`] };
       render(); break;
     }
+    // rerender(), not render(): the holidays card sits well down a long page and render()
+    // scrolls back to the top. Same rule as the search boxes and the sort headers.
+    case "phyear": { if (el.dataset.y) { vp.phYear = el.dataset.y; rerender(); } break; }
     case "phedit": { vp.phModal = { orig: el.dataset.d, date: el.dataset.d, name: el.dataset.n || "" }; render(); break; }
     case "phsave": {
       const m = vp.phModal || {};
@@ -2814,14 +2852,26 @@ document.addEventListener("input", ev => {
     // the database correctly granted 6.5. A screen that disagrees with the data is
     // worse than a visible error. rerender() keeps the caret where it is.
     if (f === "em.annualBase" || f === "em.joinDMY" || f === "em.joinDate") rerender();
+    const emDomain = ((db.org || {}).emailDomain || "").trim();
     if (f === "em.email") vp.empModal.emailTouched = true;
+    // On Add the address is assembled from an editable prefix and the company domain, so
+    // the domain can never be typed wrong. The stored form.email stays the full address —
+    // everything downstream (validation, duplicate check, save) still reads that one field.
+    if (f === "em.emailPrefix") {
+      vp.empModal.emailTouched = true;
+      const pre = el.value.trim().toLowerCase();
+      vp.empModal.form.emailPrefix = pre;
+      vp.empModal.form.email = pre && emDomain ? pre + "@" + emDomain : "";
+    }
     if (f === "em.name" && vp.empModal.mode === "add" && !vp.empModal.emailTouched) {
-      // Auto-suggest email from the name (ASCII only — Chinese names are typed manually)
+      // Auto-suggest from the name (ASCII only — Chinese names are typed manually)
       const slug = el.value.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const auto = slug ? slug + "@" + (db.org?.emailDomain || "company.com") : "";
-      vp.empModal.form.email = auto;
+      vp.empModal.form.emailPrefix = slug;
+      vp.empModal.form.email = slug && emDomain ? slug + "@" + emDomain : "";
+      const pi = document.querySelector('input[data-f="em.emailPrefix"]');
+      if (pi) pi.value = slug;
       const em = document.querySelector('input[data-f="em.email"]');
-      if (em) em.value = auto;
+      if (em) em.value = vp.empModal.form.email;
     }
   }
   if (vp.oilModal && f.startsWith("oil.")) vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;

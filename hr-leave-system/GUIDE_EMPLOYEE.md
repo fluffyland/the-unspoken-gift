@@ -121,18 +121,21 @@ automatically), there is nobody to send the request to — so the cancellation i
 ### Cancelling leave you've already started
 
 You can. Cancelling gives you back **the whole application's days** — including any
-you already took.
+you already took. The screen says so:
 
-So if you came back early, you must **apply again for the days you were actually
-away**, or your balance will be higher than it should be. The system tells you this
-on screen and offers an **Apply for days taken** button, which opens the form already
-filled in with your original dates — change the end date to your last day away and
-submit.
+> ⚠️ All 17 days will be fully restored. Please re-submit a new request for any days
+> actually taken.
+
+So if you came back early, **apply again for the days you were actually away**, or your
+balance will be higher than it should be. There's an **Apply for days taken** button
+that opens the form already filled in with your original dates — change the end date to
+your last day away and submit.
 
 Everything asks before it acts. Cancelling shows you the leave type, the dates and the
 number of days first, with **Go back** and **Confirm Cancellation**; nothing is
-changed until you confirm. Afterwards a message tells you exactly what happened and
-how many days went back into your balance.
+changed until you confirm, and clicking anywhere else won't dismiss the question by
+accident. Afterwards a message tells you exactly what happened and how many days went
+back into your balance.
 
 *Example:* you booked 23 Jul – 20 Aug and came back on the 18th. Cancel it (all 16
 days return), then re-apply for 23 Jul – 17 Aug. Your balance ends up correct.
