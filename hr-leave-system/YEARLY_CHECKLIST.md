@@ -100,7 +100,12 @@ limit 5;
 
 ### 1d. Fixing it
 
-**First, just run it by hand.** Replace `<project-ref>`:
+**First, just press the button.** HR Console → Company settings → Public holidays →
+**🔄 Sync now**. It reports what changed — added, renamed, removed, and how many of
+your manual dates were kept as yours — or says plainly why it couldn't run. Re-check
+1b afterwards and you're done.
+
+**If you'd rather do it from outside the app**, replace `<project-ref>`:
 
 ```
 curl -X POST https://<project-ref>.functions.supabase.co/sync-holidays
@@ -163,7 +168,7 @@ select grant_annual_entitlements(2027);
 
 ### If you switched to monthly accrual, this section works differently
 
-Check which mode you are on: **Company settings → Company defaults → "Credit annual
+Check which mode you are on: **Company settings → Leave policy → "Credit annual
 leave"**. In SQL: `select accrual_mode from org_settings where id = 1;`
 
 **On `monthly`, `grant_annual_entitlements` deliberately does nothing** — it refuses

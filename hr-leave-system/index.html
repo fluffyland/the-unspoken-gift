@@ -608,7 +608,56 @@ function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assig
 function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
 function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
 function ePick(e, k) { const dv = vp.draft && vp.draft.emps[e.id]; return dv && (k in dv) ? dv[k] : ({ approver1: e.approver1, approver2: e.approver2, annualBase: e.annualBase }[k]); }
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "prorateCap" ? (o.prorateCap ?? "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : (o.defaultAnnualBase ?? 14); }
+/* ---- Annual-leave maximum vs individual bases -------------------------------------
+   The company maximum is absolute: `annual_entitlement_for` is `least(base + years,
+   annual_cap)`, so a maximum below somebody's base silently CUTS them at the next
+   grant — set it to 1 and everyone on a base of 14 drops to 1 day. Company policy
+   winning is the intended rule, so the contradiction is refused at entry instead:
+   the maximum may not go below any active employee's base, and no base may go above
+   the maximum. Checked from both sides because either field can create the clash —
+   a maximum saved legitimately today, then a higher base given tomorrow.
+   Equal is fine: maximum == base is the real policy "leave does not grow with service".
+   Validating against the highest EMPLOYEE base, not the Company-defaults figure:
+   that one is only a pre-fill, and bases are edited per person. */
+function highestBase() {
+  const bases = (db.employees || []).filter(e => e.active).map(e => Number(e.annualBase ?? 14));
+  return Math.max(numOr(db.org && db.org.defaultAnnualBase, 14), ...(bases.length ? bases : [0]));
+}
+function whoHasBase(v) {
+  const e = (db.employees || []).find(x => x.active && Number(x.annualBase ?? 14) === Number(v));
+  return e ? e.name : null;
+}
+// Returns an explanation when the STAGED maximum is below someone's base, else "".
+function capBelowBase() {
+  if (!db.orgV14) return "";
+  const raw = oPick("annualCap");
+  if (raw === "" || raw == null) return "";               // blank = no maximum
+  const cap = Number(raw);
+  if (!Number.isFinite(cap)) return "";
+  const floor = highestBase();
+  if (cap >= floor) return "";
+  const who = whoHasBase(floor);
+  return `Maximum annual leave can't be less than ${fmtD(floor)} — ${who ? who + "'s base is " : "an employee's base is "}${fmtD(floor)} days. `
+       + `Lower that base first, or leave this blank for no maximum.`;
+}
+// The company maximum currently in force (staged edits included); null = none.
+function annualCapNow() {
+  if (!db.orgV14) return null;
+  const raw = oPick("annualCap");
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+// Returns an explanation when a proposed employee base exceeds the maximum, else "".
+function baseAboveCap(v) {
+  const cap = annualCapNow();
+  if (cap == null) return "";
+  const b = Number(v);
+  if (!Number.isFinite(b) || b <= cap) return "";
+  return `Annual leave base can't be more than the company maximum of ${fmtD(cap)} days.`;
+}
+
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -650,8 +699,9 @@ async function saveDraft() {
     const domain = ("domain" in d.org) ? d.org.domain : (db.org.emailDomain || "");
     const base = ("base" in d.org) ? d.org.base : (db.org.defaultAnnualBase ?? 14);
     if (!String(company).trim()) { toast("Company name can't be empty."); return false; }
+    const capMsg = capBelowBase();
+    if (capMsg) { toast(capMsg); return false; }
     const patch = { company_name: String(company).trim(), email_domain: String(domain).trim(), default_annual_base: numOr(base, 14) };
-    if (db.orgProrate) { const pc = ("prorateCap" in d.org) ? d.org.prorateCap : db.org.prorateCap; patch.prorate_cap = (pc === "" || pc == null) ? null : numOr(pc, null); }
     if (db.orgV14) {
       const ac = ("annualCap" in d.org) ? d.org.annualCap : db.org.annualCap;
       patch.annual_cap = (ac === "" || ac == null) ? null : numOr(ac, null);
@@ -999,7 +1049,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.oilModal ? oilModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}${vp.confirmModal ? confirmModal() : ""}${vp.resultModal ? resultModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -1035,11 +1085,49 @@ function phModal() {
   const m = vp.phModal || {};
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:420px">
     <div class="hd"><h3>${m.orig ? "Edit public holiday" : "Add public holiday"}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
-    <div class="field"><label>Date<span class="req">*</span></label><input type="date" id="ph-date" value="${esc(m.date || "")}"></div>
+    <div class="field"><label>Date<span class="req">*</span></label>
+      <input type="text" id="ph-date" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${m.date ? fmtDMY(m.date) : ""}">
+      <span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
     <div class="field"><label>Holiday name<span class="req">*</span></label><input type="text" id="ph-name" value="${esc(m.name || "")}" placeholder="e.g. Vesak Day"></div>
     <div class="actions">
       <button class="btn" data-act="phsave">Save</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
+    </div></div></div>`;
+}
+
+/* ---- Confirm / result dialogs -------------------------------------------------------
+   One pair of components, shared by every irreversible-ish action (cancelling leave,
+   withdrawing an application, writing to the ledger). Deliberately NOT window.confirm():
+   its buttons are "OK" and "Cancel", and offering a *Cancel* button to abort a
+   *cancellation* is ambiguous in exactly the place it must not be.
+
+   vp.confirmModal = { title, lines:[…], warn:"", okLabel, cancelLabel, act, id }
+     `act` is a data-act name dispatched when the user confirms, so the real work stays
+     in the existing handlers rather than being duplicated in here.
+   vp.resultModal  = { title, lines:[…], warn:"", act, actLabel }
+     `act` is an optional follow-on button (e.g. "Apply for days taken"). */
+function confirmModal() {
+  const m = vp.confirmModal || {};
+  return `<div class="modalback" data-act="confirmno"><div class="modal" style="max-width:460px" data-stop="1">
+    <div class="hd"><h3>${esc(m.title || "Are you sure?")}</h3>
+      <button class="iconbtn" data-act="confirmno" aria-label="Close">✕</button></div>
+    ${(m.lines || []).map(l => `<p style="margin:6px 0">${l}</p>`).join("")}
+    ${m.warn ? `<div class="callout warn" style="margin:10px 0">⚠ ${m.warn}</div>` : ""}
+    <div class="actions">
+      <button class="btn sec" data-act="confirmno">${esc(m.cancelLabel || "Go back")}</button>
+      <button class="btn" data-act="confirmyes">${esc(m.okLabel || "Confirm")}</button>
+    </div></div></div>`;
+}
+function resultModal() {
+  const m = vp.resultModal || {};
+  return `<div class="modalback" data-act="resultclose"><div class="modal" style="max-width:460px" data-stop="1">
+    <div class="hd"><h3>${esc(m.title || "Done")}</h3>
+      <button class="iconbtn" data-act="resultclose" aria-label="Close">✕</button></div>
+    ${(m.lines || []).map(l => `<p style="margin:6px 0">${l}</p>`).join("")}
+    ${m.warn ? `<div class="callout warn" style="margin:10px 0">${m.warn}</div>` : ""}
+    <div class="actions">
+      ${m.act ? `<button class="btn" data-act="${esc(m.act)}" data-id="${esc(m.actId || "")}">${esc(m.actLabel || "Continue")}</button>` : ""}
+      <button class="btn sec" data-act="resultclose">Close</button>
     </div></div></div>`;
 }
 
@@ -1150,11 +1238,12 @@ function vApply() {
   const days = wdCountHalf(f.start, f.end, half);
   const over = !t.noDeduct && days > b.avail;
   const backdated = f.start < todayStr();
-  // Per-year balance breakdown (the ledger is cumulative across years → filter to this year)
-  const cyNum = new Date().getFullYear();
-  const grantedCY = db.ledger.filter(l => l.empId === me.id && l.type === f.type && l.delta > 0 && new Date(l.ts).getFullYear() === cyNum).reduce((s, l) => s + l.delta, 0);
-  const usedCY = db.applications.filter(a => a.empId === me.id && a.type === f.type && a.status === "approved" && String(a.start).slice(0, 4) === String(cyNum)).reduce((s, a) => s + a.days, 0);
-  const carried = f.type === "annual" && db.annualCarry ? Number(db.annualCarry.carry_in) : 0;
+  // The breakdown comes from bal() and nowhere else. It used to be recomputed here from
+  // different sources — granted from ledger rows dated this year, used from APPROVED
+  // APPLICATIONS only — so every balance adjustment, expiry write-off and correction was
+  // invisible to it. Live symptom: "Available 444 (Current Year: 951 · Used: 0)" on this
+  // page while My leave entitlement correctly showed 951 / 507 / 444 for the same person.
+  // One quantity, one implementation; the two screens now render the same statement.
   const curYear = todayStr().slice(0, 4);
   const yearEnd = curYear + "-12-31";
   const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
@@ -1165,6 +1254,8 @@ function vApply() {
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
     <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
     ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
+    ${(!editing && vp.reapplyFrom) ? `<div class="callout warn" style="margin-bottom:14px"><b>${fmtD(vp.reapplyFrom.days)} day${vp.reapplyFrom.days === 1 ? "" : "s"} went back into your balance</b> when you cancelled ${esc(vp.reapplyFrom.type)} (${vp.reapplyFrom.range}).
+      The dates below are the ones you originally booked — <b>change the end date to your last day away</b> and submit, so you are only charged for the days you actually took.</div>` : ""}
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
         <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}</option>`).join("")}</select>
@@ -1172,7 +1263,7 @@ function vApply() {
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
               : "Recorded for HR's records only — it doesn't use any leave balance.")
-          : `Available Balance: <b>${fmtD(b.avail)}</b> days (Current Year: ${fmtD(grantedCY)}${carried > 0 ? " · Carried Forward: " + fmtD(carried) : ""} · Used: ${fmtD(usedCY)} · Pending: ${fmtD(b.pending)})`}</span>
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (Allowance: ${fmtD(b.granted)} · Used: ${fmtD(b.used)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
@@ -1443,9 +1534,9 @@ function detailModal(id) {
             rejected: "This application was declined. Apply again with different dates if you still need the leave.",
             withdrawn: "You withdrew this application before it was decided."
           }[a.status]}</p>` : ""}
-      ${canReapply ? `<div class="callout warn" style="margin:8px 0">You were refunded <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} in full.
-        If you actually took part of this leave, <b>re-apply for those dates</b> so your balance stays correct —
-        set the end date to your last day away.</div>` : ""}
+      ${canReapply ? `<div class="callout warn" style="margin:8px 0"><b>You were already away from ${fmtDate(a.start)}.</b>
+        All <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} have been returned to your balance, including the days you actually took.
+        Apply again for those days, or your balance will be higher than it should be.</div>` : ""}
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
       ${stepsView(a)}
       <h3 style="margin-top:14px">Timeline</h3>
@@ -1504,7 +1595,15 @@ function annualCalc(joinDate, base) {
     return { days, prorated: true, base, note: `pro-rated — ${monthsLeft} month${monthsLeft === 1 ? "" : "s"} of 12${capped ? `, capped at ${fmtD(Number(cap))}` : ""}` };
   }
   const extra = Math.max(0, y - jy - 1);
-  return { days: base + extra, note: `${base} base + ${extra} for ${y - jy} year${(y - jy) === 1 ? "" : "s"} of service = ${fmtD(base + extra)} day${(base + extra) === 1 ? "" : "s"}` };
+  // The company maximum applies to the long-service branch, exactly as v14's SQL does
+  // (`least(base + years, annual_cap)`). This mirror left it out, so a long-serving hire
+  // previewed 33 while the database would grant 21 — the same "screen disagrees with the
+  // data" fault as the Apply breakdown. Blank/absent maximum = no ceiling.
+  const maxAL = db && db.org && db.org.annualCap != null && db.org.annualCap !== "" ? Number(db.org.annualCap) : null;
+  const raw = base + extra;
+  const days = (maxAL != null && raw > maxAL) ? maxAL : raw;
+  return { days, base, note: `${base} base + ${extra} for ${y - jy} year${(y - jy) === 1 ? "" : "s"} of service = ${fmtD(raw)} day${raw === 1 ? "" : "s"}`
+    + (days !== raw ? `, capped at the company maximum of ${fmtD(maxAL)}` : "") };
 }
 function empMatches(e, q, deptF) {
   if (deptF && deptF !== "all" && e.dept !== deptF) return false;
@@ -1592,10 +1691,11 @@ function empModal() {
       <div class="field"><label>Name<span class="req">*</span></label><input type="text" data-f="em.name" value="${esc(f.name)}"></div>
       <div class="field"><label>Email<span class="req">*</span></label><input type="email" data-f="em.email" value="${esc(f.email)}" placeholder="name@${esc(db.org?.emailDomain || "company.com")}">
         ${isAdd ? `<span class="hint">Auto-fills from the name (edit freely). Domain comes from Company settings.</span>`
-                : `<span class="hint">⚠ You can edit this. It's the address used for notifications and matching — it does <b>not</b> change the email they sign in with (that's managed in your login system: Authentication → Users).</span>`}</div>
+                : `<span class="hint">⚠ <b>Changing this will change their login ID</b> — they must sign in with the new address from now on.</span>`}</div>
     </div>
     <div class="frow">
-      <div class="field"><label>Team / department</label><select data-f="em.dept">
+      <div class="field"><label>Team / department<span class="req">*</span></label><select data-f="em.dept">
+        ${f.dept ? "" : `<option value="" disabled selected>— Select —</option>`}
         ${db.departments.map(d => `<option value="${esc(d)}" ${f.dept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}
         <option value="__new" ${f.dept === "__new" ? "selected" : ""}>＋ New team…</option></select></div>
       ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
@@ -1610,10 +1710,13 @@ function empModal() {
       <div class="field"><label>Mobile</label><input type="text" data-f="em.mobile" value="${esc(f.mobile || "")}" placeholder="e.g. 9885 7721"></div>
     </div>
     <div class="frow">
-      <div class="field"><label>Gender</label><select data-f="em.gender">
+      <div class="field"><label>Gender<span class="req">*</span></label><select data-f="em.gender">
+        ${f.gender ? "" : `<option value="" disabled selected>— Select —</option>`}
         <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
-        <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select></div>
-      <div class="field"><label>Account type</label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
+        <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select>
+        <span class="hint">Decides which leave types apply (maternity / paternity).</span></div>
+      <div class="field"><label>Account type<span class="req">*</span></label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
+        ${f.role ? "" : `<option value="" disabled selected>— Select —</option>`}
         ${roleOpts.map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
         <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : (!isOwner ? "Only an Owner can grant Owner / Super Admin." : "Sets system permissions. Job titles go in Occupation.")}</span></div>
       <div class="field"><label>Hire date</label><input type="text" data-f="em.joinDMY" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${f.joinDate ? fmtDMY(f.joinDate) : esc(f.joinDMY || "")}"><span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
@@ -1625,12 +1728,13 @@ function empModal() {
     </div>
     ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
-    <div class="field" style="max-width:200px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}></div>
-    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays</label>
+    <div class="field" style="max-width:260px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
+      ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}</div>
+    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays<span class="req">*</span></label>
       <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
-        <option value="" ${f.worksSat === null || f.worksSat === undefined ? "selected" : ""}>Follow team${f.dept ? ` (${(db.deptSat || {})[f.dept] ? "yes" : "no"})` : ""}</option>
-        <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes — always</option>
-        <option value="no"  ${f.worksSat === false ? "selected" : ""}>No — never</option>
+        ${(f.worksSat === true || f.worksSat === false) ? "" : `<option value="" disabled selected>— Select —</option>`}
+        <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes</option>
+        <option value="no"  ${f.worksSat === false ? "selected" : ""}>No</option>
       </select>
       <span class="hint">Changes what leave costs: with Saturdays worked, Mon–Sat is 6 days, not 5.</span></div>` : ""}
     ${isAdd ? `<div class="callout acc"><b>Annual leave: ${fmtD(numOr(f.annualBase, 14))} days/year.</b>
@@ -1762,30 +1866,45 @@ function hrSettings() {
   const thisYear = phSorted.filter(p => p.startsWith(String(y)));
   const dow = p => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p + "T00:00:00").getDay()];
   return `<div class="stack">
-  <div class="card"><h3>Company defaults</h3>
-    <div class="callout acc" style="margin:10px 0 14px"><b>Nothing about your company is hard-coded.</b> Set your defaults here once; every form uses them. Teams are managed in the Employees tab, leave allowances in the Leave types tab.</div>
+  <div class="card"><h3>Company details</h3>
+    <div class="callout acc" style="margin:10px 0 14px"><b>Nothing about your company is hard-coded.</b> Set these once; every form uses them. Teams are managed in the Employees tab, leave allowances in the Leave types tab.</div>
     <div class="frow">
       <div class="field" style="max-width:260px"><label>Company name<span class="req">*</span></label><input type="text" id="org-company" data-f="org.company" value="${esc(oPick("company"))}">
         <span class="hint">Shown in the top bar and everywhere else</span></div>
       <div class="field" style="max-width:260px"><label>Email domain</label><input type="text" id="org-domain" data-f="org.domain" value="${esc(oPick("domain"))}" placeholder="company.com">
         <span class="hint">Add employee auto-fills name@this-domain</span></div>
-      <div class="field" style="max-width:200px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
-        <span class="hint">Pre-filled when adding a new employee</span></div>
-      ${db.orgV14 ? `<div class="field" style="max-width:240px"><label>Maximum annual leave</label>
+    </div>
+  </div>
+
+  <div class="card"><h3>Defaults for new employees</h3>
+    <p class="meta" style="margin:4px 0 12px">These only <b>pre-fill the Add employee form</b>. Changing them does not move anyone already in the system.</p>
+    <div class="frow">
+      <div class="field" style="max-width:220px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
+        <span class="hint">Starting days per year for someone new. Each employee's own base can be changed afterwards.</span></div>
+    </div>
+  </div>
+
+  <div class="card"><h3>Leave policy</h3>
+    <p class="meta" style="margin:4px 0 12px">These are <b>rules that apply to every employee</b>, not defaults — they take effect at the next yearly grant.</p>
+    ${db.orgV14 ? `<div class="frow">
+      <div class="field" style="max-width:260px"><label>Maximum annual leave (total)</label>
         <input type="number" step="0.5" min="0" data-f="org.annualCap" value="${oPick("annualCap")}" placeholder="no maximum">
-        <span class="hint">Annual leave rises by 1 day per year of service. This caps that growth — blank means it keeps rising for ever (someone with 20 years on a base of 14 would reach 33).</span></div>
+        <span class="hint">The most annual leave anyone can reach in total, including long-service increases — nobody goes above it. With a base of 14 and a maximum of 21, someone reaches 21 after 7 years and stays there. Blank = no maximum (20 years on a base of 14 would reach 33).</span>
+        ${capBelowBase() ? `<div class="callout warn" style="margin:8px 0 0">⚠ <b>${esc(capBelowBase())}</b></div>` : ""}</div>
       <div class="field" style="max-width:260px"><label>Credit annual leave</label>
         <select data-f="org.accrualMode">
           <option value="annual" ${oPick("accrualMode") === "annual" ? "selected" : ""}>All at once (1 Jan)</option>
           <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
         </select>
-        <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>` : ""}
-      ${db.orgProrate ? `<div class="field" style="max-width:240px"><label>Cap pro-rated annual leave at</label><input type="number" step="0.5" min="0" data-f="org.prorateCap" value="${oPick("prorateCap")}" placeholder="no cap">
-        <span class="hint">Most a new joiner gets in their first (partial) year. Blank = no cap.</span></div>` : ""}
-    </div>
-    <p class="hint" style="margin:2px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
+        <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>
+    </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
+    <p class="hint" style="margin:10px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
   <div class="card"><h3>Public holidays — Total ${thisYear.length} Days in ${y}</h3>
+    <div class="actions" style="margin:0 0 8px">
+      <button class="btn sec" data-act="phsync">🔄 Sync now</button>
+      <span class="meta" style="align-self:center">Check MOM's published list straight away, instead of waiting for the monthly run.</span>
+    </div>
     ${phLastCheckLine()}
     <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> — the <b>Source</b> column shows whether each date came from the sync or was added by hand, and when it last changed. You can <b>add, edit (✎) or remove (✕)</b> any date yourself, and <b>the sync will never rename or delete a date you added</b>.</p>
     <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Source</th><th></th></tr></thead><tbody>
@@ -1798,7 +1917,7 @@ function hrSettings() {
           <button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}" title="Remove">✕</button></td></tr>`).join("")}
     </tbody></table></div>
     <div class="actions" style="margin-top:10px">
-      <input type="date" id="newph" style="max-width:170px">
+      <input type="text" id="newph" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" style="max-width:150px">
       <input type="text" id="newphname" placeholder="Holiday name, e.g. Vesak Day" style="max-width:240px">
       <button class="btn sec" data-act="phadd">+ Add holiday</button>
     </div>
@@ -1847,12 +1966,12 @@ function ledGoesNegative(f) { const r = ledBalAfter(f); return !!(r && r.after <
 function ledPreview(f) {
   const r = ledBalAfter(f);
   if (!r || !Number(f.delta)) return "";
-  const e = emp(f.empId), t = lt(f.type);
   const neg = r.after < 0;
+  const sign = r.delta > 0 ? "+" : "";       // fmtD already carries the minus for deductions
+  const col = r.delta > 0 ? "var(--good)" : "var(--bad)";
   return `<div class="callout ${neg ? "warn" : "acc"}" style="margin:10px 0">
-    <b>${esc((e || {}).name || "")}</b> · ${esc((t || {}).en || f.type)}:
-    <b>${fmtD(r.before)}</b> now → <b>${fmtD(r.after)}</b> after
-    (${r.delta > 0 ? "+" : ""}${fmtD(r.delta)})
+    <div>Adjustment Preview: <b style="color:${col}">${sign}${fmtD(r.delta)} days</b></div>
+    <div style="margin-top:2px">Current: <b>${fmtD(r.before)}</b> days ➔ New Total: <b>${fmtD(r.after)}</b> days</div>
     ${neg ? `<br>⚠ <b>This takes the balance below zero.</b> That is allowed — for clawing back
       an over-grant, or where leave is earned monthly — but it is rarely what you meant.
       <div class="actions" style="margin-top:6px"><label style="display:flex;gap:6px;align-items:center;cursor:pointer">
@@ -1861,7 +1980,11 @@ function ledPreview(f) {
 }
 
 function hrLedger() {
-  const f = vp.ledForm || { empId: (activeEmps()[0] || {}).id || "", type: "oil", delta: 1, reason: "" };
+  // Nothing is pre-selected. It used to open on the first active employee with Off-in-Lieu
+  // and 1 day, so an adjustment saved without touching the dropdowns landed on whoever
+  // sorts first, under the wrong leave type — the mechanism behind "I deducted 2 days of
+  // AL and the balance didn't change". A blank form cannot be wrong by accident.
+  const f = vp.ledForm || { empId: "", type: "", delta: "", reason: "" };
   vp.ledForm = f;
   // Every entry, not the newest 30. The old `.slice(0, 30)` ran BEFORE the column
   // sort below, so sorting by Employee or Days silently re-ordered just those 30 —
@@ -1884,9 +2007,13 @@ function hrLedger() {
   return `<div class="stack"><div class="card"><h3>Add or correct a balance (off-in-lieu, adjustments, expiry)</h3>
     <p class="meta" style="margin:4px 0 10px">Use this to <b>credit off-in-lieu (OIL)</b> when someone works a weekend or public holiday, or to make one-off corrections. Positive = credit days, negative = deduct.</p>
     <div class="frow">
-      <div class="field"><label>Employee</label><select data-f="led.empId">${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
-      <div class="field"><label>Leave type</label><select data-f="led.type">${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
-      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta}" data-f="led.delta"></div>
+      <div class="field"><label>Employee<span class="req">*</span></label><select data-f="led.empId">
+        ${f.empId ? "" : `<option value="" disabled selected>— Select —</option>`}
+        ${activeEmps().map(e => `<option value="${e.id}" ${e.id === f.empId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Leave type<span class="req">*</span></label><select data-f="led.type">
+        ${f.type ? "" : `<option value="" disabled selected>— Select —</option>`}
+        ${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
+      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta === "" || f.delta == null ? "" : f.delta}" data-f="led.delta" placeholder="e.g. 1 or -2"></div>
     </div>
     <div class="field"><label>Reason<span class="req">*</span></label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
     ${ledPreview(f)}
@@ -1994,9 +2121,18 @@ document.addEventListener("mousedown", ev => { pressOnBackdrop = ev.target.class
 document.addEventListener("click", async ev => {
   const el = ev.target.closest("[data-act]");
   if (!el) return;
-  const act = el.dataset.act, id = el.dataset.id;
+  const act = el.dataset.act;
   if (act === "closemodal" && el.classList.contains("modalback") && (ev.target !== el || !pressOnBackdrop)) return;
   if (act === "dologin") { ev.preventDefault(); return doLogin(); }
+  return runAction(el);
+});
+
+/* Every data-act lives here rather than inline in the listener, so the confirm dialog
+   can re-enter the SAME handler with the action it was standing in for. The dialog then
+   stays a pure question and no action logic is duplicated to sit behind it.
+   `el` is either a real element or a synthetic { dataset: {...} }. */
+async function runAction(el) {
+  const act = el.dataset.act, id = el.dataset.id;
   switch (act) {
     case "logout": signOut(); break;
     case "nav": if (draftDirty()) { vp.leaveTo = { kind: "nav", v: el.dataset.v }; render(); break; } view = el.dataset.v; vp = {}; render(); break;
@@ -2013,7 +2149,7 @@ document.addEventListener("click", async ev => {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; delete vp.loginResult; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.oilModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; render(); break;
     case "createlogin": {
       const email = el.dataset.email, eid = el.dataset.id;
       toast("Creating login…");
@@ -2079,8 +2215,8 @@ document.addEventListener("click", async ev => {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: db.departments[0] || "__new", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "F", role: "employee", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: null } }; render(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: e.worksSat ?? null } }; render(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: undefined } }; render(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; render(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -2114,6 +2250,17 @@ document.addEventListener("click", async ev => {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
       if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
       if (f.approver1 && f.approver2 && f.approver2 === f.approver1) return toast("The 2nd level approver must be different from the 1st.");
+      // Complain in the order the fields appear on the form, so the message points at the
+      // first thing the eye lands on. (The post-resolution `if (!dept)` below stays as the
+      // guard for "＋ New team…" with an empty name.)
+      if (!f.dept) return toast("Please choose a team");
+      // Team / gender / account type / Saturdays are decisions, not defaults. They used to
+      // arrive pre-filled (first team alphabetically, Female, Employee), so clicking through
+      // filed someone silently — and gender in particular drives which leave types they are
+      // offered, via eligible(). A pre-filled wrong answer looks answered; nothing to notice.
+      if (!f.gender) return toast("Please choose Female or Male — it decides which leave types apply.");
+      if (!f.role) return toast("Please choose an account type");
+      if (db.hasSat && f.worksSat !== true && f.worksSat !== false) return toast("Please choose whether this person works Saturdays");
       let dept = f.dept;
       if (dept === "__new") {
         dept = (f.newDept || "").trim();
@@ -2124,6 +2271,7 @@ document.addEventListener("click", async ev => {
       }
       if (!dept) return toast("Please choose a team");
       const base = numOr(f.annualBase, 14);
+      { const m = baseAboveCap(base); if (m) return toast(m); }
       const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
         role: f.role, join_date: f.joinDate, approver1: f.approver1 || null,
         approver2: (f.approver1 && f.approver2) ? f.approver2 : null,
@@ -2148,7 +2296,7 @@ document.addEventListener("click", async ev => {
         if (login && login.password) { vp.loginResult = { name: nm, email: row.email, password: login.password }; render(); }
         else toast(addedMsg + " Their login wasn't auto-created" + (login && login.error ? " (" + login.error + ")" : "") + " — open their Edit form and click ‘Create login’.");
       } else {
-        if (db.hasSat) row.works_saturday = f.worksSat ?? null;   // column added by v12
+        if (db.hasSat) row.works_saturday = (f.worksSat === true || f.worksSat === false) ? f.worksSat : null;   // column added by v12
       // The profile and the login are linked by auth_user_id, not by matching email
       // text — so changing employees.email alone leaves the person still signing in
       // with the OLD address, and unable to self-reset with the new one.
@@ -2236,7 +2384,43 @@ document.addEventListener("click", async ev => {
       await reload(); toast("Company settings saved ✓");
       break;
     }
-    case "withdraw": { if (await withdrawApp(id)) { delete vp.detail; render(); toast("Application withdrawn"); } break; }
+    // ---- generic confirm / result dialogs ----
+    case "confirmno": delete vp.confirmModal; render(); break;
+    case "confirmyes": {
+      const m = vp.confirmModal; delete vp.confirmModal;
+      if (!m) { render(); break; }
+      render();
+      // Re-enter the dispatcher with the action the dialog was standing in for, so the
+      // real work lives in one place and the dialog stays a pure question.
+      await runAction({ dataset: { act: m.act, id: m.id || "" } });
+      break;
+    }
+    case "resultclose": delete vp.resultModal; render(); break;
+
+    // ---- withdraw (pending) ----
+    case "withdraw": {
+      const a = db.applications.find(x => x.id === id); if (!a) break;
+      vp.confirmModal = {
+        title: "Withdraw this application?",
+        lines: [`<b>${esc(lt(a.type).en)}</b>, ${fmtRange(a.start, a.end)} (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"}).`,
+                "It will be cancelled and no days are deducted from your balance."],
+        okLabel: "Withdraw application", act: "withdrawgo", id
+      };
+      render(); break;
+    }
+    case "withdrawgo": {
+      const a = db.applications.find(x => x.id === id);
+      const snap = a ? { type: lt(a.type).en, range: fmtRange(a.start, a.end) } : null;
+      if (await withdrawApp(id)) {
+        delete vp.detail;
+        vp.resultModal = { title: "Leave Cancelled",
+          lines: snap ? [`Your request for <b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been cancelled.`,
+                         "No days were deducted from your balance."]
+                      : ["Your request has been cancelled. No days were deducted from your balance."] };
+        render();
+      }
+      break;
+    }
     case "edit": vp = { editId: id }; view = "apply"; render(); break;
     // Cancelling refunds the whole application, so anyone who had already taken part
     // of it must re-book those days. Pre-fill the form rather than compute a partial
@@ -2281,21 +2465,60 @@ document.addEventListener("click", async ev => {
       vp.form = { type: a.type, start: a.start, end: a.end,
         half: Object.fromEntries((a.halfDays || []).map(x => [x.d, x.part])),
         reason: a.reason || "", att: a.att || "" };
-      delete vp.editId; delete vp.detail;
+      delete vp.editId; delete vp.detail; delete vp.resultModal;
+      vp.reapplyFrom = { days: a.days, type: lt(a.type).en, range: fmtRange(a.start, a.end) };
       view = "apply"; render();
-      toast("Set the end date to your last day away, then submit");
       break;
     }
     case "cancelreq": {
+      const a = db.applications.find(x => x.id === id); if (!a) break;
+      const started = a.start <= todayStr();
+      vp.confirmModal = {
+        title: "Cancel Leave Request?",
+        lines: [`Are you sure you want to cancel your leave request for <b>${esc(lt(a.type).en)}</b> from <b>${fmtDate(a.start)}</b> to <b>${fmtDate(a.end)}</b> (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"})?`],
+        warn: started ? `This leave started on <b>${fmtDate(a.start)}</b>. All ${fmtD(a.days)} day${a.days === 1 ? "" : "s"} come back, so you will need to apply again for the days you were actually away.` : "",
+        okLabel: "Confirm Cancellation", act: "cancelreqgo", id
+      };
+      render(); break;
+    }
+    case "cancelreqgo": {
+      const before = db.applications.find(x => x.id === id);
+      if (!before) break;
+      // Snapshot before the reload: after it, the row's status has moved on.
+      const snap = { type: lt(before.type).en, range: fmtRange(before.start, before.end),
+                     days: before.days, start: before.start,
+                     approver: before.steps.length ? ((emp(before.steps[0].approverId) || {}).name || "your approver") : null };
       if (await requestCancel(id)) {
         delete vp.detail;
         const a = db.applications.find(x => x.id === id);
-        render(); toast(a && a.status === "cancelled" ? "Leave cancelled — days refunded" : "Cancellation request sent to your approver");
+        const done = a && a.status === "cancelled";   // no approver → confirmed on the spot
+        const started = snap.start <= todayStr();
+        vp.resultModal = done
+          ? { title: "Leave Cancelled",
+              lines: [`<b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been cancelled.`,
+                      `<b>${fmtD(snap.days)}</b> day${snap.days === 1 ? "" : "s"} ${snap.days === 1 ? "has" : "have"} been returned to your balance.`],
+              warn: started ? `<b>You were already away from ${fmtDate(snap.start)}.</b> All ${fmtD(snap.days)} day${snap.days === 1 ? "" : "s"} have been returned, including the days you actually took. Apply again for those days, or your balance will be higher than it should be.` : "",
+              act: started ? "reapply" : null, actId: id, actLabel: "Apply for days taken" }
+          : { title: "Cancellation Request Submitted",
+              lines: [`Your request to cancel approved leave <b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been sent to <b>${esc(snap.approver || "your approver")}</b> for review.`,
+                      "Your balance will not change until it is approved."] };
+        render();
       }
       break;
     }
-    case "cancelok": { if (await confirmCancel(id, true, "")) { render(); toast("Cancellation confirmed — days refunded"); } break; }
-    case "cancelno": { if (await confirmCancel(id, false, "")) { render(); toast("Cancellation declined"); } break; }
+    case "cancelok": {
+      const a = db.applications.find(x => x.id === id);
+      const who = a ? ((emp(a.empId) || {}).name || "them") : "them";
+      const d = a ? a.days : 0;
+      if (await confirmCancel(id, true, "")) { render(); toast(`Cancellation confirmed — ${fmtD(d)} day${d === 1 ? "" : "s"} returned to ${who}`); }
+      break;
+    }
+    case "cancelno": {
+      const a = db.applications.find(x => x.id === id);
+      const who = a ? ((emp(a.empId) || {}).name || "their") + "'s" : "their";
+      if (await confirmCancel(id, false, "")) { render(); toast(`Cancellation declined — ${who} leave stands`); }
+      break;
+    }
     case "ledsort": {
       const c = el.dataset.col, s = vp.ledSort || { col: "ts", dir: -1 };
       if (s.col === c) s.dir = -s.dir; else { s.col = c; s.dir = (c === "ts" || c === "delta") ? -1 : 1; }
@@ -2303,21 +2526,51 @@ document.addEventListener("click", async ev => {
     }
     case "ledadd": {
       const f = vp.ledForm;
-      if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
+      // Order follows the form, so the message points at the first gap the eye reaches.
+      if (!f.empId) return toast("Please choose an employee");
+      if (!f.type) return toast("Please choose a leave type");
       if (!f.delta) return toast("Please enter a number of days that isn't zero.");
+      if (!f.reason.trim()) return toast("Please add a reason for this adjustment.");
       if (ledGoesNegative(f) && !vp.ledNegOk) return toast("This would take the balance below zero — tick the box to confirm.");
+      // Ledger writes are append-only and permanent — a wrong entry can only be undone by a
+      // second, compensating entry — so state the whole thing back before it is written.
+      const r = ledBalAfter(f);
+      const kind = (f.type === "oil" && Number(f.delta) > 0) ? "OIL Credit" : "Manual Adjustment";
+      vp.confirmModal = {
+        title: "Confirm Balance Adjustment",
+        lines: [`You are about to update <b>${esc((emp(f.empId) || {}).name || "")}</b>'s <b>${esc((lt(f.type) || {}).en || f.type)}</b> balance:`,
+                `<b>Type:</b> ${kind}`,
+                `<b>Change:</b> <b style="color:${Number(f.delta) > 0 ? "var(--good)" : "var(--bad)"}">${Number(f.delta) > 0 ? "+" : ""}${fmtD(Number(f.delta))} days</b> (Was ${fmtD(r.before)} days ➔ Now ${fmtD(r.after)} days)`,
+                `<b>Reason:</b> ${esc(f.reason.trim())}`],
+        warn: r.after < 0 ? "This leaves the balance below zero." : "",
+        cancelLabel: "Cancel", okLabel: "Confirm & Save", act: "ledaddgo"
+      };
+      render(); break;
+    }
+    case "ledaddgo": {
+      const f = vp.ledForm;
       const { error } = await sb.from("leave_ledger").insert({ emp_id: f.empId, leave_type: f.type,
         delta_days: Number(f.delta), reason: "Manual adjustment: " + f.reason.trim(), created_by: me.id });
       if (error) return rpcErr(error);
-      vp.ledForm = { empId: f.empId, type: f.type, delta: 1, reason: "" };
+      const snap = { who: (emp(f.empId) || {}).name || "", type: (lt(f.type) || {}).en || f.type, delta: Number(f.delta) };
+      // Back to a blank form: keeping the last employee selected is how the wrong-target
+      // mistake happened in the first place.
+      vp.ledForm = { empId: "", type: "", delta: "", reason: "" };
       vp.ledNegOk = false;
-      await reload(); toast("Adjustment saved.");
+      await reload();
+      const after = bal(f.empId, f.type).avail;
+      vp.resultModal = { title: "Balance Adjusted",
+        lines: [`<b>${esc(snap.who)}</b>'s <b>${esc(snap.type)}</b> balance has been updated by <b>${snap.delta > 0 ? "+" : ""}${fmtD(snap.delta)} days</b>.`,
+                `New total: <b>${fmtD(after)}</b> days.`] };
+      render();
       break;
     }
     case "phadd": {
-      const d = document.getElementById("newph")?.value;
+      const typed = document.getElementById("newph")?.value || "";
+      const d = dmyToIso(typed);
       const nm = (document.getElementById("newphname")?.value || "").trim();
-      if (!d) return toast("Pick a date first");
+      if (!typed.trim()) return toast("Type the date first, as day/month/year — e.g. 15/07/2026");
+      if (!d) return toast("That date doesn't look right. Type it as day/month/year, e.g. 15/07/2026");
       if (!nm) return toast("Please type the holiday's name (e.g. Vesak Day)");
       if (db.publicHolidays.includes(d)) return toast("Already in the list");
       const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
@@ -2325,12 +2578,44 @@ document.addEventListener("click", async ev => {
       await reload(); toast("Holiday added");
       break;
     }
+    // Manual holiday sync. The Edge Function reconciles against MOM's list published on
+    // data.gov.sg and writes an audit row; apply_holiday_sync (v13) protects rows HR added
+    // by hand. Report the outcome in a dialog rather than a toast — "the button did nothing"
+    // is exactly how this feature stayed broken for months without anyone noticing.
+    case "phsync": {
+      toast("Checking MOM's list…");
+      let r;
+      try { r = await sb.functions.invoke("sync-holidays", { body: {} }); }
+      catch (e) { r = { error: e }; }
+      const payload = r && r.data;
+      const failed = (r && r.error) || (payload && payload.ok === false);
+      if (failed) {
+        const why = (payload && (payload.error || payload.reason)) || (r.error && r.error.message) || "no reason given";
+        vp.resultModal = { title: "Holiday sync failed",
+          lines: ["Couldn't complete the sync, so <b>nothing was changed</b>.",
+                  `Reason: ${esc(String(why))}`],
+          warn: "If this says the function was not found, <b>sync-holidays</b> has not been deployed to this project yet — that is a one-off setup step, not a fault in your data." };
+        render(); break;
+      }
+      const res = (payload && payload.result) || {};
+      const n = k => Array.isArray(res[k]) ? res[k].length : Number(res[k] || 0);
+      const years = (payload && payload.years) || [];
+      await reload();
+      vp.resultModal = { title: "Holiday sync complete",
+        lines: [`Checked ${years.length ? years.join(" and ") : "the published years"} against MOM's list (via data.gov.sg).`,
+                `<b>${n("added")} added</b> · ${n("renamed")} renamed · ${n("removed")} removed`,
+                `<b>${n("conflicts")}</b> of the dates you added by hand also appear in MOM's list — those were kept as yours.`,
+                `Last checked: ${fmtTs(Date.now())}`] };
+      render(); break;
+    }
     case "phedit": { vp.phModal = { orig: el.dataset.d, date: el.dataset.d, name: el.dataset.n || "" }; render(); break; }
     case "phsave": {
       const m = vp.phModal || {};
-      const d = document.getElementById("ph-date")?.value;
+      const typed = document.getElementById("ph-date")?.value || "";
+      const d = dmyToIso(typed);
       const nm = (document.getElementById("ph-name")?.value || "").trim();
-      if (!d) return toast("Pick a date first");
+      if (!typed.trim()) return toast("Type the date first, as day/month/year — e.g. 15/07/2026");
+      if (!d) return toast("That date doesn't look right. Type it as day/month/year, e.g. 15/07/2026");
       if (!nm) return toast("Please type the holiday's name");
       if (d !== m.orig && db.publicHolidays.includes(d)) return toast("That date is already in the list");
       if (m.orig && d === m.orig) {
@@ -2385,7 +2670,7 @@ document.addEventListener("click", async ev => {
       break;
     }
   }
-});
+}
 
 document.addEventListener("change", async ev => {
   const el = ev.target;
@@ -2397,7 +2682,13 @@ document.addEventListener("change", async ev => {
   if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); render(); return; }
   if (el.dataset.act === "empf") {
     const id = el.dataset.id, f = el.dataset.f;
-    if (f === "annualBase") stageEmp(id, "annualBase", numOr(el.value, 14));
+    if (f === "annualBase") {
+      // Guard B on the per-row input: a base above the company maximum would be cut back
+      // at the next grant, so refuse it here rather than let the two settings disagree.
+      const m = baseAboveCap(numOr(el.value, 14));
+      if (m) { toast(m); el.value = ePick(emp(id), "annualBase") ?? 14; return; }
+      stageEmp(id, "annualBase", numOr(el.value, 14));
+    }
     else if (f === "approver1") { stageEmp(id, "approver1", el.value || null); if (!el.value) stageEmp(id, "approver2", null); }
     else if (f === "approver2") stageEmp(id, "approver2", el.value || null);
     rerender(); return;
@@ -2439,8 +2730,9 @@ document.addEventListener("change", async ev => {
   }
   const f = el.dataset.f;
   if (!f) return;
-  if (f === "stFilter") { vp.stFilter = el.value; render(); return; }
-  if (f === "empDept") { vp.empDept = el.value; render(); return; }
+  // Filters, not navigation → rerender() so the page stays where the user is looking.
+  if (f === "stFilter") { vp.stFilter = el.value; rerender(); return; }
+  if (f === "empDept") { vp.empDept = el.value; rerender(); return; }
   if (f.startsWith("led.")) {
     vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
     if (f === "led.empId" || f === "led.type") vp.ledNegOk = false;   // new target, re-confirm
@@ -2456,8 +2748,8 @@ document.addEventListener("change", async ev => {
       else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
       return;
     }
-    if (k === "worksSat") {   // "" = follow team; keep null distinct from an explicit false
-      vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : null;
+    if (k === "worksSat") {   // Yes / No only now; "" is the unchosen placeholder
+      vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : undefined;
       render(); return;
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
@@ -2497,10 +2789,21 @@ document.addEventListener("input", ev => {
   const f = el.dataset.f || "";
   const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch", ledSearch: "ledsearch" };
   if (liveSearch[f]) {
-    // Live filter; re-render then restore focus/caret so typing isn't interrupted
-    vp[f] = el.value; render();
+    // Live filter. TWO things must survive the re-render, and only one of them used to:
+    //   · scroll position — render() resets it to 0 by design, so every keystroke threw
+    //     the page back to the top. rerender() is the helper that keeps it. Filtering a
+    //     list is not navigation; only changing page/tab should scroll to the top.
+    //   · the caret — restored explicitly below rather than by render()'s own focus
+    //     logic, because focusKey() keys off data-act and these inputs carry data-f.
+    // Keep the real caret offsets: forcing it to value.length sent the cursor to the
+    // end whenever someone edited the middle of what they had typed.
+    const at = el.selectionStart, to = el.selectionEnd;
+    vp[f] = el.value; rerender();
     const s = document.getElementById(liveSearch[f]);
-    if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    // preventScroll matters as much as rerender() here: a bare focus() scrolls the input
+    // back into view, which undoes the scroll we just restored. render() already uses the same
+    // flag for the control it re-focuses (see its focus-restore block).
+    if (s) { s.focus({ preventScroll: true }); try { s.setSelectionRange(at, to); } catch (e) { /* type=search may refuse */ } }
     return;
   }
   // Sync modal text fields live so the save click (which blurs the field) never loses input

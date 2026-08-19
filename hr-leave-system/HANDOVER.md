@@ -136,7 +136,8 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ✅ base schema + v1–v6 | tables, RLS, state machine, half-days, directory view | app works |
 | ✅ v7 (inside v8) | holiday sync tables, announcements, carry-forward | works |
 | ✅ v8 | emp_no/alias/mobile, new leave types, `is_admin()`, self-edit guard trigger | works |
-| ❌ **v9 — NOT applied** | `org_settings.prorate_cap` + capped `annual_entitlement_for` | probed: `column org_settings.prorate_cap does not exist` |
+| ✅ v9 | `org_settings.prorate_cap` + capped `annual_entitlement_for` | applied 2026-08-19, carried in by v14 after it failed with `42703: column prorate_cap does not exist`. The **control was later removed from the UI** (a first year is base × months/12, already below the base, so the cap can only push a joiner lower). Column and SQL stay — `annualCalc` still mirrors it. |
+| ✅ v12 / v13 / v14 / v15 | working-day authority + Saturday + cancellation guards; holiday-sync ownership; annual maximum + monthly accrual; no-approver cancellation | user confirmed all four ran; v15 healed the stranded `cancel_requested` row |
 | ✅ v10 | `purge_employee`, `clear_employee_records`, offboard hardening, guard bypass GUC | probed: functions exist |
 | ✅ v11 | ALL DB messages/ledger reasons/announcements → English | probed: English errors |
 | ❓ `reset_all_passwords.sql` | one-time reset of all logins to `Ssu123@` | user asked for it; not re-verified |
@@ -303,6 +304,23 @@ SOP manual + bootstrap/reset scripts.
   `42703: column does not exist`. **Lesson: this file said "through v11 EXCEPT v9"
   and that was ignored.** Never write a migration that assumes an earlier one ran —
   re-add the column with `if not exists`, or feature-detect. §5 is not decoration.
+- **`rerender()` for filtering and sorting; `render()` for navigation.** `render()`
+  resets scroll to 0 by design, which is right when the page changes and wrong every
+  other time. **Three separate user bug reports have traced back to this one sentence
+  not being followed** — the ledger sort jumping to the top, the search boxes jumping
+  on every keystroke, and the two filter dropdowns (which nobody had reported yet).
+  Before shipping any handler that changes what a list shows, check which one it calls.
+  Two traps worth knowing:
+    · `focusKey()` only recognises `data-act`, so a control carrying `data-f` gets no
+      automatic focus restore — do it explicitly by id.
+    · restoring focus with a bare `focus()` scrolls the element into view and undoes
+      the scroll you just restored. Use `focus({ preventScroll: true })`, as
+      `render()` itself does.
+- **A pre-filled field looks answered.** Add employee used to default team, gender,
+  account type and Saturdays. Gender in particular feeds `eligible()`, so the default
+  silently decided who was offered maternity vs paternity leave. There is nothing on
+  screen to prompt a check, because the field is not blank. If a field decides
+  something, make it a choice.
 - **The auto-approve path is a second code path, and it is easy to forget.**
   Anyone with `approver1 = null` (the Managing Director) is auto-approved on submit
   and gets **no `approval_steps` row at all**. Every feature that routes work to an
@@ -314,8 +332,15 @@ SOP manual + bootstrap/reset scripts.
 - **Storage orphans**: deleting/clearing an employee does NOT remove their
   uploaded MC files from the `attachments` bucket. Manual cleanup; a cleanup
   routine was offered, not requested.
-- **sync-holidays deployment + pg_cron: unverified.** Holidays seeded for
-  2026 only — check before 2027 (SOP has manual fallback).
+- **sync-holidays has never actually run against this project.** Every
+  `public_holidays` row is `manual`. The function and the v13 reconciliation are
+  written and tested; nothing has invoked them. A **🔄 Sync now** button now exists in
+  Company settings — pressing it is both the fix and the test, and it reports failure
+  plainly if the function was never deployed.
+  Data source, verified 2026-08: data.gov.sg collection 691, metadata naming the
+  Ministry of Manpower as `sources` and `managedBy`. **2026 → 14 dates** (matching
+  what is already in the system), **2027 → 12 dates, already published** — so a first
+  sync should add 12 and leave 2026 alone. pg_cron scheduling still unverified.
 - **Email notifications**: never configured (needs Resend + webhook).
 - **Offered, user never confirmed**: "Login ✓/✗" column in the Employees
   list; email-invite flow instead of default password.

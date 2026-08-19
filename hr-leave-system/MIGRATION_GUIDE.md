@@ -76,7 +76,7 @@ Wait for "Success" before starting the next.
 | 1 | `schema.sql` | every table, view, function and security rule |
 | 2 | `keepalive_ping_v2.sql` | the anti-sleep heartbeat |
 | 3 | `bootstrap_owner.sql` | creates your first Owner account |
-| 4 | `migration_app_v9.sql` | cap on a new joiner's first-year pro-rate (blank = no cap) |
+| 4 | `migration_app_v9.sql` | adds `org_settings.prorate_cap`, which v14 needs |
 | 5 | `migration_app_v12.sql` | one working-day authority, Saturday support, cancellation safeguards |
 | 6 | `migration_app_v13.sql` | holiday sync stops taking over manually added dates |
 | 7 | `migration_app_v14.sql` | annual-leave maximum, and monthly accrual as an option |
@@ -87,6 +87,9 @@ Wait for "Success" before starting the next.
 column — so a database missing v9 fails v14 with
 `ERROR: 42703: column "prorate_cap" does not exist`. v14 now adds the column
 defensively, so either order works, but running v9 keeps the history honest.
+The column has **no control in the app** — a first year is already base × months ÷ 12,
+which is below the base, so capping it could only ever reduce a new joiner further.
+It exists, it is `null`, and the SQL still reads it.
 
 **v12–v15 are all idempotent** — running one twice changes nothing the second time,
 and each ends with verification queries. If you are unsure whether one ran, run it
@@ -132,8 +135,11 @@ create it with the exact name below, paste the whole contents of the matching
 
 > These need no API keys. Supabase injects what they need automatically.
 
-**Test `sync-holidays` right away** (replace `<project-ref>` with the code from
-your Project URL):
+**Test `sync-holidays` right away.** Easiest way, once the website is up: HR Console →
+Company settings → Public holidays → **🔄 Sync now**. It reports how many dates were
+added, renamed or removed, and says plainly if the function isn't deployed.
+
+From a terminal instead (replace `<project-ref>` with the code from your Project URL):
 
 ```
 curl -X POST https://<project-ref>.functions.supabase.co/sync-holidays
@@ -141,6 +147,11 @@ curl -X POST https://<project-ref>.functions.supabase.co/sync-holidays
 
 You want `{"ok":true,...}` back. Then check the `holiday_sync_log` table has a
 row in it.
+
+> The holiday data is MOM's own, published as a machine-readable feed on
+> **data.gov.sg** (collection 691 — its metadata names the Ministry of Manpower as
+> both the source and the manager). It is not scraped from the mom.gov.sg web page,
+> which would break silently whenever that page was redesigned.
 
 ### 1.7 Schedule the automatic jobs
 
@@ -421,7 +432,7 @@ Don't call it done until **every** line passes.
 - [ ] `migration_app_v9.sql` ran — `prorate_cap` column exists
 - [ ] `migration_app_v12.sql` ran — working-day authority, Saturday columns, safer cancellation
 - [ ] `migration_app_v13.sql` ran — `public_holidays.updated_at` exists, manual dates survive a sync
-- [ ] `migration_app_v14.sql` ran — `annual_cap` and `accrual_mode` exist in Company defaults
+- [ ] `migration_app_v14.sql` ran — `annual_cap` and `accrual_mode` exist in Company settings → Leave policy
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

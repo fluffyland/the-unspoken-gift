@@ -123,10 +123,16 @@ automatically), there is nobody to send the request to — so the cancellation i
 You can. Cancelling gives you back **the whole application's days** — including any
 you already took.
 
-So if you took part of it and came back early, you then need to **re-apply for the
-days you actually took**. The system offers you a **Re-apply for days taken** button
-straight after, with the form already filled in — just change the end date to your
-last day away and submit.
+So if you came back early, you must **apply again for the days you were actually
+away**, or your balance will be higher than it should be. The system tells you this
+on screen and offers an **Apply for days taken** button, which opens the form already
+filled in with your original dates — change the end date to your last day away and
+submit.
+
+Everything asks before it acts. Cancelling shows you the leave type, the dates and the
+number of days first, with **Go back** and **Confirm Cancellation**; nothing is
+changed until you confirm. Afterwards a message tells you exactly what happened and
+how many days went back into your balance.
 
 *Example:* you booked 23 Jul – 20 Aug and came back on the 18th. Cancel it (all 16
 days return), then re-apply for 23 Jul – 17 Aug. Your balance ends up correct.
@@ -145,13 +151,18 @@ history; you're not starting again.
 
 Your balance shows:
 
-- **Current year** — this year's allowance
-- **Carried forward** — unused days brought from last year (these **expire**, so
-  spend them first)
-- **Used** — already taken
+- **Allowance** — everything credited to you: this year's grant, anything carried
+  forward, plus any corrections HR has made
+- **Used** — everything deducted: leave taken, and any corrections
 - **Pending** — requested but not yet decided; already set aside for you
 
-**Available** is what you can actually book today.
+**Available** is what you can actually book today — Allowance minus Used minus
+Pending. The same three figures appear in **My details → My leave entitlement**, and
+they will always agree.
+
+Carried-forward days **expire**, so spend them first. When you have any, Overview
+shows the amount and the date they run out; they are already included in the figures
+above.
 
 ### Why your annual leave might go up every month
 

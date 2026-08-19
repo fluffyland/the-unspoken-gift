@@ -38,7 +38,7 @@ HR Console has six tabs:
 | **Employees & approval routes** | add, edit, offboard staff; set who approves whom |
 | **Leave types** | leave categories and how many days each carries |
 | **Balance adjustments** | credit off-in-lieu, fix mistakes |
-| **Company settings** | company defaults, public holidays, yearly allowances |
+| **Company settings** | company details, defaults, leave policy, public holidays, yearly allowances |
 
 > Changes in the HR Console are **not saved as you type**. A **Save changes**
 > bar appears at the top once you've edited something. Click it, or you lose
@@ -50,9 +50,25 @@ HR Console has six tabs:
 
 **HR Console → Employees & approval routes → Add employee**
 
-Fill in name, work email, hire date (`DD/MM/YYYY`), team, job title, and the
-annual leave base. Set **approver 1**; tick two-level approval and set
-**approver 2** where a second sign-off is needed.
+Fill in name, work email, hire date (`DD/MM/YYYY`) and job title. Set **approver 1**;
+tick two-level approval and set **approver 2** where a second sign-off is needed.
+
+**Four fields start on "— Select —" and must be chosen.** They used to arrive
+pre-filled, which meant clicking through filed someone silently:
+
+| Field | Why it isn't guessed for you |
+|---|---|
+| **Team / department** | drives who approves their leave |
+| **Gender** | decides which leave types they're offered — maternity vs paternity |
+| **Account type** | decides what they can see and do |
+| **Works Saturdays** | changes what their leave costs: Mon–Sat is 6 days, not 5 |
+
+Gender is the one worth pausing on. It used to default to Female, so half of all new
+hires were set up with the wrong parental leave — and because the field *looked*
+answered, nothing prompted anyone to check.
+
+The **annual leave base** is pre-filled from Company settings and can be changed. It
+cannot exceed the company maximum, if you've set one.
 
 Saving does three things automatically: creates their profile, creates their
 login, and credits this year's leave (pro-rated if they joined mid-year).
@@ -108,8 +124,22 @@ Typical uses:
 - a balance is wrong after a data fix → correct it
 - expiring days → deduct them
 
-As you type, the form shows **what the balance is now and what it will become** —
-so you never have to guess how much is safe to deduct.
+**Nothing is pre-selected.** Employee, leave type, days and reason are all required.
+The form used to open on the first employee alphabetically with Off-in-Lieu and 1 day
+already filled in, so an adjustment saved without touching the dropdowns landed on the
+wrong person under the wrong leave type — and looked perfectly normal in the list.
+
+As you type, the form shows the impact:
+
+```
+Adjustment Preview: +1.5 days
+Current: 12.0 days ➔ New Total: 13.5 days
+```
+
+**It asks before saving.** A confirmation states the employee, the leave type, whether
+it's an OIL credit or a manual adjustment, the before and after figures, and your
+reason. Ledger entries are permanent — a wrong one can only be undone by adding a
+second, opposite entry — so read it before confirming.
 
 **Going below zero is allowed, but it asks first.** If the result would be negative
 you get a warning and a tick box to confirm. Clawing back an over-grant is a real
@@ -199,9 +229,12 @@ Use **Offboard** for real departures. The other two destroy history you may need
 **Works Sat** for a team, and Saturday becomes a normal working day for everyone in
 it.
 
-**Individual exceptions:** their Edit form → **Works Saturdays** → *Follow team* /
-*Yes* / *No*. "Follow team" is the default; use Yes or No only for someone who
-differs from their team.
+**Per person:** their Edit form → **Works Saturdays** → **Yes** or **No**. This is now
+a required answer rather than an inherited one, so each person's record states it
+outright. Anyone whose record predates the change will be asked once, the first time
+you open their Edit form.
+
+The team-level tick still applies to those older records until they're answered.
 
 > ⚠️ **This changes what leave costs.** For a Saturday worker, Mon–Sat is **6 days**,
 > not 5. Set it before people apply for leave, not after — existing applications keep
@@ -213,8 +246,20 @@ Public holidays are still excluded for everyone, including on a Saturday.
 
 **HR Console → Company settings → Public holidays**
 
-The list auto-syncs monthly from MOM's official data. The **Source** column shows
-where each date came from and when it last changed:
+The list auto-syncs monthly from MOM's official data, and there's a **🔄 Sync now**
+button if you don't want to wait. It tells you exactly what changed — how many dates
+were added, renamed or removed, and how many of your own manual entries also appear in
+MOM's list and were kept as yours. If it can't run, it says so; it never fails quietly.
+
+**Where the data comes from:** data.gov.sg collection 691, published by the **Ministry
+of Manpower** — their own machine-readable feed, not a copy of the mom.gov.sg web page
+(which would break silently whenever the page was redesigned). You can check the source
+yourself at `api-production.data.gov.sg/v2/public/api/collections/691/metadata`.
+
+**Adding a date by hand:** type it as **DD/MM/YYYY** — e.g. `15/07/2026`. Slashes,
+dashes and dots all work.
+
+The **Source** column shows where each date came from and when it last changed:
 
 | | |
 |---|---|
@@ -239,11 +284,34 @@ as yours."*
 
 ## Annual leave: the maximum, and how it's credited
 
-**HR Console → Company settings → Company defaults**
+**HR Console → Company settings → Leave policy**
 
-**Maximum annual leave.** Annual leave rises by 1 day for each year of service. Left
-blank it rises **for ever** — someone with 20 years on a base of 14 reaches 33 days.
-Set a maximum (21 is common) and the growth stops there.
+Company settings is split into three cards, because "default" was doing two different
+jobs in one box:
+
+| Card | What it is |
+|---|---|
+| **Company details** | name and email domain |
+| **Defaults for new employees** | a **pre-fill** for the Add employee form. Changing it moves nobody who already exists |
+| **Leave policy** | **rules that apply to everyone**, at the next yearly grant |
+
+**Maximum annual leave is a total, not an addition.** It is the most anyone can
+reach, including long-service increases — **not** "base plus this much". Annual leave
+rises by 1 day per year of service, and left blank it rises **for ever**: 20 years on
+a base of 14 reaches 33 days. Set it to 21 and someone gets there after 7 years and
+stays at 21.
+
+**Nobody goes above the company maximum**, whatever their individual base. So the two
+settings must not contradict each other, and the system refuses to let them:
+
+- the maximum **cannot be saved below any employee's base** — it would cut them at the
+  next grant. It names who is blocking it: *"can't be less than 20 — Amanda's base is
+  20 days."* Lower that base first, or leave it blank.
+- an employee's base **cannot be set above the maximum**, in Add employee, Edit, or
+  the per-row box in the Employees list.
+
+Setting the maximum equal to the base is allowed and meaningful: it means *annual
+leave does not increase with service*.
 
 > Blank is the existing behaviour, so nothing changes until you set a number.
 > Setting one affects future grants, not leave already credited.
