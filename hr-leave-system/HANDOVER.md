@@ -73,13 +73,20 @@ KEEP-ALIVE / MONITORING  (three external services, none of them in this repo)
        on the Free plan a private repo cannot publish Pages, so the website
        would be unpublished and the HR system would go offline.
 
-  WATCHER   UptimeRobot, 5-min interval, PHONE PUSH enabled (not just email)
+  WATCHER   UptimeRobot — LIVE since 2026-08-19, 5-min interval, EMAIL alerts
     Monitor the DATABASE, plain GET, key in URL:
       https://aypyolzkdupkpefpxius.supabase.co/rest/v1/leave_types?select=code&limit=1&apikey=<anon key>
       Returns 200 with [] — anon cannot read rows (RLS). The 200 is the signal.
     Optionally also the site: https://fluffyland.github.io/hrleavesystem/
     ⚠️ Watching only the WEBSITE would not have caught the July outage — Pages
        stayed up for all 14 days while the database was asleep.
+    ✅ Alerting was TESTED, not just configured: the URL was deliberately broken,
+       a down alert arrived, and the URL was restored. Do the same after any change
+       to the monitor — a never-fired alarm is a setting, not an alarm.
+    ⚠️ The user declined the phone app; alerts go to EMAIL only. That is the exact
+       channel that failed in July (8 alerts, unread for two weeks). It is their
+       informed choice, recorded here rather than re-litigated. If an outage is ever
+       missed again, this is the first thing to revisit — not the monitor itself.
 
   WHY NOT GitHub Actions: it disables cron after 60 days with no commit, and a
   workflow that stops running raises no failure — silence looks like success.
