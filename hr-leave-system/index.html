@@ -1876,7 +1876,10 @@ function hrSettings() {
   // One year on screen at a time. The heading used to count the CURRENT year while the
   // table listed EVERY year, so the moment next year's dates arrived the count and the
   // rows disagreed. Both now read the same `phY`, so they cannot drift apart again.
-  const phYears = [...new Set(phSorted.map(p => p.slice(0, 4)).concat(String(y)))].sort();
+  // Next year is always offered, even before a single date exists for it — that is the
+  // year that goes missing when the sync stops, so "▶ shows nothing" has to be a
+  // reachable answer. Built from the data alone, ▶ was dead exactly when it mattered.
+  const phYears = [...new Set(phSorted.map(p => p.slice(0, 4)).concat(String(y), String(y + 1)))].sort();
   const phY = phYears.includes(String(vp.phYear)) ? String(vp.phYear) : String(y);
   const phAt = phYears.indexOf(phY);
   const phPrev = phAt > 0 ? phYears[phAt - 1] : "";
@@ -2498,9 +2501,18 @@ async function runAction(el) {
     case "cancelreq": {
       const a = db.applications.find(x => x.id === id); if (!a) break;
       const started = a.start <= todayStr();
+      // State the balance impact on EVERY cancellation. The restore sentence used to appear
+      // only for leave that had already begun, so the ordinary case — cancelling something
+      // in the future — never said the days come back at all.
+      const cb = bal(a.empId, a.type);
+      const dayW = `${fmtD(a.days)} day${a.days === 1 ? "" : "s"}`;
+      const impact = cb.granted === null
+        ? `All ${dayW} will be fully restored.`
+        : `All ${dayW} will be fully restored — your available balance goes from <b>${fmtD(cb.avail)}</b> to <b>${fmtD(cb.avail + a.days)}</b> days.`;
       vp.confirmModal = {
         title: "Cancel Leave Request?",
-        lines: [`Are you sure you want to cancel your leave request for <b>${esc(lt(a.type).en)}</b> from <b>${fmtDate(a.start)}</b> to <b>${fmtDate(a.end)}</b> (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"})?`],
+        lines: [`Are you sure you want to cancel your leave request for <b>${esc(lt(a.type).en)}</b> from <b>${fmtDate(a.start)}</b> to <b>${fmtDate(a.end)}</b> (<b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"})?`,
+                impact],
         warn: started ? `All ${fmtD(a.days)} day${a.days === 1 ? "" : "s"} will be fully restored. Please re-submit a new request for any days actually taken.` : "",
         okLabel: "Confirm Cancellation", act: "cancelreqgo", id
       };
@@ -2616,20 +2628,29 @@ async function runAction(el) {
       const failed = (r && r.error) || (payload && payload.ok === false);
       if (failed) {
         const why = String((payload && (payload.error || payload.reason)) || (r.error && r.error.message) || "");
-        // Two genuinely different situations, and telling them apart is the whole point.
-        // "Not switched on" is a one-off setup job; anything else is a passing fault and
-        // pressing the button again tomorrow may well work. Reporting both as one message
-        // (naming an Edge Function, at that) told the reader nothing they could act on.
-        const notSetUp = /failed to send a request|not found|404/i.test(why);
-        vp.resultModal = notSetUp
-          ? { title: "Holiday sync isn't switched on yet",
+        // Three cases, and the difference between them is what we can HONESTLY tell apart.
+        //   · ran and reported a problem  → it carries a real reason; show it.
+        //   · could not be reached, offline → the browser knows this for certain.
+        //   · could not be reached, online  → we genuinely cannot tell whether the updater
+        //     is missing or the connection dropped: supabase-js raises the same
+        //     "Failed to send a request to the Edge Function" for both (it comes from the
+        //     .catch() on the fetch itself). An earlier version of this dialog asserted
+        //     "not switched on" from that string alone, which would send someone off to do
+        //     a setup job because their wifi blinked. Say both, and say which to try first.
+        const ran = !!(payload && payload.ok === false);
+        const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+        vp.resultModal = ran
+          ? { title: "Holiday check didn't finish",
               lines: ["<b>Nothing was changed.</b>",
-                      "Automatic holiday updates have not been switched on for this system yet, so there is nothing to check against.",
-                      "Add the dates yourself with <b>+ Add holiday</b> below — that works exactly the same way."] }
-          : { title: "Holiday sync didn't finish",
+                      "The holiday list was checked but couldn't be updated.",
+                      why ? `<span class="meta">Reason: ${esc(why)}</span>` : "",
+                      "You can add dates yourself with <b>+ Add holiday</b> below."].filter(Boolean) }
+          : { title: "Couldn't check the holidays",
               lines: ["<b>Nothing was changed.</b>",
-                      "The check couldn't be completed just now. Try again later, or add the dates yourself with <b>+ Add holiday</b> below.",
-                      why ? `<span class="meta">Details: ${esc(why)}</span>` : ""].filter(Boolean) };
+                      offline
+                        ? "You're not connected to the internet right now. Reconnect and press <b>🔄 Sync now</b> again."
+                        : "Either the connection dropped, or automatic holiday updates were never switched on for this system. Try again in a minute — if it keeps failing, it needs switching on, and that is a one-off job for whoever set the system up.",
+                      "Either way you can add dates yourself with <b>+ Add holiday</b> below."] };
         render(); break;
       }
       const res = (payload && payload.result) || {};
@@ -2859,7 +2880,16 @@ document.addEventListener("input", ev => {
     // everything downstream (validation, duplicate check, save) still reads that one field.
     if (f === "em.emailPrefix") {
       vp.empModal.emailTouched = true;
-      const pre = el.value.trim().toLowerCase();
+      // Clean as they type, and write it back, so the box always shows what will be saved.
+      // Dots and hyphens stay — jian.wei is a perfectly ordinary address; spaces and the
+      // rest go, because they only surface later as "Please enter a valid email" pointing
+      // at a field that no longer contains one.
+      const at = el.selectionStart;
+      const pre = el.value.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+      if (el.value !== pre) {
+        el.value = pre;
+        try { el.setSelectionRange(Math.max(0, at - 1), Math.max(0, at - 1)); } catch (e) { /* ignore */ }
+      }
       vp.empModal.form.emailPrefix = pre;
       vp.empModal.form.email = pre && emDomain ? pre + "@" + emDomain : "";
     }

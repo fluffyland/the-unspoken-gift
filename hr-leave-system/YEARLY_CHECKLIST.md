@@ -109,12 +109,17 @@ limit 5;
 your manual dates were kept as yours — or says plainly why it couldn't run. Re-check
 1b afterwards and you're done.
 
-> **As of August 2026 this button cannot work yet** — it says *"Holiday sync isn't
-> switched on yet"*, because the updater has never been deployed to this Supabase
-> project. That is a one-off setup job, not a fault in your data. Until it's done,
-> load each year by hand: **+ Add holiday**, or paste
+> **As of August 2026 this button cannot work yet** — the updater has never been deployed
+> to this Supabase project, so pressing it says *"Couldn't check the holidays"*. That is a
+> one-off setup job, not a fault in your data. Until it's done, load each year by hand:
+> **+ Add holiday**, or paste
 > [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into the SQL
 > Editor for 2027. Both routes are as correct as the sync; they just aren't automatic.
+>
+> **Check the date on this note.** It describes one particular day, and
+> [`HANDOVER.md`](HANDOVER.md) §5 is where the live state is actually tracked. If the
+> sync has since been switched on, that message means something else entirely — see 1d
+> below.
 
 **If you'd rather do it from outside the app**, replace `<project-ref>`:
 

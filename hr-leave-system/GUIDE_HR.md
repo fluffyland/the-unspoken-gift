@@ -63,6 +63,12 @@ following the name.
 > field and you type the whole address. Fill the domain in once and the auto-fill works
 > for every hire after it.
 
+**Someone who isn't on your domain** — a contractor, a part-timer with only a personal
+address — can't be typed straight into the Add form, because the domain is locked on
+purpose. Add them on the company domain, save, then open their profile and change the
+email there: **Edit** keeps the full address box. It's two steps instead of one, and it's
+the price of the lock.
+
 **Four fields start on "— Select —" and must be chosen.** They used to arrive
 pre-filled, which meant clicking through filed someone silently:
 
@@ -266,12 +272,20 @@ button if you don't want to wait. It tells you exactly what changed — how many
 were added, renamed or removed, and how many of your own manual entries also appear in
 MOM's list and were kept as yours. If it can't run, it says so; it never fails quietly.
 
-> **⚠️ Automatic updates are not switched on for this system yet.** Press **🔄 Sync now**
-> and it says so in as many words. Until someone switches it on, add each year's dates
-> with **+ Add holiday**, or paste
+> **⚠️ As of August 2026, automatic updates have not been switched on for this system.**
+> Press **🔄 Sync now** and it can't reach anything. Until someone switches it on, add
+> each year's dates with **+ Add holiday**, or paste
 > [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into
 > Supabase → SQL Editor, which loads all 12 of MOM's 2027 dates in one go and leaves
 > 2026 untouched.
+>
+> *This is a statement about a particular day, not about how the system works.*
+> [`HANDOVER.md`](HANDOVER.md) §5 is the one place that tracks what is actually running —
+> check there before trusting this paragraph.
+
+If the sync can't be reached, the message says so **without guessing why**: it may be your
+internet, or it may be that automatic updates were never switched on. It tells you which
+to try first. It will never send you off to fix something that isn't broken.
 
 **Where the data comes from:** data.gov.sg collection 691, published by the **Ministry
 of Manpower** — their own machine-readable feed, not a copy of the mom.gov.sg web page

@@ -255,6 +255,25 @@ scratchpad — **gone after the session ends**; recreate on demand. Also run
 `node --check` on the extracted script after every edit, and keep `$$`
 counts even in any SQL file you touch.
 
+**Know what this harness does NOT prove.** It seeds `db` and `me` by hand and calls
+`render()`, so it tests *behaviour against your own assumptions about the data*, never
+against the live database. A field you name wrongly in the seed is a field the tests
+happily agree with. Two habits keep it honest:
+
+- **Cross-check the seed against the real mappers**, not against memory — `mapEmp` /
+  `mapType` (`app.html:298-305`) and the `applications` mapper are the source of truth for
+  shape. Diffing the seed's keys against those three caught nothing in Aug 2026, which is
+  the point: it is cheap and it is the only thing standing between a green suite and a
+  fiction.
+- **SQL is different — verify it for real.** A throwaway Postgres
+  (`runuser -u postgres -- bash /tmp/script.sh`; `initdb` refuses to run as root) executes
+  the actual statements. `insert_holidays_2027.sql` was checked that way: 12 inserted,
+  2026 still 14, idempotent on a second run. Never ship SQL on a read-through alone — v14
+  shipped that way and failed on the user's first attempt.
+- **The user is the integration test.** Say so plainly when handing work over, and name
+  the two or three things only they can click. Do not describe seeded assertions in a way
+  that sounds like the live system was checked.
+
 ## 9. Remote verification trick (use this instead of trusting "I ran it")
 
 The anon key can probe what's ACTUALLY deployed (RLS makes it harmless):
