@@ -166,7 +166,7 @@ unless the user wants the cap feature.
 | Function | State |
 |---|---|
 | `create-login` | ✅ deployed, LATEST version (probe: returns "Only HR can manage logins.") — handles create / `action:"reset"` / `action:"remove"`, default pw `Ssu123@`, Owner-target protection |
-| `sync-holidays` | ❌ **NOT deployed** — confirmed 2026-08-19: pressing 🔄 Sync now returns *"Failed to send a request to the Edge Function"*. The DB half (`apply_holiday_sync`, v13) and the audit log both exist; only the function is missing. pg_cron schedule therefore also dead |
+| `sync-holidays` | ⚰️ **DEAD CODE — do not deploy.** Never deployed; confirmed 2026-08-19 when 🔄 Sync now returned *"Failed to send a request to the Edge Function"*. The whole feature was then **removed from the frontend** at the user's instruction (see §12). The file, `apply_holiday_sync` (v13), `holiday_sync_log` and the `source`/`synced_at` columns all still exist and are all unread. Deploying this would resurrect a feature the user deliberately killed |
 | `send-notification` | written in repo; **NOT set up** (needs Resend key + DB webhook; email flow never configured) |
 
 **Auth model**: Supabase Auth users are linked to `employees.auth_user_id`
@@ -196,12 +196,12 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `supabase/migration_app_v1..v15.sql` | incremental history. Applied on the live database: **v1–v15, including v9** (v9 was skipped for a long time and only went in with v14 on 2026-08-19 — see below) |
 | `supabase/bootstrap_owner.sql` | create first Owner (edit name/email inside) |
 | `supabase/reset_all_data.sql` | wipe all people/records/logins, keep types+holidays |
-| `supabase/insert_holidays_2027.sql` | MOM's 12 public holidays for 2027, for pasting into the SQL Editor while `sync-holidays` is undeployed |
+| `supabase/insert_holidays_2027.sql` | MOM's 12 public holidays for 2027 — bulk **manual** entry (`source = 'manual'`), a shortcut for typing them in, not a sync |
 | `supabase/reset_all_passwords.sql` | set every login's password to `Ssu123@` |
 | `supabase/delete_employee_fully.sql` / `clear_employee_records.sql` | standalone SQL-editor equivalents of the app's Delete/Clear buttons (needed because SQL editor runs as postgres where `is_hr()` is false) |
 | `supabase/seed.sql` | demo data (early phase; superseded by real usage) |
 | `supabase/functions/create-login/index.ts` | login lifecycle Edge Function (see §5) |
-| `supabase/functions/sync-holidays/index.ts` | MOM public-holiday sync from data.gov.sg (collection 691) |
+| `supabase/functions/sync-holidays/index.ts` | ⚰️ dead — the removed holiday sync. Kept for history only; see §12 before touching it |
 | `supabase/functions/send-notification/index.ts` | email notifications via Resend (not configured) |
 
 ## 7. Frontend internals (what you need to modify it safely)
@@ -347,8 +347,13 @@ SOP manual + bootstrap/reset scripts.
   on every keystroke, and the two filter dropdowns (which nobody had reported yet).
   Before shipping any handler that changes what a list shows, check which one it calls.
   Two traps worth knowing:
-    · `focusKey()` only recognises `data-act`, so a control carrying `data-f` gets no
-      automatic focus restore — do it explicitly by id.
+    · ~~`focusKey()` only recognises `data-act`~~ — **fixed 2026-08-20, and this was the
+      actual root cause all along.** Every form field carries `data-f`, so `focusKey`
+      returned `null` for all of them: nothing was re-focused, the caret was lost, and the
+      browser's scroll anchoring lurched. Three separate reports were "fixed" in three
+      separate callers before anyone read the helper. It now matches `data-f` too, and
+      appends `data-d` for the per-date half-day selects. **When a bug recurs in a third
+      place, stop patching callers and go read the shared function.**
     · restoring focus with a bare `focus()` scrolls the element into view and undoes
       the scroll you just restored. Use `focus({ preventScroll: true })`, as
       `render()` itself does.
@@ -368,23 +373,50 @@ SOP manual + bootstrap/reset scripts.
 - **Storage orphans**: deleting/clearing an employee does NOT remove their
   uploaded MC files from the `attachments` bucket. Manual cleanup; a cleanup
   routine was offered, not requested.
-- **sync-holidays is not deployed — this is now confirmed, not suspected.** The user
+- **The holiday sync was REMOVED, 2026-08-20. Do not rebuild it without being asked.**
+  The user's words: *"what i want is it can automatically sync if unable to do that just
+  remove the whole function. let HR manually do it."* Offered the choice between a
+  browser-side sync (one migration, then it would genuinely run by itself — data.gov.sg
+  serves `access-control-allow-origin: *`, so the fetch works from the page; only
+  `apply_holiday_sync`'s grant would have needed changing) and deleting it, they chose
+  **delete**. Out of `app.html`: the 🔄 button, `case "phsync"`, `phLastCheckLine()`,
+  `phSourceCell()`, the Source column, and the `phSource` / `phWhen` / `phLastCheck`
+  loads. Left in the database and the repo, all unread: `holiday_sync_log`,
+  `apply_holiday_sync`, the `source` / `synced_at` / `updated_at` columns, and the Edge
+  Function source.
+  **Why they were right:** it had never once run in the months it existed, and it
+  presented itself as automatic the whole time. A button that looks like it works is
+  worse than no button — it stops anyone doing the job by hand.
+  `GUIDE_HR.md` and `YEARLY_CHECKLIST.md` now say plainly that January's holiday entry is
+  a person's job and nothing will remind them.
+- **Superseded (kept for the reasoning):** sync-holidays was not deployed. The user
   pressed 🔄 Sync now on 2026-08-19 and got *"Failed to send a request to the Edge
   Function"*. Every `public_holidays` row is still `manual`. The function and the v13
   reconciliation are written and tested; nothing has ever invoked them.
-  The failure dialog now distinguishes **"isn't switched on yet"** (a setup job) from
-  **"didn't finish"** (a passing fault), because reporting both as one message told the
-  reader nothing they could act on.
-  Stop-gap shipped instead: **`supabase/insert_holidays_2027.sql`** — MOM's 12 dates for
-  2027, `source = 'data.gov.sg'` so a future real sync recognises them as its own,
-  `on conflict do nothing` so 2026 is untouched. Verified on a throwaway Postgres:
-  12 inserted, 2026 still 14, idempotent on a second run.
-  To actually fix it: Supabase Dashboard → Edge Functions → deploy
-  `supabase/functions/sync-holidays/index.ts` (127 lines, pasteable), then re-check
-  `cron.job` for `sync-holidays-monthly`.
-  Data source, verified 2026-08: data.gov.sg collection 691, metadata naming the
+  A stop-gap SQL file was shipped first; the user's response — *"actually is not consider
+  sync automatically right? since its me that paste into the sql system"* — is what led to
+  removing the feature a day later. **They were right, and the lesson is general: a
+  workaround that needs a human every time is not the feature, and calling it one buys a
+  day and costs trust.**
+  Data source, recorded for history only, 2026-08: data.gov.sg collection 691, metadata naming the
   Ministry of Manpower as `sources` and `managedBy`. **2026 → 14 dates** (matching
   what is already in the system), **2027 → 12 dates, already published**.
+- **Re-apply after cancelling: removed 2026-08-20.** Cancelling refunds the whole
+  application, so someone who came back early owes a fresh, shorter application. The app
+  used to offer to pre-fill that form for them (`case "reapply"`, plus a callout and two
+  buttons). The user: *"I dont like the apply for days taken function... i only need the
+  close button"*. Deleted outright — the on-screen sentence telling them to re-submit
+  stays, because they wrote it. Don't rebuild the helper.
+- **Wording the user dictated, and why it looks odd in the code.** The apply-form day
+  count says *"Singapore public holidays excluded automatically"* and omits weekends,
+  even though weekends ARE excluded — that is their text, given verbatim, and it is not a
+  bug to fix. Same for *"All N days will be fully restored. Please re-submit a new
+  request for any days actually taken."* Check §2 before "correcting" any of it.
+- **"Managing Director" was hard-coded into the auto-approve path** in four places
+  (`chainText`, `stepsView`, the apply-page sub-line, and the comment `submit_application`
+  writes). Anyone with no approver saw it, whoever they were. All four now say
+  *"No approver required"*. The database one is normalised on read (`autoComment` in
+  `loadAll`) rather than migrated, so rows already written display correctly too.
 - **A modal that dismisses on the backdrop dismisses on its own body too.** The confirm
   and result dialogs put `data-act` on `.modalback`; the click delegator resolves
   `ev.target.closest("[data-act]")`, and the inner `.modal` carried no `data-act` — so a

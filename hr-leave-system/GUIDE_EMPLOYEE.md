@@ -113,10 +113,10 @@ There are two different things, depending on whether it's been approved yet:
 
 Both are in the popup — open the application from **My applications** first.
 
-**If you have no approver** (the Managing Director, or anyone whose leave is approved
-automatically), there is nobody to send the request to — so the cancellation is
-**confirmed on the spot** and the days come straight back. The timeline records it as
-*"Cancelled automatically — no approver needed"*.
+**If you have no approver** — anyone whose leave is approved automatically — there is
+nobody to send the request to, so the cancellation is **confirmed on the spot** and the
+days come straight back. The timeline records it as
+*"Cancelled automatically — No approver required"*.
 
 ### Cancelling leave you've already started
 
@@ -126,10 +126,9 @@ you already took. The screen says so:
 > ⚠️ All 17 days will be fully restored. Please re-submit a new request for any days
 > actually taken.
 
-So if you came back early, **apply again for the days you were actually away**, or your
-balance will be higher than it should be. There's an **Apply for days taken** button
-that opens the form already filled in with your original dates — change the end date to
-your last day away and submit.
+So if you came back early, **go to Apply and submit a new request for the days you were
+actually away**, or your balance will be higher than it should be. It's an ordinary new
+application — same as any other.
 
 Everything asks before it acts. Cancelling shows you the leave type, the dates and the
 number of days first, with **Go back** and **Confirm Cancellation**; nothing is
@@ -138,9 +137,9 @@ accident. Afterwards a message tells you exactly what happened and how many days
 back into your balance.
 
 *Example:* you booked 23 Jul – 20 Aug and came back on the 18th. Cancel it (all 16
-days return), then re-apply for 23 Jul – 17 Aug. Your balance ends up correct.
+days return), then apply again for 23 Jul – 17 Aug. Your balance ends up correct.
 
-> If you skip the re-application, you'll be holding days you actually used. Your
+> If you skip the second application, you'll be holding days you actually used. Your
 > approver and HR can both see it, so it will come out — do the second step.
 
 **Returned to you** — open it, read the comment, fix it, resubmit. It keeps its

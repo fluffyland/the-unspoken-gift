@@ -33,7 +33,7 @@ HR Console has six tabs:
 
 | Tab | For |
 |---|---|
-| **All records** | every application, searchable, exports to CSV |
+| **All records** | every application, searchable, with remarks; exports to CSV |
 | **Balances** | everyone's remaining days, exports to CSV |
 | **Employees & approval routes** | add, edit, offboard staff; set who approves whom |
 | **Leave types** | leave categories and how many days each carries |
@@ -77,7 +77,7 @@ pre-filled, which meant clicking through filed someone silently:
 | **Team / department** | drives who approves their leave |
 | **Gender** | decides which leave types they're offered — maternity vs paternity |
 | **Account type** | decides what they can see and do |
-| **Works Saturdays** | changes what their leave costs: Mon–Sat is 6 days, not 5 |
+| **Required to work on Saturday** | changes what their leave costs: Mon–Sat is 6 days, not 5 |
 
 Gender is the one worth pausing on. It used to default to Female, so half of all new
 hires were set up with the wrong parental leave — and because the field *looked*
@@ -242,10 +242,10 @@ Use **Offboard** for real departures. The other two destroy history you may need
 ## Staff who work Saturdays
 
 **HR Console → Employees & approval routes → Teams / departments** — tick
-**Works Sat** for a team, and Saturday becomes a normal working day for everyone in
-it.
+**Required to work on Saturday** for a team, and Saturday becomes a normal working day
+for everyone in it.
 
-**Per person:** their Edit form → **Works Saturdays** → **Yes** or **No**. This is now
+**Per person:** their Edit form → **Required to work on Saturday** → **Yes** or **No**. This is now
 a required answer rather than an inherited one, so each person's record states it
 outright. Anyone whose record predates the change will be asked once, the first time
 you open their Edit form.
@@ -262,59 +262,35 @@ Public holidays are still excluded for everyone, including on a Saturday.
 
 **HR Console → Company settings → Public holidays**
 
-**One year at a time.** The heading shows the year you're looking at, with **◀** and
-**▶** either side of it — ◀ for the earlier year, ▶ for the later one, the same as the
-Calendar tab. The count in the heading always describes the rows underneath it, so 2026
-and 2027 can never be mixed together in one list.
+**You keep this list yourself.** There is no automatic updater — LeaveDesk had one, it
+never once worked, and in August 2026 it was removed rather than left sitting there
+looking automatic. Nothing about the leave maths changed: these dates are still excluded
+from every leave calculation and still shown on the company calendar. The only difference
+is that somebody has to type them in, and now it says so.
 
-The list auto-syncs monthly from MOM's official data, and there's a **🔄 Sync now**
-button if you don't want to wait. It tells you exactly what changed — how many dates
-were added, renamed or removed, and how many of your own manual entries also appear in
-MOM's list and were kept as yours. If it can't run, it says so; it never fails quietly.
+**One year at a time.** The heading shows the year you're looking at, with **◀** and **▶**
+either side of it — ◀ earlier, ▶ later, the same as the Calendar tab. The count in the
+heading always describes the rows underneath it, so 2026 and 2027 can never be mixed
+together in one list.
 
-> **⚠️ As of August 2026, automatic updates have not been switched on for this system.**
-> Press **🔄 Sync now** and it can't reach anything. Until someone switches it on, add
-> each year's dates with **+ Add holiday**, or paste
-> [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into
-> Supabase → SQL Editor, which loads all 12 of MOM's 2027 dates in one go and leaves
-> 2026 untouched.
->
-> *This is a statement about a particular day, not about how the system works.*
-> [`HANDOVER.md`](HANDOVER.md) §5 is the one place that tracks what is actually running —
-> check there before trusting this paragraph.
+**Adding a date:** type it as **DD/MM/YYYY** — e.g. `15/07/2026` — give it a name, and
+press **+ Add holiday**. Slashes, dashes and dots all work. **✎** edits a date, **✕**
+removes one.
 
-If the sync can't be reached, the message says so **without guessing why**: it may be your
-internet, or it may be that automatic updates were never switched on. It tells you which
-to try first. It will never send you off to fix something that isn't broken.
+**Where to get the dates:** MOM publishes them at
+**https://www.mom.gov.sg/employment-practices/public-holidays**. Singapore has **11
+gazetted public holidays a year**; when one falls on a Sunday the following Monday is a
+holiday too, so a year normally has **11 to 15 rows**. Fewer than 11 means something is
+missing.
 
-**Where the data comes from:** data.gov.sg collection 691, published by the **Ministry
-of Manpower** — their own machine-readable feed, not a copy of the mom.gov.sg web page
-(which would break silently whenever the page was redesigned). You can check the source
-yourself at `api-production.data.gov.sg/v2/public/api/collections/691/metadata`.
+**A shortcut for a whole year:** paste
+[`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into
+Supabase → SQL Editor and run it — that's 2027's twelve dates in one go, taken from MOM's
+published list. It is still manual entry, just faster. It never overwrites a date you
+already have.
 
-**Adding a date by hand:** type it as **DD/MM/YYYY** — e.g. `15/07/2026`. Slashes,
-dashes and dots all work.
-
-The **Source** column shows where each date came from and when it last changed:
-
-| | |
-|---|---|
-| 🔄 Sync · 01/08/2026 09:17 | came from MOM, confirmed on that date |
-| ✋ Manual · 15/07/2026 14:03 | you added or edited it then |
-
-Above the table, **"Last checked against MOM"** tells you when the sync last *ran*.
-That's the one to watch: a sync that runs and finds nothing changes no rows, so
-without this line a working sync and a dead one look identical. If it's more than
-about 45 days old the system warns you — the schedule has stopped.
-
-**Your manual entries are protected.** The sync will never delete a date you added,
-and never renames one. If you add a date that MOM later publishes too, it stays
-yours and HR gets told: *"1 date you added by hand also appears in MOM's list — kept
-as yours."*
-
-> **Check this every January.** The sync is the single most likely thing to fail
-> quietly — see [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md) for exactly how to
-> verify it and what to do when it hasn't worked.
+> **Do this every January**, for the year ahead. Nothing else will do it, and nothing will
+> remind you — see [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md).
 
 ---
 
@@ -386,6 +362,11 @@ assuming — again, [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md).
 
 **HR Console → All records** — every application ever. Filter by status, search
 by name, **⬇ Export CSV**.
+
+The **Remarks** column shows the reason the employee typed, so you can scan a page of
+requests without opening each one. Long ones are shortened with `…` — hover to read the
+whole thing, or click the row for the full record. The same column appears on the
+approver's team view, and the full text has always been in the CSV export.
 
 Statuses: Pending · Approved · Rejected · Returned · Withdrawn ·
 Cancellation requested · Cancelled.

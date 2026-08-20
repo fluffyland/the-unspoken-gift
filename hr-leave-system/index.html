@@ -312,7 +312,7 @@ const mapAction = c => ({
   approved: "Approved", approved_overlap_ack: "Approved (overlap acknowledged)",
   rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", auto_approved: "Auto-approved",
   cancel_requested: "Cancellation requested", cancelled: "Cancellation confirmed", cancel_denied: "Cancellation declined",
-  auto_cancelled: "Cancelled automatically — no approver needed"
+  auto_cancelled: "Cancelled automatically"
 }[c] || c);
 
 async function loadAll() {
@@ -345,19 +345,12 @@ async function loadAll() {
   const leaveTypes = (typeR.data || []).map(mapType).sort((a, b) => a.sort - b.sort);
   const publicHolidays = (phR.data || []).map(x => x.holiday).sort();
   const phNames = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.name || "Public holiday"]));
-  const phSource = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.source || "manual"]));
-  // v13 adds updated_at (last change from ANY source). Manual rows have no synced_at,
-  // so this is the only column that can answer "when was this added by hand".
-  const phWhen = Object.fromEntries((phR.data || []).map(x => [x.holiday, x.updated_at || x.synced_at || null]));
   const departments = (deptR.data || []).map(x => x.name).sort((a, b) => a.localeCompare(b));
-  // When did the holiday sync last RUN? Per-row timestamps only move when a date is in
-  // the feed, so a sync that ran and found nothing leaves every row looking stale. This
-  // is the signal that the job is alive at all — same idea as the keep-alive heartbeat.
-  let phLastCheck = null;
-  try {
-    const r = await sb.from("holiday_sync_log").select("ran_at,status").order("ran_at", { ascending: false }).limit(1).maybeSingle();
-    if (r.data) phLastCheck = r.data;
-  } catch (e) { /* non-HR or table absent — the line simply won't show */ }
+  // Public holidays are a list HR keeps by hand. The automatic MOM sync was removed in
+  // Aug 2026 — it had never once run against this project, and a button that looks
+  // automatic while doing nothing is worse than no button. The `source` / `synced_at` /
+  // `updated_at` columns and the holiday_sync_log table still exist in the database;
+  // nothing reads them any more. See HANDOVER.md before wiring any of it back up.
   // Keep `departments` a plain list of names — dropdowns everywhere depend on that.
   // The Saturday flag rides alongside as a lookup instead of changing the shape.
   const deptSat = Object.fromEntries((deptR.data || []).map(x => [x.name, !!x.works_saturday]));
@@ -392,15 +385,20 @@ async function loadAll() {
   }));
   const ledger = (ledR.data || []).map(l => ({ id: l.id, empId: l.emp_id, type: l.leave_type,
     delta: Number(l.delta_days), reason: l.reason, refApp: l.ref_application, by: l.created_by, ts: Date.parse(l.created_at) }));
+  // The timeline prints "<action> — <comment>", and the database writes a fixed sentence
+  // for the two automatic actions, so the explanation landed twice and named a job title
+  // ("Managing Director") that is only right for one person. Normalise it here rather than
+  // with a migration, so rows already written are corrected too.
+  const autoComment = c => /^No approver required/i.test(c || "") ? "No approver required" : (c || "");
   const ev = events.map(v => ({ appId: v.application_id, actor: v.actor, action: mapAction(v.action),
-    comment: v.comment || "", ts: Date.parse(v.created_at) })).sort((a, b) => a.ts - b.ts);
+    comment: autoComment(v.comment), ts: Date.parse(v.created_at) })).sort((a, b) => a.ts - b.ts);
 
   // Company-wide calendar comes from a dedicated view (everyone can read it),
   // separate from `applications` which RLS limits to your own + those you approve.
   const calR = await sb.from("leave_calendar").select("*");
   const calendar = (calR.data || []).map(c => ({ name: c.name, dept: c.dept, start: c.start_date, end: c.end_date, status: c.status, worksSat: !!c.works_saturday }));
 
-  db = { org, departments, deptSat, employees, leaveTypes, publicHolidays, phNames, phSource, phWhen, phLastCheck, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
+  db = { org, departments, deptSat, employees, leaveTypes, publicHolidays, phNames, ledger, applications, events: ev, calendar, outbox: [], balCache: {} };
   // Feature detection so the UI stays safe before the v8 database migration is applied.
   db.empExtra   = !!(empR.data && empR.data[0] && ("emp_no" in empR.data[0]));
   db.ltHalf     = !!(typeR.data && typeR.data[0] && ("allow_half_day" in typeR.data[0]));
@@ -940,10 +938,22 @@ function toast(msg) { const t = document.getElementById("toast"); t.textContent 
 let keepScrollOnce = false;
 function rerender() { keepScrollOnce = true; render(); }
 // A selector that finds the same control again once the HTML has been rebuilt.
+// Which control to put the focus back on after a re-render.
+// This used to require data-act — but EVERY form field in the app carries data-f instead,
+// so it returned null for all of them: nothing was re-focused, the caret was lost, and the
+// browser's scroll anchoring lurched. That is the "jumping" reported three separate times
+// (ledger sort, search boxes, filter dropdowns) and fixed three times in the caller rather
+// than here. Matching data-f too fixes the whole class at once.
 function focusKey(el) {
-  if (!el || !el.dataset || !el.dataset.act) return null;
-  let s = `[data-act="${el.dataset.act}"]`;
-  for (const k of ["c", "id", "f", "t", "k"]) if (el.dataset[k] != null) s += `[data-${k}="${el.dataset[k]}"]`;
+  if (!el || !el.dataset) return null;
+  let s = el.dataset.act != null ? `[data-act="${el.dataset.act}"]`
+        : el.dataset.f   != null ? `[data-f="${el.dataset.f}"]`
+        : null;
+  if (!s) return null;
+  // "d" is in here for the half-day selects, which are one control per date.
+  for (const k of ["c", "id", "f", "t", "k", "d"]) {
+    if (el.dataset[k] != null && !s.includes(`[data-${k}=`)) s += `[data-${k}="${el.dataset[k]}"]`;
+  }
   return s;
 }
 function render() {
@@ -1156,7 +1166,7 @@ function vDashboard() {
     </div>`;
 }
 function chainText(e) {
-  if (!e.approver1) return "auto-approved (Managing Director)";
+  if (!e.approver1) return "Auto-approved — No approver required";
   let s = emp(e.approver1) ? emp(e.approver1).name : "—";
   if (e.twoLevel && e.approver2) s += " → " + emp(e.approver2).name + " (2 levels)";
   return s;
@@ -1229,8 +1239,12 @@ function vApply() {
     ? { type: editing.type, start: editing.start, end: editing.end, half: Object.fromEntries((editing.halfDays || []).map(x => [x.d, x.part])), reason: editing.reason, att: editing.att }
     : { type: "annual", start: dstr(1), end: dstr(1), half: {}, reason: "", att: "" });
   if (!f.half) f.half = {};
+  // lt() returns undefined for a code that is no longer a leave type — HR deleting one
+  // while a draft is open, say. That used to blank the entire page, which is the worst
+  // failure this app can have: nothing on screen and nothing to click.
+  if (!lt(f.type)) f.type = (types[0] || db.leaveTypes[0] || {}).code || "";
   vp.form = f;
-  const t = lt(f.type), b = bal(me.id, f.type);
+  const t = lt(f.type) || { code: f.type, en: f.type, days: 0 }, b = bal(me.id, f.type);
   // Half-day is only offered for types HR allows (fallback: annual + off-in-lieu pre-migration)
   const allowHalf = typeof t.allowHalf === "boolean" ? t.allowHalf : ["annual", "oil"].includes(t.code);
   const half = allowHalf ? f.half : {};
@@ -1252,10 +1266,8 @@ function vApply() {
   const clash = (f.start && f.end) ? selfOverlap(f, vp.editId) : null;
   return `
     <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
-    <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "As Managing Director your leave is recorded automatically — HR is notified for the record."}</p>
+    <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "No approver required — your leave is recorded automatically, and HR is notified for the record."}</p>
     ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
-    ${(!editing && vp.reapplyFrom) ? `<div class="callout warn" style="margin-bottom:14px"><b>${fmtD(vp.reapplyFrom.days)} day${vp.reapplyFrom.days === 1 ? "" : "s"} went back into your balance</b> when you cancelled ${esc(vp.reapplyFrom.type)} (${vp.reapplyFrom.range}).
-      The dates below are the ones you originally booked — <b>change the end date to your last day away</b> and submit, so you are only charged for the days you actually took.</div>` : ""}
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
         <select data-f="type">${types.map(x => `<option value="${x.code}" ${x.code === f.type ? "selected" : ""}>${esc(x.en)}</option>`).join("")}</select>
@@ -1278,8 +1290,8 @@ function vApply() {
             <option value="pm" ${f.half[ds] === "pm" ? "selected" : ""}>Afternoon only (PM)</option>
           </select></div>`).join("")}</div></div>` : ""}
       <div class="callout acc" style="margin:12px 0">
-        <b style="font-size:17px">${fmtD(days)}</b> working day${days === 1 ? "" : "s"} — weekends & Singapore public holidays excluded automatically
-        ${backdated ? " · <b>Backdated</b> (start date is in the past — common for sick leave)" : ""}
+        <b style="font-size:17px">${fmtD(days)}</b> working day${days === 1 ? "" : "s"} — Singapore public holidays excluded automatically
+        ${backdated ? " · <b>Backdated</b>" : ""}
       </div>
       ${over ? `<div class="callout warn" style="margin:0 0 12px">Insufficient balance: this needs ${fmtD(days)} day${days === 1 ? "" : "s"} but only ${fmtD(b.avail)} available</div>` : ""}
       ${clash ? `<div class="callout warn" style="margin:0 0 12px">⚠ <b>These dates overlap leave you've already applied for.</b><br>
@@ -1302,6 +1314,7 @@ function lastReturnComment(a) { const s = [...a.steps].reverse().find(x => x.sta
 let submitting = false; // guards against double-click / slow-network duplicate submits
 async function doSubmit() {
   const f = vp.form, t = lt(f.type);
+  if (!t) return toast("Please choose a leave type.");
   const allowHalf = typeof t.allowHalf === "boolean" ? t.allowHalf : ["annual", "oil"].includes(t.code);
   const wdays = workingDaysList(f.start, f.end);
   const half = allowHalf ? (f.half || {}) : {};
@@ -1346,15 +1359,19 @@ function vMyApps() {
     <div class="card">${mine.length ? appTable(mine, false) : `<div class="empty">No applications yet</div>`}</div>`;
 }
 function appTable(list, showWho) {
+  // Remarks appear on the views that look at OTHER people (HR console, an approver's team),
+  // where reading a reason previously meant opening every row in turn. Your own list keeps
+  // its narrower shape — you already know why you applied.
+  const cut = (r, n) => { r = String(r || ""); return r.length > n ? esc(r.slice(0, n - 1)) + "…" : esc(r); };
   return `<div class="tablebox"><table><thead><tr>
-    ${showWho ? "<th>Employee</th>" : ""}<th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th><th>Waiting on</th></tr></thead><tbody>
+    ${showWho ? "<th>Employee</th>" : ""}<th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th><th>Waiting on</th>${showWho ? "<th>Remarks</th>" : ""}</tr></thead><tbody>
     ${list.map(a => {
       const t = lt(a.type);
       const node = a.status === "pending" && a.steps.length ? emp(a.steps[a.cur].approverId).name + (a.steps.length > 1 ? ` (level ${a.cur + 1}/${a.steps.length})` : "") : "—";
       return `<tr class="rowlink" data-act="detail" data-id="${a.id}">
         ${showWho ? `<td>${esc(emp(a.empId).name)}</td>` : ""}
         <td>${esc(t.en)}${a.att ? ` <span title="Has an attachment">📎</span>` : ""}</td><td class="num">${fmtRange(a.start, a.end)}</td>
-        <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stName(a.status)}</span></td><td>${node}</td></tr>`;
+        <td class="num">${fmtD(a.days)}</td><td><span class="pill st-${a.status}">${stName(a.status)}</span></td><td>${node}</td>${showWho ? `<td class="meta" title="${esc(a.reason || "")}">${cut(a.reason, 40) || "—"}</td>` : ""}</tr>`;
     }).join("")}</tbody></table></div>`;
 }
 
@@ -1486,7 +1503,7 @@ function cancelCard(a) {
     </div></div>`;
 }
 function stepsView(a) {
-  if (!a.steps.length) return `<div class="steps"><div class="step ok"><span class="dot">✓</span><span>Approved automatically — no approver needed</span></div></div>`;
+  if (!a.steps.length) return `<div class="steps"><div class="step ok"><span class="dot">✓</span><span>Approved automatically — No approver required</span></div></div>`;
   return `<div class="steps">${a.steps.map((s, i) => {
     const cls = s.status === "approved" ? "ok" : (s.status === "rejected" || s.status === "returned") ? "no" : (i === a.cur && a.status === "pending") ? "now" : "off";
     const icon = s.status === "approved" ? "✓" : (s.status === "rejected" ? "✕" : (s.status === "returned" ? "↩" : s.order));
@@ -1509,8 +1526,6 @@ function detailModal(id) {
   // feature not existing. Cancelling refunds the FULL application; the employee then
   // re-applies for the days actually taken (see the re-apply prompt below).
   const canCancel = own && a.status === "approved";
-  const started = a.start <= todayStr();
-  const canReapply = own && a.status === "cancelled" && started;
   return `<div class="modalback" data-act="closemodal">
     <div class="modal" data-stop="1">
       <div class="hd"><h3>${esc(t.en)} · ${esc(e.name)}</h3><span class="pill st-${a.status}">${stName(a.status)}</span>
@@ -1522,7 +1537,7 @@ function detailModal(id) {
         ${a.att ? `<dt>Attachment</dt><dd><div id="attprev" data-path="${esc(a.att)}" data-name="${esc(a.att.split("/").pop().replace(/^\d+_/, ""))}">${attLink(a.att)}</div></dd>` : ""}
         <dt>Submitted</dt><dd>${fmtTs(a.createdAt)}${a.backdated ? " · backdated" : ""}</dd>
       </dl>
-      ${own && !canCancel && !canReapply && ["cancel_requested","cancelled","rejected","withdrawn"].includes(a.status)
+      ${own && !canCancel && ["cancel_requested","cancelled","rejected","withdrawn"].includes(a.status)
         ? `<p class="meta" style="margin:6px 0 0">${{
             // A no-approver application is confirmed the moment it is requested (SQL v15), so it
             // never rests in this state. Keep the fallback wording honest anyway: promising an
@@ -1534,9 +1549,6 @@ function detailModal(id) {
             rejected: "This application was declined. Apply again with different dates if you still need the leave.",
             withdrawn: "You withdrew this application before it was decided."
           }[a.status]}</p>` : ""}
-      ${canReapply ? `<div class="callout warn" style="margin:8px 0"><b>You were already away from ${fmtDate(a.start)}.</b>
-        All <b>${fmtD(a.days)}</b> day${a.days === 1 ? "" : "s"} have been returned to your balance, including the days you actually took.
-        Apply again for those days, or your balance will be higher than it should be.</div>` : ""}
       ${t.mc ? `<div class="callout acc" style="margin:6px 0">📄 The original hardcopy MC must be submitted to HR within 3 working days.</div>` : ""}
       ${stepsView(a)}
       <h3 style="margin-top:14px">Timeline</h3>
@@ -1545,7 +1557,6 @@ function detailModal(id) {
         ${own && a.status === "pending" ? `<button class="btn sec" data-act="withdraw" data-id="${a.id}">Withdraw</button>` : ""}
         ${own && a.status === "returned" ? `<button class="btn" data-act="edit" data-id="${a.id}">Amend & resubmit</button>` : ""}
         ${canCancel ? `<button class="btn ghost" data-act="cancelreq" data-id="${a.id}">Cancel this leave</button>` : ""}
-        ${canReapply ? `<button class="btn" data-act="reapply" data-id="${a.id}">Re-apply for days taken</button>` : ""}
         <button class="btn sec" data-act="closemodal">Close</button>
       </div>
     </div></div>`;
@@ -1620,8 +1631,8 @@ function hrEmployees() {
     <div class="callout acc" style="margin-bottom:14px">This tab configures the approval workflow for each employee. By default, a request needs one approver. Add a 2nd level approver if a second approval is required. In-flight applications keep their original route.</div>
     <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
       <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
-      <p class="meta" style="margin:8px 0 0">Ticking <b>Works Sat</b> makes Saturday a normal working day for that team — a Mon–Sat leave then costs 6 days instead of 5. Individuals can override it on their own profile. Public holidays are still excluded for everyone.</p>
-      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th>${db.hasSat ? `<th title="Everyone in this team works Saturdays unless their own profile overrides it">Works Sat</th>` : ""}<th></th></tr></thead><tbody>
+      <p class="meta" style="margin:8px 0 0">Ticking <b>Required to work on Saturday</b> makes Saturday a normal working day for that team — a Mon–Sat leave then costs 6 days instead of 5. Individuals can override it on their own profile. Public holidays are still excluded for everyone.</p>
+      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th>${db.hasSat ? `<th title="Everyone in this team works Saturdays unless their own profile overrides it">Required to work on Saturday</th>` : ""}<th></th></tr></thead><tbody>
         ${db.departments.map(d => `<tr>
           <td><input type="text" value="${esc(d)}" data-act="deptname" data-old="${esc(d)}" style="width:100%"></td>
           <td class="num">${deptCount(d)}</td>
@@ -1709,7 +1720,7 @@ function empModal() {
         ${db.departments.map(d => `<option value="${esc(d)}" ${f.dept === d ? "selected" : ""}>${esc(d)}</option>`).join("")}
         <option value="__new" ${f.dept === "__new" ? "selected" : ""}>＋ New team…</option></select></div>
       ${f.dept === "__new" ? `<div class="field"><label>New team name</label><input type="text" data-f="em.newDept" value="${esc(f.newDept || "")}" placeholder="e.g. Customer Service"></div>` : ""}
-      <div class="field"><label>Occupation</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Process Engineer"></div>
+      <div class="field"><label>Occupation</label><input type="text" data-f="em.title" value="${esc(f.title)}" placeholder="e.g. Cluster Head, Admin"></div>
     </div>
     ${(!isAdd && adminLocked) ? `<div class="callout" style="margin:0 0 12px">This is an Owner / Super Admin account — only another Owner can manage its login, offboarding or deletion.</div>` : ""}
     ${(!isAdd && !adminLocked && f.hasLogin === false) ? `<div class="callout warn" style="margin:0 0 12px">This person has no sign-in account yet. <button class="btn" style="margin-left:8px;padding:6px 12px" data-act="createlogin" data-id="${m.id}" data-email="${esc(f.email)}">Create login</button></div>` : ""}
@@ -1740,7 +1751,7 @@ function empModal() {
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
     <div class="field" style="max-width:260px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
       ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}</div>
-    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Works Saturdays<span class="req">*</span></label>
+    ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Required to work on Saturday<span class="req">*</span></label>
       <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
         ${(f.worksSat === true || f.worksSat === false) ? "" : `<option value="" disabled selected>— Select —</option>`}
         <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes</option>
@@ -1846,28 +1857,6 @@ function ltModal() {
    holiday add/edit would fail against an older database. */
 function phStamp() { return db.hasPhWhen ? { updated_at: new Date().toISOString() } : {}; }
 
-/* Proof the monthly sync is still running. A sync that finds no changes touches no
-   rows, so without this an alive job and a dead one look identical. */
-function phLastCheckLine() {
-  const c = db.phLastCheck;
-  if (!c) return `<div class="callout warn" style="margin:6px 0">⚠ <b>No record of the holiday sync ever running.</b> Check the schedule, or add dates by hand below.</div>`;
-  const when = Date.parse(c.ran_at);
-  const daysAgo = Math.floor((Date.now() - when) / 86400000);
-  const stale = daysAgo > 45;   // it runs monthly; 45 days means it has missed one
-  return `<div class="${stale ? "callout warn" : "meta"}" style="margin:6px 0">
-    ${stale ? "⚠ " : ""}Last checked against MOM: <b>${fmtTs(when)}</b>${daysAgo >= 0 ? ` · ${daysAgo} day${daysAgo === 1 ? "" : "s"} ago` : ""}${c.status && c.status !== "ok" ? ` · <b>status: ${esc(c.status)}</b>` : ""}
-    ${stale ? "<br>The monthly sync appears to have stopped — nothing else will tell you this." : ""}</div>`;
-}
-
-/* One cell answering both "where did this date come from" and "when did it last
-   change". Manual rows have no synced_at at all, which is why v13 adds updated_at. */
-function phSourceCell(p) {
-  const auto = (db.phSource || {})[p] === "data.gov.sg";
-  const when = (db.phWhen || {})[p];
-  const stamp = when ? fmtTs(Date.parse(when)) : "—";
-  return `${auto ? "🔄 Sync" : "✋ Manual"} · ${stamp}`;
-}
-
 function hrSettings() {
   const o = db.org || {};
   const y = new Date().getFullYear();
@@ -1925,17 +1914,11 @@ function hrSettings() {
       <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phPrev}" ${phPrev ? "" : "disabled"} title="${phPrev || "No earlier year"}">◀</button>
       <span>Public holidays — Total ${phRows.length} Days in ${phY}</span>
       <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phNext}" ${phNext ? "" : "disabled"} title="${phNext || "No later year"}">▶</button></h3>
-    <div class="actions" style="margin:0 0 8px">
-      <button class="btn sec" data-act="phsync">🔄 Sync now</button>
-      <span class="meta" style="align-self:center">Check MOM's published list straight away, instead of waiting for the monthly run.</span>
-    </div>
-    ${phLastCheckLine()}
-    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. The list <b>auto-syncs monthly from MOM</b> — the <b>Source</b> column shows whether each date came from the sync or was added by hand, and when it last changed. You can <b>add, edit (✎) or remove (✕)</b> any date yourself, and <b>the sync will never rename or delete a date you added</b>.</p>
-    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Source</th><th></th></tr></thead><tbody>
+    <p class="meta" style="margin:4px 0 10px">These dates are excluded automatically when counting leave days, and shown on the company calendar. <b>You keep this list yourself</b> — <b>add, edit (✎) or remove (✕)</b> any date. Use ◀ ▶ to move between years, and enter next year's dates each January from MOM's published list: <b>mom.gov.sg/employment-practices/public-holidays</b>.</p>
+    <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
       ${phRows.map(p => `<tr>
         <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td>
         <td>${esc(db.phNames[p] || "—")}</td>
-        <td class="meta" style="white-space:nowrap">${phSourceCell(p)}</td>
         <td style="white-space:nowrap">
           <button class="btn ghost" style="padding:3px 9px" data-act="phedit" data-d="${p}" data-n="${esc(db.phNames[p] || "")}" title="Edit">✎</button>
           <button class="btn ghost" style="padding:3px 9px" data-act="phdel" data-d="${p}" title="Remove">✕</button></td></tr>`).join("")}
@@ -2487,17 +2470,6 @@ async function runAction(el) {
       break;
     }
 
-    case "reapply": {
-      const a = db.applications.find(x => x.id === id);
-      if (!a) return;
-      vp.form = { type: a.type, start: a.start, end: a.end,
-        half: Object.fromEntries((a.halfDays || []).map(x => [x.d, x.part])),
-        reason: a.reason || "", att: a.att || "" };
-      delete vp.editId; delete vp.detail; delete vp.resultModal;
-      vp.reapplyFrom = { days: a.days, type: lt(a.type).en, range: fmtRange(a.start, a.end) };
-      view = "apply"; render();
-      break;
-    }
     case "cancelreq": {
       const a = db.applications.find(x => x.id === id); if (!a) break;
       const started = a.start <= todayStr();
@@ -2534,8 +2506,7 @@ async function runAction(el) {
           ? { title: "Leave Cancelled",
               lines: [`<b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been cancelled.`,
                       `<b>${fmtD(snap.days)}</b> day${snap.days === 1 ? "" : "s"} ${snap.days === 1 ? "has" : "have"} been returned to your balance.`],
-              warn: started ? "⚠️ Please re-submit a new request for any days actually taken." : "",
-              act: started ? "reapply" : null, actId: id, actLabel: "Apply for days taken" }
+              warn: started ? "⚠️ Please re-submit a new request for any days actually taken." : "" }
           : { title: "Cancellation Request Submitted",
               lines: [`Your request to cancel approved leave <b>${esc(snap.type)}</b> (<b>${snap.range}</b>) has been sent to <b>${esc(snap.approver || "your approver")}</b> for review.`,
                       "Your balance will not change until it is approved."] };
@@ -2615,55 +2586,6 @@ async function runAction(el) {
       await reload(); toast("Holiday added");
       break;
     }
-    // Manual holiday sync. The Edge Function reconciles against MOM's list published on
-    // data.gov.sg and writes an audit row; apply_holiday_sync (v13) protects rows HR added
-    // by hand. Report the outcome in a dialog rather than a toast — "the button did nothing"
-    // is exactly how this feature stayed broken for months without anyone noticing.
-    case "phsync": {
-      toast("Checking MOM's list…");
-      let r;
-      try { r = await sb.functions.invoke("sync-holidays", { body: {} }); }
-      catch (e) { r = { error: e }; }
-      const payload = r && r.data;
-      const failed = (r && r.error) || (payload && payload.ok === false);
-      if (failed) {
-        const why = String((payload && (payload.error || payload.reason)) || (r.error && r.error.message) || "");
-        // Three cases, and the difference between them is what we can HONESTLY tell apart.
-        //   · ran and reported a problem  → it carries a real reason; show it.
-        //   · could not be reached, offline → the browser knows this for certain.
-        //   · could not be reached, online  → we genuinely cannot tell whether the updater
-        //     is missing or the connection dropped: supabase-js raises the same
-        //     "Failed to send a request to the Edge Function" for both (it comes from the
-        //     .catch() on the fetch itself). An earlier version of this dialog asserted
-        //     "not switched on" from that string alone, which would send someone off to do
-        //     a setup job because their wifi blinked. Say both, and say which to try first.
-        const ran = !!(payload && payload.ok === false);
-        const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-        vp.resultModal = ran
-          ? { title: "Holiday check didn't finish",
-              lines: ["<b>Nothing was changed.</b>",
-                      "The holiday list was checked but couldn't be updated.",
-                      why ? `<span class="meta">Reason: ${esc(why)}</span>` : "",
-                      "You can add dates yourself with <b>+ Add holiday</b> below."].filter(Boolean) }
-          : { title: "Couldn't check the holidays",
-              lines: ["<b>Nothing was changed.</b>",
-                      offline
-                        ? "You're not connected to the internet right now. Reconnect and press <b>🔄 Sync now</b> again."
-                        : "Either the connection dropped, or automatic holiday updates were never switched on for this system. Try again in a minute — if it keeps failing, it needs switching on, and that is a one-off job for whoever set the system up.",
-                      "Either way you can add dates yourself with <b>+ Add holiday</b> below."] };
-        render(); break;
-      }
-      const res = (payload && payload.result) || {};
-      const n = k => Array.isArray(res[k]) ? res[k].length : Number(res[k] || 0);
-      const years = (payload && payload.years) || [];
-      await reload();
-      vp.resultModal = { title: "Holiday sync complete",
-        lines: [`Checked ${years.length ? years.join(" and ") : "the published years"} against MOM's list (via data.gov.sg).`,
-                `<b>${n("added")} added</b> · ${n("renamed")} renamed · ${n("removed")} removed`,
-                `<b>${n("conflicts")}</b> of the dates you added by hand also appear in MOM's list — those were kept as yours.`,
-                `Last checked: ${fmtTs(Date.now())}`] };
-      render(); break;
-    }
     // rerender(), not render(): the holidays card sits well down a long page and render()
     // scrolls back to the top. Same rule as the search boxes and the sort headers.
     case "phyear": { if (el.dataset.y) { vp.phYear = el.dataset.y; rerender(); } break; }
@@ -2738,7 +2660,7 @@ document.addEventListener("change", async ev => {
     if (btn) btn.disabled = !el.checked;
     return;
   }
-  if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); render(); return; }
+  if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); rerender(); return; }
   if (el.dataset.act === "empf") {
     const id = el.dataset.id, f = el.dataset.f;
     if (f === "annualBase") {
@@ -2803,17 +2725,17 @@ document.addEventListener("change", async ev => {
     const k = f.slice(3);
     if (k === "joinDMY") {   // free-typed hire date → parse to ISO on blur, then reformat + refresh pro-rate
       const iso = dmyToIso(el.value);
-      if (iso) { vp.empModal.form.joinDate = iso; vp.empModal.form.joinDMY = fmtDMY(iso); render(); }
+      if (iso) { vp.empModal.form.joinDate = iso; vp.empModal.form.joinDMY = fmtDMY(iso); rerender(); }
       else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
       return;
     }
     if (k === "worksSat") {   // Yes / No only now; "" is the unchosen placeholder
       vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : undefined;
-      render(); return;
+      rerender(); return;
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
     if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
-    if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) render(); // refresh pro-rate preview / dependent selects / new-team field
+    if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) rerender(); // refresh pro-rate preview / dependent selects / new-team field
     return;
   }
   if (f.startsWith("oil.") && vp.oilModal) { vp.oilModal[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value; return; }
@@ -2824,17 +2746,17 @@ document.addEventListener("change", async ev => {
       const file = el.files && el.files[0];
       vp.form._file = file || null;               // real File object, uploaded on submit
       vp.form.att = file ? file.name : "";
-      render(); return;
+      rerender(); return;
     }
     if (f === "half") {
       const ds = el.dataset.d;
       if (!vp.form.half) vp.form.half = {};
       if (el.value) vp.form.half[ds] = el.value; else delete vp.form.half[ds];
-      render(); return;
+      rerender(); return;
     }
     vp.form[f] = el.value;
     if (f === "start" && vp.form.end < vp.form.start) vp.form.end = vp.form.start;
-    render();
+    rerender();
   }
 });
 // <details> open state is lost on re-render; remember the Teams panel's state

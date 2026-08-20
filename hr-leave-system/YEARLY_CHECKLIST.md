@@ -15,14 +15,14 @@ supposed to do actually happen?"
 
 | Trust it | Verify it once a year |
 |---|---|
-| Working-day counting (weekends, holidays excluded) | **Public holidays are actually loaded** |
+| Working-day counting (weekends, holidays excluded) | **Next year's public holidays are entered — by you** |
 | Balance arithmetic — always the sum of its entries | **Rollover + new-year grant actually ran** |
 | Permissions — enforced by the database, not the screen | **Keep-alive is still alive** |
 | Approval routing | **You still have two Owners** |
 | | **You have a recent CSV backup** |
 
-The right-hand column is everything that depends on a scheduled job. Every one
-of them can fail without producing an error anyone sees.
+The right-hand column is everything that depends on a scheduled job, or on somebody
+remembering. Every one of them can fail without producing an error anyone sees.
 
 ---
 
@@ -30,133 +30,53 @@ of them can fail without producing an error anyone sees.
 
 Do this in the **first week of January**. It's about 20 minutes.
 
-## 1. Public holidays — the most likely thing to be broken
+## 1. Public holidays — the one job nothing else will do
 
-The system syncs Singapore public holidays monthly from MOM's official open data
-and loads next year's when they're published. It usually works. When it doesn't,
-**nothing tells you** — you find out when someone books leave over a holiday and
-loses a day.
+**This is manual, and nothing will remind you.** LeaveDesk used to claim a monthly sync
+from MOM; it never once ran, and it was removed in August 2026 rather than left there
+looking automatic. So next year's public holidays exist only if a person types them in.
 
-### 1a. Look at it in the app
+If you skip this, nobody sees an error. What happens instead is that someone books leave
+over Chinese New Year and quietly loses a day of annual leave.
 
-**HR Console → Company settings → Public holidays**
+### 1a. Look at next year
 
-The heading reads **"◀ Public holidays — Total N Days in YYYY ▶"**. Use the arrows to
-move between years — ◀ earlier, ▶ later. Only one year is listed at a time, and N is
-counted from the rows on screen, so the count cannot drift out of step with the list.
+**HR Console → Company settings → Public holidays**, then press **▶** to move to next
+year.
 
-**Check next year with ▶.** That is the year that will be missing if the sync has
-stopped, and the one you need before anyone books January leave.
+The heading reads **"◀ Public holidays — Total N Days in YYYY ▶"**, and N is counted from
+the rows on screen, so it cannot disagree with the list.
 
-The **Source** column tells you where each date came from and when it last changed —
-🔄 *Sync* with the last sync time, or ✋ *Manual* with when you added it.
+**Singapore has 11 gazetted public holidays a year.** When one falls on a Sunday the
+following Monday is a holiday too, so a year normally shows **11 to 15 rows**.
 
-Under the heading is a **"Last checked against MOM"** line. Read that one carefully:
-the per-row timestamps only move when a date is actually in MOM's feed, so a sync
-that ran and found nothing new correctly leaves every row looking stale. **The
-"Last checked" line is the one that tells you the sync is alive.** Months old = the
-schedule has stopped, even if every row looks fine.
+> **Fewer than 11 means the year hasn't been entered.** Don't rationalise it.
 
-**Singapore has 11 gazetted public holidays a year.** When one falls on a Sunday
-the following Monday is also a holiday, so the list may show a few more —
-roughly **11 to 15 rows** is normal.
+### 1b. Enter them
 
-> **Fewer than 11 means it's broken.** Don't rationalise it.
+MOM publishes the list at
+**https://www.mom.gov.sg/employment-practices/public-holidays**.
 
-### 1b. Check it properly in SQL
+Either:
 
-**Supabase → SQL Editor.** Replace the year with the one you're checking:
+- **In the app** — type the date as **DD/MM/YYYY**, give it a name, **+ Add holiday**.
+  Twelve dates takes about three minutes. **✎** edits, **✕** removes.
+- **In one paste** — Supabase → SQL Editor, run
+  [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) for 2027.
+  Same result, faster. It never overwrites a date you already have. For a later year,
+  copy that file and change the dates.
 
-```sql
--- What have we got, and where did it come from?
-select source, count(*)
-from public_holidays
-where holiday >= '2027-01-01' and holiday < '2028-01-01'
-group by source;
-```
-
-`data.gov.sg` = auto-synced. `manual` = typed in by hand. Zero rows means the
-sync has not run for that year at all.
+### 1c. Check it in SQL if you want certainty
 
 ```sql
--- The actual list — eyeball it against MOM's published dates
-select holiday, to_char(holiday, 'Dy') as day, name, source
+select holiday, to_char(holiday, 'Dy') as day, name
 from public_holidays
 where holiday >= '2027-01-01' and holiday < '2028-01-01'
 order by holiday;
 ```
 
-Compare against the official list at
-**https://www.mom.gov.sg/employment-practices/public-holidays**.
-
-### 1c. Did the sync job actually run?
-
-```sql
-select ran_at, source, years, total_seen, status, message
-from holiday_sync_log
-order by ran_at desc
-limit 5;
-```
-
-- **No rows at all** → the sync has never run. The function or the schedule is missing.
-- **Newest `ran_at` months old** → the schedule stopped.
-- **`status` not `ok`** → read `message`.
-
-### 1d. Fixing it
-
-**First, just press the button.** HR Console → Company settings → Public holidays →
-**🔄 Sync now**. It reports what changed — added, renamed, removed, and how many of
-your manual dates were kept as yours — or says plainly why it couldn't run. Re-check
-1b afterwards and you're done.
-
-> **As of August 2026 this button cannot work yet** — the updater has never been deployed
-> to this Supabase project, so pressing it says *"Couldn't check the holidays"*. That is a
-> one-off setup job, not a fault in your data. Until it's done, load each year by hand:
-> **+ Add holiday**, or paste
-> [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into the SQL
-> Editor for 2027. Both routes are as correct as the sync; they just aren't automatic.
->
-> **Check the date on this note.** It describes one particular day, and
-> [`HANDOVER.md`](HANDOVER.md) §5 is where the live state is actually tracked. If the
-> sync has since been switched on, that message means something else entirely — see 1d
-> below.
-
-**If you'd rather do it from outside the app**, replace `<project-ref>`:
-
-```
-curl -X POST https://<project-ref>.functions.supabase.co/sync-holidays
-```
-
-`{"ok":true,...}` means it worked — re-check 1b, you're done.
-
-**If that fails**, check the schedule exists:
-
-```sql
-select jobname, schedule, active from cron.job;
-select jobname, status, return_message, start_time
-from cron.job_run_details
-order by start_time desc
-limit 10;
-```
-
-You should see `sync-holidays-monthly`, `annual-rollover` and `annual-grant`,
-all `active`. Missing? Re-run the scheduling SQL from
-[`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md) §1.7.
-
-**If it still won't work — enter them by hand and move on.** Don't let a broken
-sync hold up the year. Either use **+ Add holiday** in Company settings, or:
-
-```sql
-insert into public_holidays (holiday, name, source) values
-  ('2027-01-01', 'New Year''s Day', 'manual'),
-  ('2027-02-06', 'Chinese New Year', 'manual')
-  -- ...the rest from MOM's list
-on conflict (holiday) do update set name = excluded.name;
-```
-
-> Manual entries are **safe**. The sync only ever touches rows where
-> `source = 'data.gov.sg'` — it will never overwrite or delete what you typed.
-> That also means a wrong manual entry stays wrong until *you* fix it.
+Compare against MOM's published list. That is the whole check — there is no sync log to
+read any more, and no schedule that can have stopped.
 
 ---
 
@@ -316,7 +236,7 @@ pause.
 
 If you only do five things in January:
 
-1. **Count the public holidays.** Fewer than 11 → broken.
+1. **Press ▶ and enter next year's public holidays.** Nothing else will. Fewer than 11 → not done.
 2. **Check Balances shows non-zero entitlements** for the new year.
 3. **Check `last_ping_at` is recent.**
 4. **Send yourself a test alert** and confirm it reaches your phone.
