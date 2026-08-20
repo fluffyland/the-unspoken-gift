@@ -273,21 +273,45 @@ either side of it — ◀ earlier, ▶ later, the same as the Calendar tab. The 
 heading always describes the rows underneath it, so 2026 and 2027 can never be mixed
 together in one list.
 
-**Adding a date:** type it as **DD/MM/YYYY** — e.g. `15/07/2026` — give it a name, and
+**Adding one date:** type it as **DD/MM/YYYY** — e.g. `15/07/2026` — give it a name, and
 press **+ Add holiday**. Slashes, dashes and dots all work. **✎** edits a date, **✕**
 removes one.
 
-**Where to get the dates:** MOM publishes them at
-**https://www.mom.gov.sg/employment-practices/public-holidays**. Singapore has **11
-gazetted public holidays a year**; when one falls on a Sunday the following Monday is a
-holiday too, so a year normally has **11 to 15 rows**. Fewer than 11 means something is
-missing.
+**Adding a whole year at once:** press **➕ Add a whole year** and paste the list, one
+holiday per line — a date, a space, then the name:
 
-**A shortcut for a whole year:** paste
-[`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) into
-Supabase → SQL Editor and run it — that's 2027's twelve dates in one go, taken from MOM's
-published list. It is still manual entry, just faster. It never overwrites a date you
-already have.
+```
+01/01/2027  New Year's Day
+06/02/2027  Chinese New Year
+1 January 2028  New Year's Day
+```
+
+Dates can be `01/01/2027`, `2027-01-01` or `1 January 2027`. Before anything is saved you
+see exactly what will be added, which dates are **already on the list** (those are skipped,
+never overwritten) and any lines it **couldn't read** — those are shown to you rather than
+quietly dropped. Then **Add N dates**, or **Cancel** and nothing happens.
+
+**It tells you when next year is missing.** From September onwards, if next year has fewer
+than 11 dates, a warning appears on this card and a ⚠️ appears on the **Company settings**
+tab. It stays quiet before September because MOM usually publishes the following year around
+April, and a warning that shows all year is a warning people learn to ignore.
+
+**Where to get the dates:** MOM publishes them at
+**https://www.mom.gov.sg/employment-practices/public-holidays**.
+
+**Why a year shows more than 11 dates.** Singapore gazettes **11 public holidays a year**.
+When one falls on a Sunday, the following Monday is a public holiday too and appears as its
+own row — so a full year normally lists **11 to 15 dates**. 2026 has 14: eleven holidays
+plus three observed Mondays.
+
+**Both rows belong in the list**, and the count is correct as it stands. The Monday is the
+actual day off, so it must be there or staff lose a day. The Sunday costs nothing, because
+Sunday was never a working day. The heading counts **dates on the list**, not days off —
+fewer than 11 means the year is incomplete.
+
+> There is also [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) for
+> Supabase → SQL Editor, from before the paste box existed. **➕ Add a whole year** does the
+> same thing without leaving LeaveDesk; use that instead.
 
 > **Do this every January**, for the year ahead. Nothing else will do it, and nothing will
 > remind you — see [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md).

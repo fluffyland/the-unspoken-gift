@@ -44,13 +44,20 @@ over Chinese New Year and quietly loses a day of annual leave.
 **HR Console → Company settings → Public holidays**, then press **▶** to move to next
 year.
 
-The heading reads **"◀ Public holidays — Total N Days in YYYY ▶"**, and N is counted from
-the rows on screen, so it cannot disagree with the list.
+The heading reads **"◀ Public holidays — N dates in YYYY ▶"**, and N is counted from the
+rows on screen, so it cannot disagree with the list.
 
 **Singapore has 11 gazetted public holidays a year.** When one falls on a Sunday the
-following Monday is a holiday too, so a year normally shows **11 to 15 rows**.
+following Monday is a holiday too and gets its own row, so a year normally shows **11 to
+15 dates**. Both rows are correct and both must stay: the Monday is the day off, and the
+Sunday costs nothing because it was never a working day.
 
 > **Fewer than 11 means the year hasn't been entered.** Don't rationalise it.
+
+**LeaveDesk now tells you.** From September, if next year has fewer than 11 dates you get
+a warning on the Public holidays card and a ⚠️ on the **Company settings** tab. That is a
+prompt, not a guarantee — it can only count what is there, and nobody but you can add the
+dates.
 
 ### 1b. Enter them
 
@@ -59,12 +66,15 @@ MOM publishes the list at
 
 Either:
 
-- **In the app** — type the date as **DD/MM/YYYY**, give it a name, **+ Add holiday**.
-  Twelve dates takes about three minutes. **✎** edits, **✕** removes.
-- **In one paste** — Supabase → SQL Editor, run
-  [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) for 2027.
-  Same result, faster. It never overwrites a date you already have. For a later year,
-  copy that file and change the dates.
+- **A whole year at once** — press **➕ Add a whole year** and paste the list, one per
+  line: a date, a space, then the name. Dates can be `01/01/2027`, `2027-01-01` or
+  `1 January 2027`. You see exactly what will be added before anything is saved, plus
+  anything already on the list (skipped) and any line it couldn't read. **This is the
+  quickest route and it works for any year.**
+- **One at a time** — type the date as **DD/MM/YYYY**, give it a name, **+ Add holiday**.
+  **✎** edits, **✕** removes.
+- There is also [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql)
+  for the Supabase SQL Editor, from before the paste box existed. You no longer need it.
 
 ### 1c. Check it in SQL if you want certainty
 

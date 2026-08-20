@@ -417,6 +417,33 @@ SOP manual + bootstrap/reset scripts.
   writes). Anyone with no approver saw it, whoever they were. All four now say
   *"No approver required"*. The database one is normalised on read (`autoComment` in
   `loadAll`) rather than migrated, so rows already written display correctly too.
+- **`.modalback` is the scroller, not the window — this is what "the page jumps" actually
+  was.** `.modalback` is `overflow-y:auto`, so while a modal is open `window.scrollY` sits
+  at a constant 0. `render()` saved and restored the window and therefore preserved
+  nothing, and every edit in a tall Edit-employee form threw you back to the top.
+  **Reported three times and "fixed" twice** — once by moving callers to `rerender()`, once
+  by teaching `focusKey()` about `data-f` (both were real bugs, neither was this one).
+  It survived because **the test asserted `window.scrollY` was unchanged, and it never
+  changes in that case**: the test passed for a reason unrelated to the bug.
+  Lesson, and it is the important one in this file: **prove a regression test fails without
+  the fix.** Revert the fix, watch it go red, put it back. `t5.mjs` was checked that way —
+  5 failures without, 0 with. Two of this session's three bad tests would have been caught
+  in thirty seconds by that habit.
+- **Never dereference `emp()` / `lt()` for display.** They are `Array.find()`, so they
+  return `undefined` for a row that isn't there — and a `TypeError` inside `render()` draws
+  NOTHING: a white page, no message, nothing to click. Two live routes to it: `loadAll()`
+  falls back from `employees_directory` to `employees`, whose RLS gives a non-HR user
+  **only their own row**; and `delete_employee_fully.sql` is a documented tool. Use
+  `empName()` / `ltName()` for a name, or `empSafe()` / `ltSafe()` for a whole record —
+  they return stand-ins shaped like the real thing. Bare `emp()`/`lt()` stays where the
+  code needs to know whether the row exists.
+- **Removed as dead code, Aug 2026** — don't resurrect without checking why: `oilModal()`
+  and its `oilopen`/`oilsave` handlers (the `+ OIL` button went in commit `79654c9`,
+  10 Jul 2026; Balance adjustments replaced it), `wdCount()` (superseded by
+  `wdCountHalf()`, and it still carried the pre-v12 rule that Saturday is never a working
+  day), `nowTs()`, the `mailOpen`/`booting` globals, `data-stop="1"` (no JS ever read it —
+  it *looked* like the thing protecting modals from click-through and never was), the
+  `resultModal` follow-on button, and 15 CSS rules.
 - **A modal that dismisses on the backdrop dismisses on its own body too.** The confirm
   and result dialogs put `data-act` on `.modalback`; the click delegator resolves
   `ev.target.closest("[data-act]")`, and the inner `.modal` carried no `data-act` — so a
