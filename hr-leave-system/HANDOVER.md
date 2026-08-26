@@ -250,10 +250,18 @@ const inline = html.match(/<script>\s*"use strict";[\s\S]*?<\/script>/)[0];
 //   return approvalCard(app); }) → regex-assert on the HTML string
 ```
 
-Previous suites (verify4–verify10, ~85 assertions) lived in the session
-scratchpad — **gone after the session ends**; recreate on demand. Also run
-`node --check` on the extracted script after every edit, and keep `$$`
+Previous suites lived in the session scratchpad — **gone after the session ends**;
+recreate on demand. As of 2026-08-26 there were seven, 152 assertions in total:
+`t.mjs` 17, `t2.mjs` 21, `t3.mjs` 13, `t4.mjs` 32, `t5.mjs` 11, `t6.mjs` 24,
+`t7.mjs` 34 (the caret, the holiday scroll jump, pasting MOM's table, year
+navigation). A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
+Also run `node --check` on the extracted script after every edit, and keep `$$`
 counts even in any SQL file you touch.
+
+**A test that asserts the old contract is not a regression — read it before "fixing"
+the code.** Making the year arrows unbounded turned two `t2.mjs` assertions red; they
+asserted the arrows were *disabled* at the ends, which was precisely what the change
+removed. The assertions were updated, not the code.
 
 **Know what this harness does NOT prove.** It seeds `db` and `me` by hand and calls
 `render()`, so it tests *behaviour against your own assumptions about the data*, never
