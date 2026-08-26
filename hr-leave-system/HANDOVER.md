@@ -429,6 +429,38 @@ SOP manual + bootstrap/reset scripts.
   the fix.** Revert the fix, watch it go red, put it back. `t5.mjs` was checked that way —
   5 failures without, 0 with. Two of this session's three bad tests would have been caught
   in thirty seconds by that habit.
+- **`render()` must restore the CARET, not just the focus — and that is a third face of the
+  same bug.** Putting the focus back on a rebuilt field without its `selectionStart` /
+  `selectionEnd` drops the cursor at character 0, so every subsequent keystroke is inserted
+  *in front* of the last one: typing `01` produced `10`, and backspace at position 0 did
+  nothing. It showed up on the holiday paste box because that box re-renders on every
+  keystroke to update its preview, but **it was never specific to that box** — any field
+  that re-renders as you type had it. Fixed in `render()`, where focus is already restored;
+  `selectionStart` throws on `number`/`date` inputs, hence the try/catch on both sides.
+  Third time in a row the answer was in the shared function and not in the caller.
+- **`reload()` scrolls to the top; `reloadKeep()` does not.** `reload()` is
+  `loadAll(); render()`, and `render()`'s scroll-to-top is correct for navigation and wrong
+  for a write that leaves you on the same screen. Removing a public holiday threw you back
+  to the top of a long settings page. Any handler that writes and stays put should call
+  `reloadKeep()` (`loadAll(); rerender()`): the holiday add/edit/remove actions, `orgsave`,
+  `hrsave`, `grantgo`. **Same rule as `render()` vs `rerender()`, one layer up** — which is
+  why it was missed.
+- **Public holidays save immediately; everything else on the HR Console is a draft.**
+  `saveDraft()` writes `leave_types`, `employees` and `org_settings` only. The holiday
+  handlers write `public_holidays` on the click. Both behaviours are right, but the screen
+  said nothing about the difference and a user reasonably assumed **Discard** would undo a
+  **✕**. The card now says so out loud. If you add another immediate-write control to a
+  page that has a Save bar, label it.
+- **`parseHolidayLines` reads cells, not lines.** MOM's page is a four-column table whose
+  copy-paste splits Chinese New Year's date and name across different lines, repeats the
+  holiday name in two columns, and ends with a conditional in-lieu footnote. A line-at-a-time
+  parser could not represent any of that. It now walks cells: a date opens a row awaiting a
+  name, weekday words are dropped as the Day column, anything else names the oldest unnamed
+  row, and a name with no row waiting is kept only if it elaborates the previous one
+  (`New Year` → `New Year's Day`). **The in-lieu footnote is skipped on purpose** — that
+  Monday is a holiday only for staff whose rest day is the Sunday, so it must never be added
+  company-wide automatically. Lines that contribute nothing come back in `bad`; dates that
+  never got a name come back in `noName`. Neither is ever guessed at.
 - **Never dereference `emp()` / `lt()` for display.** They are `Array.find()`, so they
   return `undefined` for a row that isn't there — and a `TypeError` inside `render()` draws
   NOTHING: a white page, no message, nothing to click. Two live routes to it: `loadAll()`

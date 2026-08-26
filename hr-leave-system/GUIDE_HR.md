@@ -268,17 +268,52 @@ looking automatic. Nothing about the leave maths changed: these dates are still 
 from every leave calculation and still shown on the company calendar. The only difference
 is that somebody has to type them in, and now it says so.
 
+> **Holiday changes save immediately.** They are **not** part of **Save changes**, and
+> **Discard** will not bring a removed date back. Everything else on the Company settings,
+> Employees and Leave types tabs waits for Save changes; this list does not, because a list
+> of dates is not a form. Delete carefully — a removed date is gone the moment you press ✕.
+
 **One year at a time.** The heading shows the year you're looking at, with **◀** and **▶**
 either side of it — ◀ earlier, ▶ later, the same as the Calendar tab. The count in the
 heading always describes the rows underneath it, so 2026 and 2027 can never be mixed
 together in one list.
 
+**Every year is reachable, empty or not.** The arrows keep going — 2028, 2029, 2035 — even
+before a single date exists for that year. That matters: to enter next year's dates you have
+to be standing on next year first. **➕ Add year** jumps straight to any year between 2000
+and 2100 without clicking ▶ ten times. A year with nothing in it simply says so, and stays
+on the list permanently once it has its first date.
+
 **Adding one date:** type it as **DD/MM/YYYY** — e.g. `15/07/2026` — give it a name, and
 press **+ Add holiday**. Slashes, dashes and dots all work. **✎** edits a date, **✕**
 removes one.
 
-**Adding a whole year at once:** press **➕ Add a whole year** and paste the list, one
-holiday per line — a date, a space, then the name:
+**Adding a whole year at once:** press **➕ Add a whole year**.
+
+**Paste MOM's table straight in.** Select the holidays table on MOM's page, copy, paste.
+The extra columns, the header row and the footnote about in-lieu days are all handled — you
+do not have to tidy anything up first:
+
+```
+Date              Day        Holiday          Holiday
+1 January 2027    Friday     New Year         New Year's Day
+6 February 2027
+7 February 2027   Saturday
+Sunday            Chinese New Year             Chinese New Year
+Monday, 8 February 2027, will be a public holiday if your rest day falls on 7 February 2027.
+10 March 2027     Wednesday  Hari Raya Puasa  Hari Raya Puasa
+```
+
+That paste produces exactly four dates, correctly named — including both days of Chinese
+New Year, whose date and name cells land on different lines when copied.
+
+> **The in-lieu sentence is deliberately ignored.** "Monday, 8 February 2027, will be a
+> public holiday if your rest day falls on 7 February 2027" is *conditional* — it applies
+> only to staff whose rest day is that Sunday, so it is not gazetted for everyone and must
+> not go on a company-wide list automatically. If it applies to your staff, add it yourself
+> with **+ Add holiday**.
+
+Or type them yourself, one per line — a date, a space, then the name:
 
 ```
 01/01/2027  New Year's Day
@@ -288,8 +323,9 @@ holiday per line — a date, a space, then the name:
 
 Dates can be `01/01/2027`, `2027-01-01` or `1 January 2027`. Before anything is saved you
 see exactly what will be added, which dates are **already on the list** (those are skipped,
-never overwritten) and any lines it **couldn't read** — those are shown to you rather than
-quietly dropped. Then **Add N dates**, or **Cancel** and nothing happens.
+never overwritten), any date that arrived **without a name**, and any lines it **couldn't
+read** — all shown to you rather than quietly dropped. Then **Add N dates**, or **Cancel**
+and nothing happens.
 
 **It tells you when next year is missing.** From September onwards, if next year has fewer
 than 11 dates, a warning appears on this card and a ⚠️ appears on the **Company settings**

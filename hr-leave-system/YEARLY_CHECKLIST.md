@@ -42,7 +42,8 @@ over Chinese New Year and quietly loses a day of annual leave.
 ### 1a. Look at next year
 
 **HR Console → Company settings → Public holidays**, then press **▶** to move to next
-year.
+year. The arrows reach **any** year, empty or not — and **➕ Add year** jumps straight to
+one, so you can stand on 2031 and start entering it years before it exists.
 
 The heading reads **"◀ Public holidays — N dates in YYYY ▶"**, and N is counted from the
 rows on screen, so it cannot disagree with the list.
@@ -66,13 +67,17 @@ MOM publishes the list at
 
 Either:
 
-- **A whole year at once** — press **➕ Add a whole year** and paste the list, one per
-  line: a date, a space, then the name. Dates can be `01/01/2027`, `2027-01-01` or
-  `1 January 2027`. You see exactly what will be added before anything is saved, plus
-  anything already on the list (skipped) and any line it couldn't read. **This is the
-  quickest route and it works for any year.**
+- **A whole year at once** — press **➕ Add a whole year** and **paste MOM's table
+  straight in**: select it on their page, copy, paste. Extra columns, the header row, the
+  two-line Chinese New Year entry and the in-lieu footnote are all handled. You see exactly
+  what will be added before anything is saved, plus anything already on the list (skipped),
+  any date that came without a name, and any line it couldn't read. **This is the quickest
+  route and it works for any year.**
+  Typing them yourself also works — one per line, a date then the name, in any of
+  `01/01/2027`, `2027-01-01` or `1 January 2027`.
 - **One at a time** — type the date as **DD/MM/YYYY**, give it a name, **+ Add holiday**.
-  **✎** edits, **✕** removes.
+  **✎** edits, **✕** removes. **These save immediately** — they are not part of *Save
+  changes*, and *Discard* will not undo a **✕**.
 - There is also [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql)
   for the Supabase SQL Editor, from before the paste box existed. You no longer need it.
 
@@ -246,7 +251,8 @@ pause.
 
 If you only do five things in January:
 
-1. **Press ▶ and enter next year's public holidays.** Nothing else will. Fewer than 11 → not done.
+1. **Press ▶ and enter next year's public holidays** — paste MOM's table straight into
+   **➕ Add a whole year**. Nothing else will do it. Fewer than 11 → not done.
 2. **Check Balances shows non-zero entitlements** for the new year.
 3. **Check `last_ping_at` is recent.**
 4. **Send yourself a test alert** and confirm it reaches your phone.

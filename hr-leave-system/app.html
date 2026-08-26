@@ -267,47 +267,102 @@ function phMissingYear(now) {
   return n < 11 ? nextY : "";
 }
 
-/* Parse a pasted block into holidays. One per line: a date, whitespace, then the name.
-   Accepts 01/01/2027, 2027-01-01 and 1 January 2027, because those are what people
-   actually paste. Anything else comes back in `bad` so it can be shown rather than
-   silently dropped — a bulk importer that eats a line is worse than one that refuses. */
+/* Read a pasted list of public holidays.
+
+   MOM's own page is a table — Date | Day | Holiday — and copying it gives tab-separated
+   cells, a header row, dates whose Day and Holiday cells land on a LATER line (that is how
+   Chinese New Year's two days come out), and a footnote sentence about in-lieu days.
+   Reading one line at a time could not cope with any of that: a bare "6 February 2027"
+   was unreadable, and "1 January 2027" ended up named "Friday New Year New Year's Day".
+
+   So this walks the CELLS in order and reads the table the way a person does:
+     · a date        → opens a row that is waiting for a name
+     · a weekday     → the Day column; dropped
+     · anything else → the name for the OLDEST row that hasn't got one
+   A name arriving with no row waiting is kept only if it is a longer form of the name just
+   assigned ("New Year" → "New Year's Day"); that is what collapses MOM's duplicated
+   Holiday columns, and it is why the header row disappears instead of becoming a name.
+
+   Nothing is guessed. A line that contributes nothing comes back in `bad`, and a date left
+   without a name comes back in `noName`, so both are shown rather than silently dropped —
+   a bulk importer that eats a line is worse than one that refuses.
+
+   Returns { add, dup, bad, noName }. It writes nothing; the caller confirms first. */
 const MONTHS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+const WEEKDAYS = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+// Column headings and the like. Not names, and not errors either.
+const PH_NOISE = ["date","dates","day","days","holiday","holidays","public holiday","public holidays","observance","note","notes"];
+// MOM's footnote: "Monday, 8 February 2027, will be a public holiday if your rest day
+// falls on 7 February 2027." That Monday is conditional — it depends on the individual's
+// rest day — so it is NOT gazetted for everyone and must never be added automatically.
+const PH_FOOTNOTE = /will be a public holiday|rest day|in lieu|following monday/i;
+
 function parseHolidayLines(text, existing) {
-  const add = [], dup = [], bad = [];
-  const seen = new Set();
+  const rows = [], dup = [], bad = [], pad = n => String(n).padStart(2, "0");
   const isReal = (y, mo, d) => {
     const dt = new Date(y, mo - 1, d);
     return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
   };
-  const pad = n => String(n).padStart(2, "0");
-  for (const raw of String(text || "").split(/\r?\n/)) {
-    const line = raw.trim().replace(/\s*\|\s*/g, " ");   // tolerate pasted table pipes
-    if (!line) continue;
-    let iso = "", name = "";
-    // "1 January 2027  New Year's Day"
-    let m = line.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})\s+(.+)$/);
+  // A date only when the WHOLE cell is one — so "8 February 2027" inside a sentence
+  // can never be mistaken for a row of the table.
+  const asDate = v => {
+    const t = String(v || "").trim().replace(/[,.]$/, "");
+    const m = t.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/);
     if (m) {
       const mo = MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1;
-      if (mo && isReal(+m[3], mo, +m[1])) { iso = `${m[3]}-${pad(mo)}-${pad(+m[1])}`; name = m[4]; }
+      return mo && isReal(+m[3], mo, +m[1]) ? `${m[3]}-${pad(mo)}-${pad(+m[1])}` : "";
     }
-    if (!iso) {
-      m = line.match(/^(\S+)\s+(.+)$/);
-      if (m) {
-        const t = m[1];
-        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) {
-          const [yy, mm, dd] = t.split("-").map(Number);
-          if (isReal(yy, mm, dd)) iso = `${yy}-${pad(mm)}-${pad(dd)}`;
-        } else iso = dmyToIso(t);
-        if (iso) name = m[2];
+    const i = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (i) return isReal(+i[1], +i[2], +i[3]) ? `${i[1]}-${pad(+i[2])}-${pad(+i[3])}` : "";
+    return dmyToIso(t);
+  };
+  const plain = v => String(v || "").trim().replace(/[,.]$/, "").toLowerCase();
+  const isWeekday = v => WEEKDAYS.includes(plain(v));
+  const isNoise = v => PH_NOISE.includes(plain(v));
+  // One cell may still hold "01/01/2027 New Year's Day" when it was typed with a single
+  // space rather than copied out of a table. Split those, and drop a leading weekday.
+  const expand = cell => {
+    const t = String(cell || "").trim();
+    if (!t || asDate(t)) return t ? [t] : [];
+    const m = t.match(/^(\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s*[\/.\-]\s*\d{1,2}\s*[\/.\-]\s*\d{2,4})\s+(.+)$/);
+    if (m && asDate(m[1])) {
+      const rest = m[2].trim().replace(/^(mon|tue|tues|wed|wednes|thu|thur|thurs|fri|sat|satur|sun)(day)?[,\s]+/i, "").trim();
+      return rest ? [m[1], rest] : [m[1]];
+    }
+    return [t];
+  };
+
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (PH_FOOTNOTE.test(line)) continue;          // an explanatory sentence, not a row
+    let used = false;
+    for (const cell of line.split(/\t+|\s{2,}|\s*\|\s*/).flatMap(expand)) {
+      const iso = asDate(cell);
+      if (iso) { rows.push({ holiday: iso, name: "" }); used = true; continue; }
+      if (isWeekday(cell) || isNoise(cell)) { used = true; continue; }
+      const name = String(cell).trim();
+      if (!name || name.length > 60) continue;     // prose, not a holiday name
+      const waiting = rows.find(r => !r.name);
+      if (waiting) { waiting.name = name; used = true; continue; }
+      // No row waiting. MOM prints the holiday twice, the second time in full.
+      const last = rows.length ? rows[rows.length - 1] : null;
+      if (last && last.name && (name.startsWith(last.name) || last.name.startsWith(name))) {
+        if (name.length > last.name.length) last.name = name;
+        used = true;
       }
     }
-    name = (name || "").trim();
-    if (!iso || !name) { bad.push(line); continue; }
-    if ((existing || []).includes(iso) || seen.has(iso)) { dup.push(iso); continue; }
-    seen.add(iso); add.push({ holiday: iso, name });
+    if (!used) bad.push(line);
+  }
+
+  const add = [], noName = [], seen = new Set();
+  for (const r of rows) {
+    if (!r.name) { noName.push(r.holiday); continue; }
+    if ((existing || []).includes(r.holiday) || seen.has(r.holiday)) { dup.push(r.holiday); continue; }
+    seen.add(r.holiday); add.push(r);
   }
   add.sort((a, b) => a.holiday < b.holiday ? -1 : 1);
-  return { add, dup, bad };
+  return { add, dup, bad, noName };
 }
 
 function dmyToIso(s) {
@@ -548,6 +603,11 @@ function halfChips(a) {
 
 /* Refresh the cache from Supabase and re-render (called after every mutation) */
 async function reload() { await loadAll(); render(); }
+/* Reload the data but stay where you are on the page. render() scrolls to the top by
+   design — it is also what runs when you switch tab — so any write that leaves you on
+   the SAME screen has to use this instead. The Public holidays card sits near the bottom
+   of a long settings page, so removing one date used to throw you back up to the header. */
+async function reloadKeep() { await loadAll(); rerender(); }
 // One-click login creation via the create-login Edge Function (HR-only, checked server-side).
 async function createLogin(email, empId) {
   try {
@@ -1008,10 +1068,18 @@ function render() {
   // "fixed" twice, because the test measured window.scrollY, which never moves in
   // that case and therefore always passed. Save the backdrop's own scrollTop too.
   const mbTop = keep ? (document.querySelector(".modalback") || {}).scrollTop || 0 : 0;
-  const fk = keep ? focusKey(document.activeElement) : null;
+  const ae = document.activeElement;
+  const fk = keep ? focusKey(ae) : null;
+  // AND THE CARET. Putting the focus back without the cursor position drops it at
+  // character 0, so every new character is typed IN FRONT of the last one: typing
+  // "01" produced "10", and backspace at position 0 did nothing. Any field that
+  // re-renders as you type was affected — reported on the holiday paste box, but it
+  // was never specific to that box, which is why it belongs here and not there.
+  let selS = null, selE = null;
+  if (fk) { try { selS = ae.selectionStart; selE = ae.selectionEnd; } catch (e) { /* number/date inputs refuse */ } }
   // Where the control you touched sat on screen, so we can put it back exactly
   // there — the save bar appearing would otherwise shift everything down.
-  const wasAt = fk ? document.activeElement.getBoundingClientRect().top : 0;
+  const wasAt = fk ? ae.getBoundingClientRect().top : 0;
   $app().innerHTML = (me && !me.unlinked) ? shell() : loginPage();
   window.scrollTo(0, y);
   const mb = mbTop ? document.querySelector(".modalback") : null;
@@ -1024,6 +1092,7 @@ function render() {
       const nowAt = el.getBoundingClientRect().top;
       if (!mb && nowAt !== wasAt) window.scrollTo(0, y + (nowAt - wasAt));
       el.focus({ preventScroll: true });
+      if (selS != null) { try { el.setSelectionRange(selS, selE); } catch (e) { /* not a text field */ } }
     }
   }
   // "Mixed" is a JS-only checkbox state — it can't be set from HTML.
@@ -1112,7 +1181,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.phBulk ? phBulkModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}${vp.confirmModal ? confirmModal() : ""}${vp.resultModal ? resultModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.phBulk ? phBulkModal() : ""}${vp.phYearGo ? phYearModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}${vp.confirmModal ? confirmModal() : ""}${vp.resultModal ? resultModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -1169,24 +1238,42 @@ function phBulkModal() {
   const years = [...new Set(r.add.map(a => a.holiday.slice(0, 4)))];
   return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:560px">
     <div class="hd"><h3>Add a whole year</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
-    <p class="meta" style="margin:0 0 10px">One holiday per line: the date, a space, then the name. Dates can be
-      <b>01/01/2027</b>, <b>2027-01-01</b> or <b>1 January 2027</b>. Copy them from the
-      <a href="https://www.mom.gov.sg/employment-practices/public-holidays" target="_blank" rel="noopener">MOM Public Holidays List</a>.</p>
+    <p class="meta" style="margin:0 0 10px">Paste straight from the
+      <a href="https://www.mom.gov.sg/employment-practices/public-holidays" target="_blank" rel="noopener">MOM Public Holidays List</a> —
+      the whole table, extra columns and all. Or type one per line: the date, then the name.
+      Dates can be <b>01/01/2027</b>, <b>2027-01-01</b> or <b>1 January 2027</b>.</p>
     <div class="field"><label>Paste the dates</label>
       <textarea data-f="phb.text" rows="8" placeholder="01/01/2027  New Year's Day&#10;06/02/2027  Chinese New Year&#10;07/02/2027  Chinese New Year">${esc(m.text || "")}</textarea></div>
     ${m.text && m.text.trim() ? `
       ${r.add.length ? `<div class="callout acc" style="margin:10px 0">
         <b>Ready to add ${r.add.length} date${r.add.length === 1 ? "" : "s"}${years.length === 1 ? " to " + years[0] : ""}</b>
         <div class="tablebox" style="margin-top:6px;max-height:190px;overflow-y:auto"><table><tbody>
-          ${r.add.map(a => `<tr><td class="num" style="white-space:nowrap">${fmtDate(a.holiday)} ${a.holiday.slice(0, 4)}</td><td>${dow(a.holiday)}</td><td>${esc(a.name)}</td></tr>`).join("")}
+          ${r.add.map(a => `<tr><td class="num" style="white-space:nowrap">${fmtDMY(a.holiday)}</td><td>${dow(a.holiday)}</td><td>${esc(a.name)}</td></tr>`).join("")}
         </tbody></table></div></div>` : `<div class="callout warn" style="margin:10px 0">Nothing new to add yet.</div>`}
       ${r.dup.length ? `<p class="meta" style="margin:6px 0">Already in the list — will be skipped: <b>${r.dup.length}</b> (${r.dup.map(d => fmtDate(d)).join(", ")})</p>` : ""}
+      ${r.noName.length ? `<div class="callout warn" style="margin:6px 0"><b>${r.noName.length} date${r.noName.length === 1 ? " has" : "s have"} no name</b> — ${r.noName.map(d => fmtDMY(d)).join(", ")}. Add the name${r.noName.length === 1 ? "" : "s"} and paste again, or add ${r.noName.length === 1 ? "it" : "them"} one at a time below.</div>` : ""}
       ${r.bad.length ? `<div class="callout warn" style="margin:6px 0"><b>Couldn't read ${r.bad.length} line${r.bad.length === 1 ? "" : "s"}</b> — these will be ignored:
         <ul style="margin:4px 0 0 18px">${r.bad.map(b => `<li>${esc(b)}</li>`).join("")}</ul></div>` : ""}
     ` : ""}
     <div class="actions">
       <button class="btn sec" data-act="closemodal">Cancel</button>
       <button class="btn" data-act="phbulkgo" ${r.add.length ? "" : "disabled"}>Add ${r.add.length} date${r.add.length === 1 ? "" : "s"}</button>
+    </div></div></div>`;
+}
+
+/* Jump to any year. The arrows step one year at a time, which is right for "next year"
+   and useless for "2035", so this is the way to get anywhere. A year does not have to
+   exist to be opened — an empty one is exactly where you go to start filling it in. */
+function phYearModal() {
+  return `<div class="modalback"><div class="modal" style="max-width:380px">
+    <div class="hd"><h3>Add a year</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <p class="meta" style="margin:0 0 12px">Type any year to open it. If it has no dates yet you can start adding them straight away — the year stays on the list from the moment it has its first date.</p>
+    <div class="field"><label>Year</label>
+      <input type="text" id="phyear-in" inputmode="numeric" autocomplete="off" value="${esc(String(vp.phYearGo || ""))}" placeholder="2028" style="max-width:120px">
+      <span class="hint">Anything from 2000 to 2100.</span></div>
+    <div class="actions">
+      <button class="btn" data-act="phyeargo">Open this year</button>
+      <button class="btn sec" data-act="closemodal">Cancel</button>
     </div></div></div>`;
 }
 
@@ -1936,14 +2023,13 @@ function hrSettings() {
   // One year on screen at a time. The heading used to count the CURRENT year while the
   // table listed EVERY year, so the moment next year's dates arrived the count and the
   // rows disagreed. Both now read the same `phY`, so they cannot drift apart again.
-  // Next year is always offered, even before a single date exists for it — that is the
-  // year that goes missing when the sync stops, so "▶ shows nothing" has to be a
-  // reachable answer. Built from the data alone, ▶ was dead exactly when it mattered.
-  const phYears = [...new Set(phSorted.map(p => p.slice(0, 4)).concat(String(y), String(y + 1)))].sort();
-  const phY = phYears.includes(String(vp.phYear)) ? String(vp.phYear) : String(y);
-  const phAt = phYears.indexOf(phY);
-  const phPrev = phAt > 0 ? phYears[phAt - 1] : "";
-  const phNext = phAt < phYears.length - 1 ? phYears[phAt + 1] : "";
+  // EVERY year is reachable, not only the ones that already have dates in them. Built from
+  // the data, ▶ was dead at the last year on file — so there was no way to stand on an
+  // empty 2028 and start entering it, which is precisely when you need to be there.
+  const PH_MIN = 2000, PH_MAX = 2100;
+  const phY = String(Math.min(PH_MAX, Math.max(PH_MIN, numOr(vp.phYear, y))));
+  const phPrev = +phY > PH_MIN ? String(+phY - 1) : "";
+  const phNext = +phY < PH_MAX ? String(+phY + 1) : "";
   const phRows = phSorted.filter(p => p.startsWith(phY));
   const dow = p => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p + "T00:00:00").getDay()];
   return `<div class="stack">
@@ -1984,10 +2070,12 @@ function hrSettings() {
   <div class="card"><h3 style="display:flex;align-items:center;gap:8px">
       <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phPrev}" ${phPrev ? "" : "disabled"} title="${phPrev || "No earlier year"}">◀</button>
       <span>Public holidays — ${phRows.length} date${phRows.length === 1 ? "" : "s"} in ${phY}</span>
-      <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phNext}" ${phNext ? "" : "disabled"} title="${phNext || "No later year"}">▶</button></h3>
+      <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phNext}" ${phNext ? "" : "disabled"} title="${phNext || "No later year"}">▶</button>
+      <button class="btn ghost" style="padding:2px 9px;font-size:12.5px;font-weight:600" data-act="phyearopen" title="Open any year">➕ Add year</button></h3>
     ${phMissingYear() ? `<div class="callout warn" style="margin:6px 0 10px">⚠️ <b>${phMissingYear()} public holidays are not entered yet</b> — ${db.publicHolidays.filter(p => p.startsWith(phMissingYear())).length} date(s) on file. Staff can't book ${phMissingYear()} leave correctly until they are. Use <b>➕ Add a whole year</b> below.</div>` : ""}
     <p class="meta" style="margin:4px 0 10px">Manually manage public holiday dates below. Use ◀ ▶ to switch years. For annual updates, refer to the <a href="https://www.mom.gov.sg/employment-practices/public-holidays" target="_blank" rel="noopener">MOM Public Holidays List</a>.</p>
     <div class="callout acc" style="margin:0 0 10px">💡 <b>Annual Maintenance:</b> Update next year's dates every January using MOM's published list.</div>
+    <p class="hint" style="margin:0 0 10px">Holiday changes <b>save immediately</b> — they are not part of <b>Save changes</b>, and <b>Discard</b> will not bring a removed date back.</p>
     <div class="tablebox" style="max-width:560px"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>
       ${phRows.map(p => `<tr>
         <td class="num">${fmtDate(p)}</td><td>${dow(p)}</td>
@@ -2223,7 +2311,7 @@ async function runAction(el) {
     case "logout": signOut(); break;
     case "nav": if (draftDirty()) { vp.leaveTo = { kind: "nav", v: el.dataset.v }; render(); break; } view = el.dataset.v; vp = {}; render(); break;
     case "hrtab": if (draftDirty()) { vp.leaveTo = { kind: "hrtab", t: el.dataset.t }; render(); break; } hrTab = el.dataset.t; vp = {}; render(); break;
-    case "hrsave": { if (await saveDraft()) { delete vp.draft; await reload(); toast("Changes saved."); } break; }
+    case "hrsave": { if (await saveDraft()) { delete vp.draft; await reloadKeep(); toast("Changes saved."); } break; }
     case "hrdiscard": delete vp.draft; render(); break;
     case "hrkeep": delete vp.leaveTo; render(); break;
     case "hrdiscardleave": { const to = vp.leaveTo; delete vp.draft; delete vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; render(); break; }
@@ -2235,7 +2323,7 @@ async function runAction(el) {
       render(); break;
     }
     case "detail": vp.detail = id; render(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.phBulk; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; render(); break;
+    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.phBulk; delete vp.phYearGo; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; render(); break;
     case "createlogin": {
       const email = el.dataset.email, eid = el.dataset.id;
       toast("Creating login…");
@@ -2457,7 +2545,7 @@ async function runAction(el) {
       if (!patch.company_name) return toast("Company name can't be empty");
       const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
       if (error) return rpcErr(error);
-      await reload(); toast("Company settings saved ✓");
+      await reloadKeep(); toast("Company settings saved ✓");
       break;
     }
     // ---- generic confirm / result dialogs ----
@@ -2648,12 +2736,18 @@ async function runAction(el) {
       if (db.publicHolidays.includes(d)) return toast("Already in the list");
       const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
       if (error) return rpcErr(error);
-      await reload(); toast("Holiday added");
+      await reloadKeep(); toast("Holiday added");
       break;
     }
     // rerender(), not render(): the holidays card sits well down a long page and render()
     // scrolls back to the top. Same rule as the search boxes and the sort headers.
     case "phyear": { if (el.dataset.y) { vp.phYear = el.dataset.y; rerender(); } break; }
+    case "phyearopen": vp.phYearGo = String(numOr(vp.phYear, new Date().getFullYear()) + 1); render(); break;
+    case "phyeargo": {
+      const n = parseInt(String((document.getElementById("phyear-in") || {}).value || "").trim(), 10);
+      if (!(n >= 2000 && n <= 2100)) return toast("Type a year between 2000 and 2100 — for example 2028");
+      vp.phYear = String(n); delete vp.phYearGo; rerender(); break;
+    }
     case "phbulkopen": vp.phBulk = { text: "" }; render(); break;
     case "phbulkgo": {
       const r = parseHolidayLines((vp.phBulk || {}).text, db.publicHolidays);
@@ -2688,7 +2782,7 @@ async function runAction(el) {
         const { error } = await sb.from("public_holidays").insert(Object.assign({ holiday: d, name: nm, source: "manual" }, phStamp()));
         if (error) return rpcErr(error);
       }
-      delete vp.phModal; await reload(); toast(m.orig ? "Holiday updated" : "Holiday added");
+      delete vp.phModal; await reloadKeep(); toast(m.orig ? "Holiday updated" : "Holiday added");
       break;
     }
     case "balcsv": {
@@ -2716,10 +2810,10 @@ async function runAction(el) {
       const yr = numOr(vp.grantYear, new Date().getFullYear());
       const { data, error } = await sb.rpc("grant_annual_entitlements", { p_year: yr });
       if (error) return rpcErr(error);
-      delete vp.grantConfirm; await reload(); toast(`${yr} leave allowances have been added for everyone.`);
+      delete vp.grantConfirm; await reloadKeep(); toast(`${yr} leave allowances have been added for everyone.`);
       break;
     }
-    case "phdel": { const { error } = await sb.from("public_holidays").delete().eq("holiday", el.dataset.d); if (error) return rpcErr(error); await reload(); toast("Holiday removed"); break; }
+    case "phdel": { const { error } = await sb.from("public_holidays").delete().eq("holiday", el.dataset.d); if (error) return rpcErr(error); await reloadKeep(); toast("Holiday removed"); break; }
     case "decide": {
       const d = el.dataset.d;
       const cm = (document.getElementById("cm-" + id) || {}).value || "";
