@@ -42,8 +42,8 @@ over Chinese New Year and quietly loses a day of annual leave.
 ### 1a. Look at next year
 
 **HR Console → Company settings → Public holidays**, then press **▶** to move to next
-year. The arrows reach **any** year, empty or not — and **➕ Add year** jumps straight to
-one, so you can stand on 2031 and start entering it years before it exists.
+year. The arrows reach **any** year, empty or not, and the **🔍** box beside them goes
+straight to one — type `2031` and you are there, years before it exists.
 
 The heading reads **"◀ Public holidays — N dates in YYYY ▶"**, and N is counted from the
 rows on screen, so it cannot disagree with the list.
@@ -67,7 +67,7 @@ MOM publishes the list at
 
 Either:
 
-- **A whole year at once** — press **➕ Add a whole year** and **paste MOM's table
+- **A whole year at once** — press **➕ Add whole year holiday** and **paste MOM's table
   straight in**: select it on their page, copy, paste. Extra columns, the header row, the
   two-line Chinese New Year entry and the in-lieu footnote are all handled. You see exactly
   what will be added before anything is saved, plus anything already on the list (skipped),
@@ -252,7 +252,7 @@ pause.
 If you only do five things in January:
 
 1. **Press ▶ and enter next year's public holidays** — paste MOM's table straight into
-   **➕ Add a whole year**. Nothing else will do it. Fewer than 11 → not done.
+   **➕ Add whole year holiday**. Nothing else will do it. Fewer than 11 → not done.
 2. **Check Balances shows non-zero entitlements** for the new year.
 3. **Check `last_ping_at` is recent.**
 4. **Send yourself a test alert** and confirm it reaches your phone.

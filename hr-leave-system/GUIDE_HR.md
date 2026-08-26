@@ -280,15 +280,20 @@ together in one list.
 
 **Every year is reachable, empty or not.** The arrows keep going — 2028, 2029, 2035 — even
 before a single date exists for that year. That matters: to enter next year's dates you have
-to be standing on next year first. **➕ Add year** jumps straight to any year between 2000
-and 2100 without clicking ▶ ten times. A year with nothing in it simply says so, and stays
-on the list permanently once it has its first date.
+to be standing on next year first. A year with nothing in it simply says so, and stays on
+the list permanently once it has its first date.
+
+**The 🔍 box beside the arrows goes straight to a year.** Type `2029` and the table below
+switches to 2029 as you finish the fourth digit — no button to press. It shows the year you
+are currently on, greyed out, until you type over it.
 
 **Adding one date:** type it as **DD/MM/YYYY** — e.g. `15/07/2026` — give it a name, and
 press **+ Add holiday**. Slashes, dashes and dots all work. **✎** edits a date, **✕**
 removes one.
 
-**Adding a whole year at once:** press **➕ Add a whole year**.
+**Adding a whole year at once:** press **➕ Add whole year holiday**. When it finishes,
+the table below is already showing the year you just added, so you can check it straight
+away.
 
 **Paste MOM's table straight in.** Select the holidays table on MOM's page, copy, paste.
 The extra columns, the header row and the footnote about in-lieu days are all handled — you
@@ -346,7 +351,7 @@ Sunday was never a working day. The heading counts **dates on the list**, not da
 fewer than 11 means the year is incomplete.
 
 > There is also [`supabase/insert_holidays_2027.sql`](supabase/insert_holidays_2027.sql) for
-> Supabase → SQL Editor, from before the paste box existed. **➕ Add a whole year** does the
+> Supabase → SQL Editor, from before the paste box existed. **➕ Add whole year holiday** does the
 > same thing without leaving LeaveDesk; use that instead.
 
 > **Do this every January**, for the year ahead. Nothing else will do it, and nothing will

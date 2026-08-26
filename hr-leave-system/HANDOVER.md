@@ -254,7 +254,7 @@ Previous suites lived in the session scratchpad — **gone after the session end
 recreate on demand. As of 2026-08-26 there were seven, 152 assertions in total:
 `t.mjs` 17, `t2.mjs` 21, `t3.mjs` 13, `t4.mjs` 32, `t5.mjs` 11, `t6.mjs` 24,
 `t7.mjs` 34 (the caret, the holiday scroll jump, pasting MOM's table, year
-navigation). A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
+navigation), `t8.mjs` 34 (the popup/`render()` rule, the year search bar, layout). A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
 Also run `node --check` on the extracted script after every edit, and keep `$$`
 counts even in any SQL file you touch.
 
@@ -446,6 +446,21 @@ SOP manual + bootstrap/reset scripts.
   that re-renders as you type had it. Fixed in `render()`, where focus is already restored;
   `selectionStart` throws on `number`/`date` inputs, hence the try/catch on both sides.
   Third time in a row the answer was in the shared function and not in the caller.
+- **A POPUP IS NOT NAVIGATION. Opening or closing one must use `rerender()`.** This is the
+  rule that ends the "page jumps" reports, and it was hiding in plain sight: `render()`
+  scrolls to 0 by design, and **every** modal handler in the app called it. `.modalback` is
+  `position:fixed`, so the page behind holds its position on its own — nothing was keeping
+  it there. Thirty handlers were converted at once (2026-08-26); before that, each report
+  was fixed one button at a time, which is why it kept coming back on whatever was built
+  next. **`render()` is only for changing page or tab** (`case "edit"`, the `hr*leave`
+  handlers) — those assign `view` or `hrTab`, which is the tell.
+
+  There is a **source-level test** for this in `t8.mjs`: it discovers the popup list by
+  regexing `vp.X ? XModal` out of app.html at run time, then asserts that no handler
+  touching one of those keys calls a bare `render()` without also navigating. A popup added
+  later is therefore covered without anyone remembering to extend the test. **Prefer a rule
+  checked against the source over a list of cases typed into a test** — the typed list is
+  what let this survive three rounds.
 - **`reload()` scrolls to the top; `reloadKeep()` does not.** `reload()` is
   `loadAll(); render()`, and `render()`'s scroll-to-top is correct for navigation and wrong
   for a write that leaves you on the same screen. Removing a public holiday threw you back
