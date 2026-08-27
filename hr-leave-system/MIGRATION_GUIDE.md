@@ -82,6 +82,7 @@ Wait for "Success" before starting the next.
 | 7 | `migration_app_v14.sql` | annual-leave maximum, and monthly accrual as an option |
 | 8 | `migration_app_v15.sql` | cancelling leave that has no approver confirms immediately |
 | 9 | `migration_app_v16.sql` | carry-forward per employee, configurable expiry, **the yearly reset**, and the one-button "Start a new year" with its permanent log |
+| 10 | `migration_app_v18.sql` | **the Leave types page finally does something** — changing Days / year credits the difference to everyone; annual leave becomes one number you type; HR can apply leave for an employee; every manual change is recorded |
 
 ⚠️ **v9 is easy to skip and it bites later.** It is the only place
 `org_settings.prorate_cap` is created, and v14 rewrites a function that reads that
@@ -97,7 +98,11 @@ It exists, it is `null`, and the SQL still reads it.
 > ever cleared the old year. v16 is what resets them. Until you run it, the app says so on
 > the Company settings tab rather than pretending otherwise.
 
-**v12–v16 are all idempotent** — running one twice changes nothing the second time,
+> **v18 is the one to run if you run only one.** Before it, changing "Days / year" on the
+> Leave types tab did **nothing** for anyone already employed — it only affected the next
+> yearly credit. The page looked like a control and was a note-to-self.
+
+**v12–v18 are all idempotent** — running one twice changes nothing the second time,
 and each ends with verification queries. If you are unsure whether one ran, run it
 again rather than guessing.
 
@@ -444,6 +449,10 @@ Don't call it done until **every** line passes.
       `select count(*) from year_start_log;` returns a number rather than an error
 - [ ] `keepalive_ping_v3.sql` ran — the daily ping now also expires carried days
       (`select keepalive_ping();` twice should return N then N+1)
+- [ ] `migration_app_v18.sql` ran — the HR Console shows **Leave Application** and
+      **Amendment records** tabs (not "Balance adjustments"), Edit employee says
+      **Total entitlement / year**, and `select count(*) from hr_amendments;` returns a
+      number rather than an error
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

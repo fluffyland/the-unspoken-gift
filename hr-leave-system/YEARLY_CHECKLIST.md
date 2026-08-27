@@ -105,7 +105,7 @@ It does four things, in the only order that works:
 
 1. **Expires** any carried days that have passed their date
 2. **Carries forward** what's left of last year's annual leave, up to **each person's own
-   maximum** (set per employee on the Employees tab)
+   maximum** (Edit employee → Carry Foward AL)
 3. **Resets** every other leave type to zero — sick, hospitalisation, childcare and the
    rest — because those are use-it-or-lose-it
 4. **Credits** the new year's allowances to everyone
@@ -124,9 +124,11 @@ LeaveDesk forfeits the days, it does not pay them out.
 
 ### Afterwards, check three things
 
-- **HR Console → Balances** — every active person has a non-zero **entitled** figure
+- **HR Console → Balances** — every active person has a non-zero **given this year** figure
 - **Sick leave reads 14, not 28.** If it reads 28, the reset did not run — you are on a
   build without `migration_app_v16.sql`
+- **Everyone's annual leave is the figure you typed**, not that plus years of service —
+  the service increment was removed in v18
 - **📋 Past runs** — the permanent record. Pick any past year and it is all still there,
   years later, with its own CSV export. This is the answer to "what happened at the end of
   2027?" without touching SQL.
@@ -171,7 +173,7 @@ Automation is easiest to trust when you've looked at actual numbers. Pick:
 - someone **long-serving** → base plus service-based extra
 - someone who **didn't use all** last year's leave → carried-forward days visible
 
-If any look wrong, fix with **HR Console → Balance adjustments** and note why.
+If any look wrong, fix the person's **Total entitlement / year** in Edit employee — it moves this year's balance and is recorded in **Amendment records**.
 
 ---
 
@@ -242,8 +244,9 @@ pause.
 - [ ] Any statutory changes? MOM occasionally revises entitlements — e.g. Shared
       Parental Leave increasing. Update **default days** on the type.
 
-> Changing a type doesn't retrospectively change existing balances. Top people
-> up with **Balance adjustments** if a change should apply to the current year.
+> **Changing a type's days now credits everyone the difference straight away** — 60 → 62
+> gives every eligible employee 2 more days on top of what they have, and is recorded as
+> one company-wide amendment. Days already taken are not affected; nobody is reset.
 
 ---
 

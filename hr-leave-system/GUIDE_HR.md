@@ -36,8 +36,9 @@ HR Console has six tabs:
 | **All records** | every application, searchable, with remarks; exports to CSV |
 | **Balances** | everyone's remaining days, exports to CSV |
 | **Employees & approval routes** | add, edit, offboard staff; set who approves whom |
-| **Leave types** | leave categories and how many days each carries |
-| **Balance adjustments** | credit off-in-lieu, fix mistakes |
+| **Leave types** | leave categories and how many days each carries — **changing the days credits everyone the difference** |
+| **Leave Application** | enter leave **for** an employee; approved on the spot |
+| **Amendment records** | every manual change HR has made — entitlements, off-in-lieu, company-wide amendments |
 | **Company settings** | company details, defaults, leave policy, public holidays, yearly allowances |
 
 > Changes in the HR Console are **not saved as you type**. A **Save changes**
@@ -128,17 +129,34 @@ keeping it off-system — it's the only copy that survives losing the database.
 
 ---
 
-## Off-in-lieu and corrections
+## Entering leave for an employee
 
-**HR Console → Balance adjustments**
+**HR Console → Leave Application**
 
-Pick the employee, the leave type, and the number of days. **Positive credits,
-negative deducts.** The reason is required and permanent.
+For the person who phoned in sick, or handed you a paper form. Pick them from the list,
+fill in the same form they would, submit.
 
-Typical uses:
-- someone worked a weekend or public holiday → credit off-in-lieu (OIL)
-- a balance is wrong after a data fix → correct it
-- expiring days → deduct them
+- **Approved immediately** — you are HR; there is nobody to send it to.
+- It appears in **their own My applications**, in **All records**, and on the **calendar**.
+- The history shows **"Applied by HR on behalf"**, so nobody later mistakes it for
+  something they submitted themselves.
+- The employee list is the live one: add somebody and they are in it; offboard them and
+  they are gone.
+
+**It is literally the same form staff use**, so everything on the Leave types tab reaches
+it: half-days, whether an MC is required, days per year, who is eligible. Change a setting
+there and both forms follow it — there is no second copy to keep in step.
+
+The balance rules are the same too. Not enough days, overlapping dates, or a missing MC
+are refused for you exactly as they would be for them.
+
+## Off-in-lieu
+
+**HR Console → Employees → Edit → Credit Off-in-Lieu**
+
+Days and a reason, credited when you press **Save changes**. It is inside the employee's
+own form because only some staff earn it — a company-wide box would invite crediting
+everybody. Their balance updates immediately and it is written to **Amendment records**.
 
 **Nothing is pre-selected.** Employee, leave type, days and reason are all required.
 The form used to open on the first employee alphabetically with Off-in-Lieu and 1 day
@@ -176,9 +194,23 @@ column to sort, and the page stays where it is instead of jumping to the top.
 Per type you can set: whether it deducts from a balance, whether half-days are
 allowed, whether an MC attachment is compulsory, and who is eligible.
 
-Changing a policy (say Shared Parental Leave going from 4 to 10 weeks) is done
-here — edit the default days. Existing balances aren't retrospectively changed;
-use **Balance adjustments** if people need topping up.
+### Changing how many days a leave type carries
+
+**This is the one that used to do nothing.** Editing "Days / year" only affected the
+*next* yearly credit — everyone already employed kept the old number, and nothing said so.
+
+Now it **credits the difference to every eligible employee, immediately**:
+
+> Hospitalisation Leave: 60 → **62** days per year.
+> **+2 days** will be credited to **21 employees**.
+> Days already taken are not affected — nobody is reset.
+
+Somebody who has already used 5 days goes from 55 left to 57. Reducing the figure deducts
+the same way, and says so first. Nothing is written until you confirm, and the whole thing
+is recorded as **one** line in Amendment records — not twenty-one lines with names.
+
+**Two types have no days box, on purpose.** **Annual Leave** is set per employee (Edit
+employee → Total entitlement / year), and **Off-in-Lieu** is earned rather than granted.
 
 ---
 
@@ -409,15 +441,38 @@ mid-year joiner accrues from their joining month.
 > mode refuses to run while the other is active, so you can't double-credit by
 > accident, but a year that's been part-credited one way needs reconciling by hand.
 
+## Annual leave: the number you type
+
+**HR Console → Employees → Edit → Total entitlement / year**
+
+Whatever you type is what that person gets. **Nothing is added for years of service and
+nothing is pro-rated** — if a new joiner should get 6 days for their first part-year, you
+work that out and type 6, then type their full figure next January.
+
+> **This changed in v18.** Before it, the field was called "Annual leave base" and the
+> system quietly added **1 day per year of service** on top. Somebody showing 14 was
+> actually getting 20, and no screen connected the two. That rule is gone.
+
+**Your company maximum still applies**, and now it caps the number you type — set it to 21
+and the field refuses 25, saying why.
+
+**Changing it moves this year's balance too**, not just next year's. You see how much
+before you save:
+
+> Alice Tan — Total entitlement / year: 20 → 16
+> This year's balance moves from 17 to 13 days.
+
+It is written to **Amendment records**, never applied silently.
+
 ## Carry-forward, expiry, and what resets each year
 
 ### How many days each person may carry
 
 **Per employee, not per company** — different people carry different amounts.
 
-- **HR Console → Employees**, the **Carry-forward** column, next to their AL base and
-  approvers. Edit it there and press **Save changes** like anything else on that tab.
-- Or inside **Edit** → **Carry Foward AL (max days)**.
+**HR Console → Employees → Edit → Carry Foward AL (max days)**, next to the entitlement.
+(It used to be a column on the Employees table; that pushed the **Edit** button off the
+side of the screen, so it lives in the form instead.)
 
 Anything above that person's figure is **forfeited** when you start the new year, and you
 see exactly who loses what before it happens.

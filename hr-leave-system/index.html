@@ -521,12 +521,29 @@ async function loadAll() {
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
-  const [annR2, carryR2] = await Promise.all([
+  const [annR2, carryR2, amdR, allCarryR] = await Promise.all([
     sb.from("my_announcements").select("*").eq("read", false).order("created_at", { ascending: false }),
-    sb.from("my_annual_carry").select("*").maybeSingle()
+    sb.from("my_annual_carry").select("*").maybeSingle(),
+    // The second record book. HR only (RLS), and absent until v18 runs — which is also
+    // how the app knows whether v18 is there at all.
+    isHR ? sb.from("hr_amendments").select("*").order("at", { ascending: false }).limit(500)
+         : Promise.resolve({ data: [], error: null }),
+    // HR can read the whole carry table (RLS: `emp_id = current_emp_id() or is_hr()`),
+    // which is what lets the Balances tab show a CF column for everyone rather than
+    // just for whoever is looking at it.
+    isHR ? sb.from("annual_carry").select("emp_id,year,carry_in,expired_at")
+         : Promise.resolve({ data: [], error: null })
   ]);
   db.announcements = annR2.error ? [] : (annR2.data || []);
   db.annualCarry = (carryR2 && !carryR2.error) ? carryR2.data : null;
+  db.amendments = (amdR && !amdR.error) ? (amdR.data || []) : [];
+  db.allCarry = (allCarryR && !allCarryR.error) ? (allCarryR.data || []) : [];
+  // v18: entitlement typed directly, leave-type days crediting the difference, HR applying
+  // on behalf, and the amendment record. Detected from the record table it adds — but only
+  // HR ever reads that table, so non-HR falls back to the column v18 leaves on employees.
+  // Every screen this flag gates is HR-only (Leave types, Edit employee, Amendment
+  // records), so for everyone else it simply never matters.
+  db.orgV18 = isHR ? !!(amdR && !amdR.error) : db.orgV16;
 
   // Approvers (non-HR) can't read applicants' ledger under RLS; fetch just the
   // available-days number for each application in their inbox via a definer RPC.
@@ -756,6 +773,25 @@ function capBelowBase() {
        + `Lower that base first, or leave this blank for no maximum.`;
 }
 // The company maximum currently in force (staged edits included); null = none.
+/* Changing the entitlement now moves THIS year's balance, so it has to be stated before
+   you press Save. Shown only when their allowance for this year has already been credited
+   — before that there is nothing to correct and the new figure simply gets granted. */
+function entChange(empId, typed) {
+  const e = emp(empId); if (!e) return "";
+  const before = Number(e.annualBase);
+  const after = numOr(typed, before);
+  if (!Number.isFinite(after) || after === before) return "";
+  const y = String(new Date().getFullYear());
+  const granted = db.ledger.some(l => l.empId === empId && l.type === "annual" &&
+    (l.reason === y + " annual allowance" || l.reason === y + " 年度配额"));
+  const b = bal(empId, "annual");
+  const diff = after - before;
+  return `<div class="callout ${diff < 0 ? "warn" : "acc"}" style="margin:8px 0 0">
+    <b>${fmtD(before)} → ${fmtD(after)} days.</b><br>
+    ${granted
+      ? `This year's balance moves from <b>${fmtD(b.avail)}</b> to <b>${fmtD(b.avail + diff)}</b> days, and it is recorded.`
+      : `${y} has not been credited yet, so nothing changes today — they will be granted <b>${fmtD(after)}</b> days when you start the year.`}</div>`;
+}
 function annualCapNow() {
   if (!db.orgV14) return null;
   const raw = oPick("annualCap");
@@ -795,10 +831,32 @@ function draftSummary() {
     out.push(`Company settings: ${p.join(", ")}`); }
   return out;
 }
+/* Every pending "Days / year" change, with who it will reach. Computed from the same
+   `eligible()` the rest of the app uses, so the count on the confirmation and the count
+   the database actually credits come from one rule. */
+function typeDayChanges() {
+  const d = vp.draft || {}, out = [];
+  for (const code in (d.types || {})) {
+    if (!("days" in d.types[code])) continue;
+    const t = lt(code); if (!t || code === "annual" || code === "oil" || t.noDeduct) continue;
+    const before = Number(t.days) || 0, after = numOr(d.types[code].days, 0);
+    if (after === before) continue;
+    out.push({ code, name: t.en, before, after, delta: after - before,
+               affected: activeEmps().filter(e => eligible(t, e)).length });
+  }
+  return out;
+}
 async function saveDraft() {
   const d = vp.draft; if (!d) return true;
   for (const code in (d.types || {})) { const dv = d.types[code], patch = {};
-    if ("days" in dv) patch.default_days = numOr(dv.days, 0);
+    // Days per year is NOT a plain column write any more: it credits the difference to
+    // every eligible employee, so it has to go through the function that does both. It
+    // used to be an ordinary update, which is why changing it did nothing for anyone
+    // already employed — the complaint that started this round.
+    if ("days" in dv && db.orgV18) {
+      const { error } = await sb.rpc("amend_leave_type_days", { p_code: code, p_days: numOr(dv.days, 0) });
+      if (error) { rpcErr(error); return false; }
+    } else if ("days" in dv) patch.default_days = numOr(dv.days, 0);
     if ("half" in dv && db.ltHalf) patch.allow_half_day = dv.half;
     if ("mc" in dv) patch.requires_attachment = dv.mc;
     if (Object.keys(patch).length) { const { error } = await sb.from("leave_types").update(patch).eq("code", code); if (error) { rpcErr(error); return false; } } }
@@ -859,16 +917,31 @@ function leaveModal() {
 const stName = s => ({ pending: "Pending", approved: "Approved", rejected: "Rejected", returned: "Returned", withdrawn: "Withdrawn", cancel_requested: "Cancellation requested", cancelled: "Cancelled" }[s] || s);
 
 function canSeeLedger(empId) { return empId === me.id || me.role === "hr" || me.role === "admin"; }
+// Ledger lines that are bookkeeping, not entitlement and not leave taken. Kept as one
+// pattern so the Balances tab, the Apply page and My details cannot classify differently.
+const HOUSEKEEPING = /expired \(unused\)|above the carry-over cap|reset — use it or lose it/;
 function bal(empId, code) {
   const key = empId + "|" + code;
   // Approvers see only a precomputed available-days number for applicants (RLS
   // hides the raw ledger); granted/used are unknown to them.
   if (!canSeeLedger(empId) && key in db.balCache) return { granted: null, used: null, pending: 0, avail: db.balCache[key], limited: true };
-  let granted = 0, used = 0;
-  for (const l of db.ledger) if (l.empId === empId && l.type === code) { if (l.delta > 0) granted += l.delta; else used -= l.delta; }
+  let granted = 0, used = 0, yGranted = 0, yUsed = 0;
+  // "Allowance" and "Used" used to be ALL-TIME totals while the screen called them "this
+  // year". That is where 19 / 22 came from — a +1 credit raised the "entitlement" — and
+  // where 972 / 528 comes from after several years. They are now this year's, and the
+  // yearly housekeeping (expiry write-offs, carry forfeits) is excluded: those are not
+  // leave anybody took, and not entitlement anybody was given.
+  const y = String(new Date().getFullYear());
+  for (const l of db.ledger) if (l.empId === empId && l.type === code) {
+    if (l.delta > 0) granted += l.delta; else used -= l.delta;
+    if (String(new Date(l.ts).getFullYear()) !== y || HOUSEKEEPING.test(l.reason || "")) continue;
+    if (l.delta > 0) yGranted += l.delta; else yUsed -= l.delta;
+  }
   let pending = 0;
   for (const a of db.applications) if (a.empId === empId && a.type === code && a.status === "pending") pending += a.days;
-  return { granted, used, pending, avail: granted - used - pending };
+  // avail is deliberately still the WHOLE ledger: it is what you may book, and last
+  // year's carried days are real days you may book.
+  return { granted, used, pending, avail: granted - used - pending, yGranted, yUsed };
 }
 function eligible(t, e) { return !t.gender || t.gender === e.gender; }
 
@@ -943,7 +1016,10 @@ async function submitApp(data, editId) {
   const { data: id, error } = await sb.rpc("submit_application", {
     p_type: data.type, p_start: data.start, p_end: data.end,
     p_reason: data.reason, p_attachment: data.att || null, p_resubmit_id: editId || null,
-    p_half_days: data.halfDays || []
+    p_half_days: data.halfDays || [],
+    // Only sent when HR is applying for someone else. The database does the same
+    // day-counting, balance check and overlap check either way — one function.
+    p_for_emp: data.forEmp || null
   });
   if (error) { rpcErr(error); return null; }
   await loadAll();
@@ -1361,12 +1437,15 @@ function chainText(e) {
    the two are different money: carried days can expire, this year's cannot. It stays on
    screen at zero rather than vanishing, so the figure is always answerable. */
 function carryLine(code, b) {
-  if (code !== "annual" || !db.annualCarry) return "";
+  // Shown for annual leave ALWAYS — including 0, and including when no carry-over record
+  // exists at all. It used to vanish entirely in that case, so there was no way to tell
+  // "you have none" from "this app has no such thing".
+  if (code !== "annual" || !db.orgV16) return "";
   const avail = Number(b.avail) || 0;
-  const c = Math.max(0, Number(db.annualCarry.remaining) || 0);
+  const c = Math.max(0, Number((db.annualCarry || {}).remaining) || 0);
   const usable = Math.max(0, Math.min(c, avail));   // carry you can still actually book
   const own = avail - usable;                        // the two always sum to Available
-  const exp = db.annualCarry.expires_on ? fmtDateY(db.annualCarry.expires_on) : "N/A";
+  const exp = (db.annualCarry || {}).expires_on ? fmtDateY(db.annualCarry.expires_on) : "N/A";
   return `Annual Leave: ${fmtD(own)} · Carry Forward: ${fmtD(usable)} (Expiry Date: ${exp}) · `;
 }
 /* ---- Start a new year: preview, result, and the permanent log --------------------
@@ -1436,7 +1515,7 @@ function balCard(t) {
   const b = bal(me.id, t.code);
   return `<div class="bal"><div class="t">${esc(t.en)}</div>
     <div class="n">${fmtD(b.avail)}<small> days left</small></div>
-    <div class="d">Allowance ${fmtD(b.granted)} · Used ${fmtD(b.used)}${b.pending ? " · Pending " + fmtD(b.pending) : ""}</div></div>`;
+    <div class="d">Given this year ${fmtD(b.yGranted)} · Taken ${fmtD(b.yUsed)}${b.pending ? " · Pending " + fmtD(b.pending) : ""}</div></div>`;
 }
 
 /* ---- My details (employee self-service) ---- */
@@ -1467,7 +1546,7 @@ function vProfile() {
       <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Allowance</th><th class="num">Used</th><th class="num">Left</th></tr></thead><tbody>
         ${cards.map(t => { const b = bal(me.id, t.code); return `<tr>
           <td>${esc(t.en)}${t.noDeduct ? ` <span class="meta">· for records only</span>` : ""}</td>
-          <td class="num">${t.noDeduct ? "—" : fmtD(b.granted)}</td>
+          <td class="num">${t.noDeduct ? "—" : fmtD(b.yGranted)}</td>
           <td class="num">${fmtD(b.used)}</td>
           <td class="num">${t.noDeduct ? "—" : fmtD(b.avail)}</td></tr>`; }).join("")}
       </tbody></table></div>
@@ -1493,9 +1572,15 @@ function teamCard() {
 }
 
 /* ---- Apply ---- */
+/* Who the Apply form is FOR. Normally the person using it; when HR is applying on
+   somebody's behalf, that employee. Introduced so the HR form is the SAME form — the
+   working-day counting, the balance line, the half-day rules and the MC rule all come
+   from one renderer, and a change to any of them reaches both places at once. */
+function applySubject() { return (vp.forEmp && emp(vp.forEmp)) || me; }
 function vApply() {
+  const who = applySubject(), onBehalf = !!vp.hrApply;
   const editing = vp.editId ? db.applications.find(a => a.id === vp.editId) : null;
-  const types = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);
+  const types = db.leaveTypes.filter(t => eligible(t, who)).sort((a, b) => a.sort - b.sort);
   const f = vp.form || (editing
     ? { type: editing.type, start: editing.start, end: editing.end, half: Object.fromEntries((editing.halfDays || []).map(x => [x.d, x.part])), reason: editing.reason, att: editing.att }
     : { type: "annual", start: dstr(1), end: dstr(1), half: {}, reason: "", att: "" });
@@ -1505,7 +1590,7 @@ function vApply() {
   // failure this app can have: nothing on screen and nothing to click.
   if (!lt(f.type)) f.type = (types[0] || db.leaveTypes[0] || {}).code || "";
   vp.form = f;
-  const t = ltSafe(f.type), b = bal(me.id, f.type);
+  const t = ltSafe(f.type), b = bal(who.id, f.type);
   const allowHalf = allowsHalf(t);
   const half = allowHalf ? f.half : {};
   const wdays = workingDaysList(f.start, f.end);
@@ -1525,8 +1610,13 @@ function vApply() {
   // step, after filling everything in, is the complaint this fixes.
   const clash = (f.start && f.end) ? selfOverlap(f, vp.editId) : null;
   return `
-    <h2>${editing ? "Amend & resubmit" : "Apply for leave"}</h2>
-    <p class="sub">${me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "No approver required — your leave is recorded automatically, and HR is notified for the record."}</p>
+    <h2>${editing ? "Amend & resubmit" : onBehalf ? "Enter leave for an employee" : "Apply for leave"}</h2>
+    <p class="sub">${onBehalf
+      ? `Applying for <b>${esc(who.name)}</b>. It is approved immediately and appears in their own list, marked as entered by you.`
+      : (me.approver1 ? "On submit, an email goes to your approver: " + chainText(me) : "No approver required — your leave is recorded automatically, and HR is notified for the record.")}</p>
+    ${onBehalf ? `<div class="field" style="max-width:340px"><label>Employee<span class="req">*</span></label>
+      <select data-f="forEmp">${activeEmps().map(e => `<option value="${e.id}" ${e.id === who.id ? "selected" : ""}>${esc(e.name)}${e.dept ? " · " + esc(e.dept) : ""}</option>`).join("")}</select>
+      <span class="hint">Everyone currently employed. Add someone and they appear here; offboard them and they go.</span></div>` : ""}
     ${editing ? `<div class="callout warn" style="margin-bottom:14px">This application was returned: “${esc(lastReturnComment(editing))}”. Amend it and resubmit for approval.</div>` : ""}
     <div class="card" style="max-width:640px;margin:0 auto">
       <div class="field"><label>Leave type</label>
@@ -1535,7 +1625,7 @@ function vApply() {
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
               : "Recorded for HR's records only — it doesn't use any leave balance.")
-          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(t.code, b)}Allowance: ${fmtD(b.granted)} · Used: ${fmtD(b.used)} · Pending: ${fmtD(b.pending)})`}</span>
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(t.code, b)}Given this year: ${fmtD(b.yGranted)} · Taken: ${fmtD(b.yUsed)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
@@ -1595,17 +1685,28 @@ async function doSubmit() {
     let att = f.att || "", uploadedPath = "";
     if (f._file) {
       const safe = f._file.name.replace(/[^\w.\-]/g, "_");
-      const path = me.id + "/" + Date.now() + "_" + safe;
+      const path = applySubject().id + "/" + Date.now() + "_" + safe;
       const { error: upErr } = await sb.storage.from("attachments").upload(path, f._file);
       if (upErr) return rpcErr(upErr);
       att = path; uploadedPath = path;
     }
-    const res = await submitApp({ type: f.type, start: f.start, end: f.end, halfDays, days, reason: f.reason.trim(), att, backdated: f.start < todayStr() }, editId);
+    // Declared BEFORE the call that reads it — it was below, which is a crash, not a bug
+    // you can argue about.
+    const subj = applySubject(), onBehalf = !!vp.hrApply;
+    const res = await submitApp({ type: f.type, start: f.start, end: f.end, halfDays, days, reason: f.reason.trim(), att, backdated: f.start < todayStr(), forEmp: onBehalf ? subj.id : null }, editId);
     // On failure, delete the just-uploaded file so a rejected submit doesn't orphan storage.
     if (!res) { if (uploadedPath) await sb.storage.from("attachments").remove([uploadedPath]); return; }
-    const approverName = me.approver1 ? (emp(me.approver1) || {}).name || "your approver" : "";
-    vp = {}; view = "myapps"; render();
-    toast(res.auto ? "Your leave has been recorded and approved automatically. HR has been notified." : "Your application has been submitted and sent to " + approverName + " for approval.");
+    const approverName = subj.approver1 ? (emp(subj.approver1) || {}).name || "your approver" : "";
+    if (onBehalf) {
+      // Stay where HR is working — sending them to "My applications" would show their own
+      // leave, not the one they just entered.
+      const nm = subj.name;
+      vp = {}; render();
+      toast(fmtD(days) + " day" + (days === 1 ? "" : "s") + " of " + ltName(f.type) + " recorded for " + nm + " and approved.");
+    } else {
+      vp = {}; view = "myapps"; render();
+      toast(res.auto ? "Your leave has been recorded and approved automatically. HR has been notified." : "Your application has been submitted and sent to " + approverName + " for approval.");
+    }
   } finally {
     submitting = false;
     if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = label; }
@@ -1824,12 +1925,14 @@ function detailModal(id) {
 
 /* ---- HR Console ---- */
 function vHR() {
-  const tabs = [["records", "All records"], ["balances", "Balances"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Balance adjustments"], ["settings", "Company settings"]];
+  const tabs = db.orgV18
+    ? [["records", "All records"], ["balances", "Balances"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["apply", "Leave Application"], ["amend", "Amendment records"], ["settings", "Company settings"]]
+    : [["records", "All records"], ["balances", "Balances"], ["employees", "Employees & approval routes"], ["types", "Leave types"], ["ledger", "Balance adjustments"], ["settings", "Company settings"]];
   if (!tabs.some(t => t[0] === hrTab)) hrTab = "records";
   return `<h2>HR Console</h2><p class="sub">Company-wide records, balances, approval routing and balance adjustments</p>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-act="hrtab" data-t="${k}" class="${hrTab === k ? "on" : ""}">${l}${k === "settings" && phMissingYear() ? " ⚠️" : ""}</button>`).join("")}</div>
     ${draftDirty() ? saveBar() : ""}
-    ${{ records: hrRecords, balances: hrBalances, employees: hrEmployees, types: hrTypes, ledger: hrLedger, settings: hrSettings }[hrTab]()}`;
+    ${({ records: hrRecords, balances: hrBalances, employees: hrEmployees, types: hrTypes, ledger: hrLedger, apply: hrApply, amend: hrAmend, settings: hrSettings }[hrTab] || hrRecords)()}`;
 }
 function hrRecords() {
   const f = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
@@ -1917,7 +2020,7 @@ function hrEmployees() {
       <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
     </div>
     <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">AL base</th>${db.orgV16 ? '<th class="num">Carry-forward</th>' : ""}<th></th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">${db.orgV18 ? "Entitlement" : "AL base"}</th><th></th></tr></thead><tbody>
     ${shown.length ? shown.map(e => { const lock = !canEditSensitive(e); const dis = lock ? "disabled" : ""; return `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)}</td>
@@ -1926,9 +2029,8 @@ function hrEmployees() {
       <td><select data-act="empf" data-id="${e.id}" data-f="approver1" ${dis}>${apprOpts(e.id, ePick(e, "approver1"), ePick(e, "approver2"))}</select></td>
       <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${ePick(e, "approver1") && !lock ? "" : "disabled"}>${apprOpts(e.id, ePick(e, "approver2"), ePick(e, "approver1"))}</select></td>
       <td class="num"><input type="number" step="0.5" min="0" value="${ePick(e, "annualBase") ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase" ${dis}></td>
-      ${db.orgV16 ? `<td class="num"><input type="number" step="0.5" min="0" value="${ePick(e, "carryCap") ?? 0}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="carryCap" ${dis} title="Max annual leave days this person may carry into next year"></td>` : ""}
       <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
-    </tr>`; }).join("") : `<tr><td colspan="${db.orgV16 ? 9 : 8}"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
+    </tr>`; }).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
     <p class="meta" style="margin-top:8px">Off-in-lieu credits and one-off corrections live in <b>Balance adjustments</b>. Offboarding is inside <b>Edit</b> (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th></tr></thead><tbody>
@@ -2010,8 +2112,16 @@ function empModal() {
     </div>
     ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
-    <div class="field" style="max-width:260px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
-      ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}</div>
+    <div class="field" style="max-width:260px"><label>${db.orgV18 ? "Total entitlement / year" : "Annual leave base (days/yr)"}</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
+      ${db.orgV18 ? `<span class="hint">The annual leave this person gets, in full. Nothing is added for years of service and nothing is pro-rated — what you type is what they get.${annualCapNow() != null ? ` Your company maximum is <b>${fmtD(annualCapNow())}</b>.` : ""}</span>` : ""}
+      ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}
+      ${db.orgV18 && !isAdd ? entChange(m.id, f.annualBase) : ""}</div>
+    ${db.orgV18 && !isAdd ? `<div class="field" style="max-width:300px"><label>Credit Off-in-Lieu</label>
+      <div class="frow" style="gap:6px;margin:0">
+        <input type="number" step="0.5" data-f="em.oilDays" value="${f.oilDays ?? ""}" placeholder="days" style="max-width:90px">
+        <input type="text" data-f="em.oilReason" value="${esc(f.oilReason || "")}" placeholder="Reason, e.g. worked 1 May" style="flex:1;min-width:0">
+      </div>
+      <span class="hint">Only some staff earn off-in-lieu, so it is credited here rather than company-wide. Added when you press <b>Save changes</b>, and recorded. Their balance now: <b>${fmtD(bal(m.id, "oil").avail)}</b> days.</span></div>` : ""}
     ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Foward AL (max days)</label><input type="number" step="0.5" min="0" data-f="em.carryCap" value="${f.carryCap ?? 0}" ${selfLock ? "disabled" : ""}>
       <span class="hint">The most unused annual leave this person may carry into next year. Anything above it is forfeited when you start the new year. 0 means nothing carries over.</span></div>` : ""}
     ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Required to work on Saturday<span class="req">*</span></label>
@@ -2026,7 +2136,12 @@ function empModal() {
           ? `Joining ${esc(fmtDate(f.joinDate))}, they receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> for the rest of ${new Date().getFullYear()} (${esc(calc.note)}).
              <br>From 1 Jan ${new Date().getFullYear() + 1} they receive the full ${fmtD(numOr(f.annualBase, 14))} days.`
           : `They receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> this year — ${esc(calc.note)}.`}
-        <br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`}
+        <br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : (db.orgV18
+      // Changing it now moves THIS year's balance, so the old line ("only affects future
+      // years — use Balance adjustments") stopped being true, and Balance adjustments is
+      // gone anyway.
+      ? `<div class="callout acc">Changing this moves <b>this year's</b> balance too, not just next year's — you will see exactly how much before you save, and it is written to <b>Amendment records</b>.</div>`
+      : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`)}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
@@ -2066,7 +2181,8 @@ function offModal() {
 }
 function hrTypes() {
   return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible. Default days only affect next year's allowances.</div>
+    <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible.</div>
+    ${db.orgV18 ? `<div class="callout warn" style="margin-bottom:14px">📌 <b>Changing Days / year credits the difference to everyone, now.</b> Take Hospitalisation from 60 to 62 and every eligible employee gains <b>2 days</b> on top of what they have — somebody who already used 5 goes from 55 to 57. <b>Nobody is reset to 62.</b> You see exactly who and how many before it is saved.</div>` : ""}
     <div class="frow" style="margin-bottom:12px"><button class="btn" data-act="ltadd">+ Add leave type</button></div>
     <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th>
       <th style="text-align:center">Half-day allowed?${db.ltHalf ? colToggle("half") : ""}</th>
@@ -2074,7 +2190,9 @@ function hrTypes() {
       <th>Who is eligible</th><th></th></tr></thead><tbody>
     ${db.leaveTypes.slice().sort((a, b) => a.sort - b.sort).map(t => `<tr>
       <td><b>${esc(t.en)}</b>${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}</td>
-      <td class="num"><input type="number" step="0.5" min="0" value="${tPick(t, "days")}" style="width:84px" data-act="typedays" data-c="${t.code}"></td>
+      <td class="num">${db.orgV18 && (t.code === "annual" || t.code === "oil")
+        ? `<span class="meta" title="${t.code === "annual" ? "Set per employee in Edit employee" : "Earned by working overtime — credited per employee in Edit employee"}">—<div class="meta" style="font-size:11.5px">${t.code === "annual" ? "per employee" : "earned, not granted"}</div></span>`
+        : `<input type="number" step="0.5" min="0" value="${tPick(t, "days")}" style="width:84px" data-act="typedays" data-c="${t.code}">`}</td>
       <td style="text-align:center">${t.noDeduct ? "No" : "Yes"}</td>
       <td style="text-align:center"><input type="checkbox" data-act="typehalf" data-c="${t.code}" ${tPick(t, "half") ? "checked" : ""}></td>
       <td style="text-align:center"><input type="checkbox" data-act="typeattach" data-c="${t.code}" ${tPick(t, "mc") ? "checked" : ""}></td>
@@ -2240,19 +2358,91 @@ function csvDownload(filename, rows) {
   a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
   a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 }
+/* HR applies leave for someone. Deliberately the SAME renderer as the staff Apply page:
+   whatever you change on the Leave types tab — half-days, attachment required, days per
+   year, who is eligible — reaches both at once, because there is only one form. */
+/* Short column headers, with a legend under the table. The known types get the
+   abbreviation people actually use; anything HR adds later falls back to initials, so a
+   new type never breaks the header row. */
+const LT_SHORT = { annual: "AL", sick: "SL", hosp: "HL", childcare: "CCL", oil: "OIL",
+  maternity: "ML", paternity: "PL", shared_parental: "SPL", infant: "UIC", adoption: "ADL",
+  compassionate: "CL", marriage: "MRL", ns: "NS", unpaid: "UL" };
+function ltShort(t) {
+  if (LT_SHORT[t.code]) return LT_SHORT[t.code];
+  const w = String(t.en || t.code).replace(/[^A-Za-z ]/g, "").split(/\s+/).filter(Boolean);
+  return (w.map(x => x[0]).join("") || String(t.code).slice(0, 3)).toUpperCase().slice(0, 4);
+}
+// Carried-forward days still available to this person. HR reads it per employee; the
+// employee's own screens read db.annualCarry, which is the same figure for themselves.
+function carryOf(empId) {
+  if (empId === me.id && db.annualCarry) return Math.max(0, Number(db.annualCarry.remaining) || 0);
+  const y = new Date().getFullYear();
+  const row = (db.allCarry || []).find(c => c.emp_id === empId && Number(c.year) === y && !c.expired_at);
+  if (!row) return 0;
+  // Same "carried days are used first" rule the database applies: what is left of the
+  // carry is what was carried minus this year's annual leave already taken.
+  const taken = db.applications
+    .filter(a => a.empId === empId && a.type === "annual" && a.status === "approved" &&
+                 String(a.start).slice(0, 4) === String(y))
+    .reduce((n, a) => n + Number(a.days || 0), 0);
+  return Math.max(0, (Number(row.carry_in) || 0) - taken);
+}
+function hrApply() {
+  const list = activeEmps();
+  if (!list.length) return `<div class="card"><div class="empty">No active employees to apply for.</div></div>`;
+  vp.hrApply = true;
+  if (!vp.forEmp || !emp(vp.forEmp)) { vp.forEmp = list[0].id; vp.form = null; }
+  return `<div class="card">
+    <div class="callout acc" style="margin-bottom:14px">Enter leave <b>for</b> an employee — for someone who called in sick, or handed you a form on paper. It is <b>approved immediately</b>, deducted from their balance, and appears in their own <b>My applications</b>, in <b>All records</b> and on the <b>calendar</b>, marked as entered by you.</div>
+    ${vApply()}
+  </div>`;
+}
+
+/* The second record book: everything HR changed by hand. Leave applications live in All
+   records; this is entitlement changes, off-in-lieu credits, and company-wide leave-type
+   amendments — the last written as ONE line, not one per employee. */
+function hrAmend() {
+  const q = (vp.amdSearch || "").toLowerCase();
+  const rows = (db.amendments || []).filter(a => !q ||
+    (a.emp_name || "whole company").toLowerCase().includes(q) ||
+    (a.reason || "").toLowerCase().includes(q) ||
+    ltName(a.leave_type).toLowerCase().includes(q));
+  const kindName = k => ({ entitlement: "Entitlement changed", oil_credit: "Off-in-lieu credited",
+                           type_days: "Company leave amendment", correction: "Correction" }[k] || k);
+  return `<div class="card">
+    <div class="frow" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+      <p class="meta" style="margin:0">Every change HR made by hand. Leave applications are in <b>All records</b>; this is everything else.</p>
+      <span class="actions" style="margin:0">
+        <input type="search" id="amdsearch" data-f="amdSearch" value="${esc(vp.amdSearch || "")}" placeholder="Name, leave type, reason…" style="max-width:240px">
+        <button class="btn sec" data-act="amdcsv">⬇ Export CSV</button></span>
+    </div>
+    ${rows.length ? `<div class="tablebox"><table><thead><tr><th>When</th><th>Who changed it</th><th>Employee</th><th>Leave type</th><th>What</th><th class="num">Change</th><th>Reason</th></tr></thead><tbody>
+      ${rows.map(a => `<tr>
+        <td class="num meta" style="white-space:nowrap">${fmtTs(Date.parse(a.at))}</td>
+        <td>${esc(a.by_name || "—")}</td>
+        <td>${a.emp_name ? esc(a.emp_name) : `<b>Whole company</b>${a.affected ? ` <span class="meta">(${a.affected})</span>` : ""}`}</td>
+        <td>${esc(ltName(a.leave_type))}</td>
+        <td>${esc(kindName(a.kind))}${a.before_days != null && a.after_days != null ? `<div class="meta">${fmtD(Number(a.before_days))} → ${fmtD(Number(a.after_days))}</div>` : ""}</td>
+        <td class="num"${Number(a.delta_days) < 0 ? ' style="color:var(--bad)"' : Number(a.delta_days) > 0 ? ' style="color:var(--good)"' : ""}>${a.delta_days == null ? "—" : (Number(a.delta_days) > 0 ? "+" : "") + fmtD(Number(a.delta_days))}</td>
+        <td class="meta">${esc(a.reason || "")}</td></tr>`).join("")}
+    </tbody></table></div>` : `<div class="empty">${q ? "Nothing matches your search." : "No manual changes yet. Entitlement edits, off-in-lieu credits and company-wide leave amendments all appear here."}</div>`}
+  </div>`;
+}
 function hrBalances() {
   const types = db.leaveTypes.filter(t => !t.noDeduct).sort((a, b) => a.sort - b.sort);
   const emps = activeEmps();
   return `<div class="card">
     <div class="frow" style="justify-content:space-between;align-items:center;margin-bottom:10px">
-      <p class="meta" style="margin:0">Each cell shows <b>days left / entitled this year</b> (pending requests already reserved). Export for payroll or backup (e.g. to your NAS).</p>
+      <p class="meta" style="margin:0">Each cell shows <b>days left / given this year</b> (pending requests already reserved). Export for payroll or backup (e.g. to your NAS).</p>
       <button class="btn sec" data-act="balcsv">⬇ Export CSV</button>
     </div>
-    <div class="tablebox"><table class="nowrap"><thead><tr><th>Employee</th><th>Team</th>${types.map(t => `<th class="num" title="${esc(t.en)}">${esc(t.en.replace(/ Leave$/, ""))}</th>`).join("")}</tr></thead><tbody>
+    <div class="tablebox"><table class="nowrap"><thead><tr><th>Employee</th><th>Team</th>${db.orgV16 ? `<th class="num" title="Carry Forward — unused annual leave brought in from last year">CF</th>` : ""}${types.map(t => `<th class="num" title="${esc(t.en)}">${esc(ltShort(t))}</th>`).join("")}</tr></thead><tbody>
     ${emps.map(e => `<tr>
       <td><b>${esc(e.name)}</b></td><td class="meta">${esc(e.dept)}</td>
-      ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num">${fmtD(b.avail)} / ${fmtD(b.granted)}</td>`; }).join("")}
-    </tr>`).join("")}</tbody></table></div></div>`;
+      ${db.orgV16 ? `<td class="num meta">${fmtD(carryOf(e.id))}</td>` : ""}
+      ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num" title="${fmtD(b.avail)} left of ${fmtD(b.yGranted)} given this year">${fmtD(b.avail)} / ${fmtD(b.yGranted)}</td>`; }).join("")}
+    </tr>`).join("")}</tbody></table></div>
+    <p class="meta" style="margin-top:10px;line-height:1.9">${db.orgV16 ? `<b>CF</b> Carry Forward · ` : ""}${types.map(t => `<b>${esc(ltShort(t))}</b> ${esc(t.en)}`).join(" · ")}</p></div>`;
 }
 /* What this adjustment does to the balance, shown before it is made. Without this
    there was nothing on screen to deduct against. */
@@ -2442,7 +2632,26 @@ async function runAction(el) {
     case "logout": signOut(); break;
     case "nav": if (draftDirty()) { vp.leaveTo = { kind: "nav", v: el.dataset.v }; render(); break; } view = el.dataset.v; vp = {}; render(); break;
     case "hrtab": if (draftDirty()) { vp.leaveTo = { kind: "hrtab", t: el.dataset.t }; render(); break; } hrTab = el.dataset.t; vp = {}; render(); break;
-    case "hrsave": { if (await saveDraft()) { delete vp.draft; await reloadKeep(); toast("Changes saved."); } break; }
+    case "hrsave": {
+      // A days-per-year change reaches everybody's balance at once, so it is stated in
+      // full before it happens — the same rule as balance adjustments and the holiday paste.
+      const ch = typeDayChanges();
+      if (ch.length && !vp.typeOk) {
+        vp.confirmModal = {
+          title: "Confirm leave amendment",
+          lines: ch.map(c => `<b>${esc(c.name)}</b>: ${fmtD(c.before)} → <b>${fmtD(c.after)}</b> days per year.<br>` +
+            `<b style="color:${c.delta > 0 ? "var(--good)" : "var(--bad)"}">${c.delta > 0 ? "+" : ""}${fmtD(c.delta)} day${Math.abs(c.delta) === 1 ? "" : "s"}</b> ` +
+            `will be ${c.delta > 0 ? "credited to" : "deducted from"} <b>${c.affected}</b> employee${c.affected === 1 ? "" : "s"}.`)
+            .concat(["Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]),
+          okLabel: "Save changes", cancelLabel: "Cancel", act: "hrsaveok"
+        };
+        rerender(); break;
+      }
+      delete vp.typeOk;
+      if (await saveDraft()) { delete vp.draft; await reloadKeep(); toast("Changes saved."); }
+      break;
+    }
+    case "hrsaveok": { vp.typeOk = true; await runAction({ dataset: { act: "hrsave" } }); break; }
     case "hrdiscard": delete vp.draft; render(); break;
     case "hrkeep": delete vp.leaveTo; rerender(); break;
     case "hrdiscardleave": { const to = vp.leaveTo; delete vp.draft; delete vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; render(); break; }
@@ -2580,7 +2789,10 @@ async function runAction(el) {
       const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
         role: f.role, join_date: f.joinDate, approver1: f.approver1 || null,
         approver2: (f.approver1 && f.approver2) ? f.approver2 : null,
-        two_level: !!(f.approver1 && f.approver2), annual_base: base };
+        two_level: !!(f.approver1 && f.approver2) };
+      // annual_base is written by set_annual_entitlement on the edit path (below), because
+      // changing it has to move this year's balance too. On add there is no balance yet.
+      if (m.mode === "add") row.annual_base = base;
       if (db.orgV16) row.carry_cap = Math.max(0, numOr(f.carryCap, 0));
       if (db.empExtra) { row.emp_no = (f.empNo || "").trim() || null; row.alias = (f.alias || "").trim() || null; row.mobile = (f.mobile || "").trim() || null; }
       if (m.mode === "add") {
@@ -2619,6 +2831,20 @@ async function runAction(el) {
         }
       }
         if (error) return rpcErr(error);
+        // The entitlement is not a plain column write: changing it moves THIS year's
+        // balance and writes an amendment record. One function does both, so the number
+        // and the balance can never end up telling different stories.
+        if (db.orgV18 && prev && Number(prev.annualBase) !== base) {
+          const { error: ee } = await sb.rpc("set_annual_entitlement", { p_emp: m.id, p_days: base });
+          if (ee) return rpcErr(ee);
+        } else if (!db.orgV18) {
+          const { error: ee } = await sb.from("employees").update({ annual_base: base }).eq("id", m.id);
+          if (ee) return rpcErr(ee);
+        }
+        if (db.orgV18 && numOr(f.oilDays, 0)) {
+          const { error: oe } = await sb.rpc("credit_oil", { p_emp: m.id, p_days: numOr(f.oilDays, 0), p_reason: (f.oilReason || "").trim() });
+          if (oe) return rpcErr(oe);
+        }
         delete vp.empModal; await reload(); toast("Saved " + f.name.trim() + "'s profile");
       }
       break;
@@ -2916,10 +3142,22 @@ async function runAction(el) {
       delete vp.phModal; await reloadKeep(); toast(m.orig ? "Holiday updated" : "Holiday added");
       break;
     }
+    case "amdcsv": {
+      const rows = [["When", "Who changed it", "Employee", "Leave type", "What", "Change", "Reason"]];
+      const kindName = k => ({ entitlement: "Entitlement changed", oil_credit: "Off-in-lieu credited",
+                               type_days: "Company leave amendment", correction: "Correction" }[k] || k);
+      for (const a of (db.amendments || [])) {
+        rows.push([fmtTs(Date.parse(a.at)), a.by_name || "", a.emp_name || "Whole company",
+                   ltName(a.leave_type), kindName(a.kind),
+                   a.delta_days == null ? "" : fmtD(Number(a.delta_days)), a.reason || ""]);
+      }
+      csvDownload("amendment-records-" + todayStr() + ".csv", rows);
+      toast("Exported"); break;
+    }
     case "balcsv": {
       const types = db.leaveTypes.filter(t => !t.noDeduct).sort((a, b) => a.sort - b.sort);
       const rows = [["Employee", "Team", ...types.flatMap(t => [t.en + " left", t.en + " entitled"])]];
-      for (const e of activeEmps()) rows.push([e.name, e.dept, ...types.flatMap(t => { if (!eligible(t, e)) return ["n/a", "n/a"]; const b = bal(e.id, t.code); return [fmtD(b.avail), fmtD(b.granted)]; })]);
+      for (const e of activeEmps()) rows.push([e.name, e.dept, ...types.flatMap(t => { if (!eligible(t, e)) return ["n/a", "n/a"]; const b = bal(e.id, t.code); return [fmtD(b.avail), fmtD(b.yGranted)]; })]);
       csvDownload("leave-balances-" + todayStr() + ".csv", rows);
       toast("Balances exported"); break;
     }
@@ -3059,13 +3297,30 @@ document.addEventListener("change", async ev => {
   // Filters, not navigation → rerender() so the page stays where the user is looking.
   if (f === "stFilter") { vp.stFilter = el.value; rerender(); return; }
   if (f === "empDept") { vp.empDept = el.value; rerender(); return; }
+  // Switching who HR is applying for clears the half-day picks and the balance line with
+  // it — they belong to the previous person.
+  if (f === "forEmp") { vp.forEmp = el.value; vp.form = null; rerender(); return; }
+  // THE SWALLOWED FIRST CLICK. These used to be staged here, on `change`, which fires on
+  // BLUR — and the handler re-rendered immediately. So: mouse-down blurs the field →
+  // change → the page is rebuilt → mouse-up lands on a different button element → no
+  // click event ever fires, because a click needs down and up on the SAME element. The
+  // second click worked because nothing re-rendered that time.
+  // They are staged as you type now (see the `input` listener), so by the time you click
+  // there is nothing left to stage and nothing re-renders. This still runs for anything
+  // arriving only as `change` — a <select>, or a paste with the mouse — and does nothing
+  // when the value is already staged.
   if (f.startsWith("led.")) {
-    vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+    const k = f.slice(4), v = el.type === "number" ? Number(el.value) : el.value;
+    if (vp.ledForm[k] === v) return;                 // already staged while typing
+    vp.ledForm[k] = v;
     if (f === "led.empId" || f === "led.type") vp.ledNegOk = false;   // new target, re-confirm
-    rerender();   // keeps focus/caret; the balance preview must track what you type
+    rerender();
     return;
   }
-  if (f.startsWith("org.")) { stageOrg(f.slice(4), el.value); rerender(); return; }
+  if (f.startsWith("org.")) {
+    if (vp.draft && vp.draft.org && vp.draft.org[f.slice(4)] === el.value) return;
+    stageOrg(f.slice(4), el.value); rerender(); return;
+  }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
     if (k === "joinDMY") {   // free-typed hire date → parse to ISO on blur, then reformat + refresh pro-rate
@@ -3121,7 +3376,7 @@ document.addEventListener("input", ev => {
     rerender();
     return;
   }
-  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch", ledSearch: "ledsearch" };
+  const liveSearch = { empSearch: "empsearch", recSearch: "recsearch", calSearch: "calsearch", ledSearch: "ledsearch", amdSearch: "amdsearch" };
   if (liveSearch[f]) {
     // Live filter. TWO things must survive the re-render, and only one of them used to:
     //   · scroll position — rerender() resets it to 0 by design, so every keystroke threw
@@ -3182,6 +3437,16 @@ document.addEventListener("input", ev => {
   // The preview has to track what is typed, so this re-renders on every keystroke.
   // rerender() keeps the modal's scroll and the caret (see rerender()).
   if (vp.phBulk && f === "phb.text") { vp.phBulk.text = el.value; rerender(); return; }
+  // Staged live rather than on blur — see the long note in the `change` listener. Text and
+  // number boxes only: a <select> or checkbox has no half-typed state, and its `change` is
+  // a deliberate choice rather than a side effect of clicking somewhere else.
+  if (vp.ledForm && f.startsWith("led.") && (el.type === "text" || el.type === "number")) {
+    vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+    rerender(); return;
+  }
+  if (f.startsWith("org.") && (el.type === "text" || el.type === "number")) {
+    stageOrg(f.slice(4), el.value); rerender(); return;
+  }
   if (vp.offModal && f.startsWith("off.") && el.type !== "radio") vp.offModal[f.slice(4)] = el.value;
 });
 

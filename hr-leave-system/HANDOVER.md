@@ -255,12 +255,18 @@ recreate on demand. As of 2026-08-26 there were seven, 152 assertions in total:
 `t.mjs` 17, `t2.mjs` 21, `t3.mjs` 13, `t4.mjs` 32, `t5.mjs` 11, `t6.mjs` 24,
 `t7.mjs` 34 (the caret, the holiday scroll jump, pasting MOM's table, year
 navigation), `t8.mjs` 34 (the popup/`render()` rule, the year search bar, layout),
-`t9.mjs` 38 (per-employee carry cap, the Apply split, Start a new year).
+`t9.mjs` 35 (per-employee carry cap, the Apply split, Start a new year),
+`t10.mjs` 51 (the Leave types credit, the entitlement, the two record books, HR applying
+on behalf, the year-scoped figures, the swallowed click).
 
 **The v16 SQL is tested against a real Postgres, not the browser.** `pgup.sh` starts a
 throwaway instance, `shim.sql` stands in for what Supabase provides (roles, `auth.uid()`),
 then `schema.sql` + `migration_app_v16.sql` + `seed16.sql`, and `t16.sql` / `t16b.sql` /
-`t16c.sql` assert 43 outcomes — the reset, per-person caps, expiry by date, never-expires,
+`t16c.sql` assert 43 outcomes, and `t18.sql` / `t18b.sql` a further 45 (the leave-type
+credit, the entitlement, HR-on-behalf, and the permission guards under
+`SET SESSION AUTHORIZATION`). `chain.sh` builds that database the way the real one was
+built — schema plus every migration in order — because basing a rewrite on `schema.sql`
+alone silently picked up a stale `working_days_hd` signature — the reset, per-person caps, expiry by date, never-expires,
 idempotency, and that running the grant first cannot inflate the carried figure. The
 browser suite stubs `sb.rpc` with **the literal JSON that real Postgres returned**
 (`preview.json`), so the two halves cannot drift apart unnoticed. A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
@@ -455,6 +461,54 @@ SOP manual + bootstrap/reset scripts.
   that re-renders as you type had it. Fixed in `render()`, where focus is already restored;
   `selectionStart` throws on `number`/`date` inputs, hence the try/catch on both sides.
   Third time in a row the answer was in the shared function and not in the caller.
+- **The Leave types page did nothing, for a year.** Editing "Days / year" wrote
+  `leave_types.default_days` and stopped. Nobody already employed was affected — the new
+  figure only reached them at the *next* yearly credit, which for most types is never,
+  because those are granted once a year. The page looked like a control and was a
+  note-to-self. **`amend_leave_type_days()` now credits the DIFFERENCE** to every eligible
+  active employee (60 → 62 gives everybody +2 on top of what they have; somebody who used
+  5 goes 55 → 57) and writes **one** company-wide row to `hr_amendments`, not one per
+  person. **Annual and off-in-lieu are refused outright** — annual is per employee, and
+  off-in-lieu is earned. Refusing beats storing a number nothing uses: it used to just
+  skip the credit while still saving `default_days`, and `grant_annual_entitlements` then
+  granted off-in-lieu to everybody. The test caught it (OIL went 1.5 → 4.5) — that is a
+  silent gift of leave to the whole company, so the yearly grant now excludes `oil`
+  explicitly as well. **Two defences, because one failure mode is invisible.**
+- **The "1 day per year of service" rule was real, and invisible.**
+  `annual_base + (year − joinYear − 1)` — someone showing 14 was getting 20, and no screen
+  connected them. Removed in v18 along with first-year pro-rating: `annual_entitlement_for`
+  is now `least(annual_base, annual_cap)`. **The lesson is not the formula, it is that a
+  figure the user cannot derive from what is on screen will eventually be reported as a
+  bug** — and they will be right, even when the arithmetic is correct.
+- **Changing the entitlement now moves THIS year's balance.** `set_annual_entitlement()`
+  writes the difference to the ledger and logs it. The screen used to carry a line saying
+  "only affects future years — use Balance adjustments", which was true and useless: two
+  places to change one fact.
+- **`bal()` returns `yGranted` / `yUsed` as well as `avail`.** "Allowance" and "Used" were
+  all-time sums while every label said "this year" — the source of *19 / 22* (a +1 credit
+  raised the "entitlement") and of *972 / 528* after several years. They are now scoped to
+  the current year and exclude `HOUSEKEEPING` lines (expiry write-offs, carry forfeits,
+  resets), which are neither entitlement nor leave taken. **`avail` was deliberately left
+  as the whole ledger** — carried days from last year are real days you may book, and that
+  is the figure the database enforces.
+- **THE SWALLOWED FIRST CLICK — a general trap, not one form.** Fields staged on `change`
+  (which fires on **blur**) whose handler re-renders immediately: mouse-down blurs the
+  field → re-render → mouse-up lands on a *different* element → **no click event fires at
+  all**, because a click needs down and up on the same element. The second click works
+  because nothing re-renders. It hit Balance adjustments and Company settings → Save
+  changes. **Fix: stage those fields on `input` (as you type), and make the `change`
+  handler a no-op when the value is already staged.** Any future field that re-renders on
+  `change` has this bug; check it before shipping the form.
+- **`SET ROLE` does not change `session_user`.** Every permission guard here reads
+  `if not is_hr() and session_user <> 'postgres'`, so a test that uses `SET ROLE` still
+  passes the escape hatch and proves nothing — three of four permission assertions were
+  green for the wrong reason. **Use `SET SESSION AUTHORIZATION`.** Same family as the
+  `pg.click()` and `window.scrollY` mistakes: the test agreed with the code without
+  exercising it.
+- **A table alias that matches a declared PL/pgSQL variable breaks at run time.**
+  `cross join leave_types t` inside a function declaring `record t` gives
+  `record "t" is not assigned yet` — only on the branch that reaches it, never at create
+  time. Alias tables something the function does not declare.
 - **Every leave type accumulated for ever, and nobody wrote that.** `leave_balances` is
   `sum(delta_days)` over the whole ledger with **no year boundary**, and
   `grant_annual_entitlements` credits a fresh quota every January. Nothing removed the old

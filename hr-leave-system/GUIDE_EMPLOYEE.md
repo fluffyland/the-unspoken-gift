@@ -61,6 +61,9 @@ leave it is split into **two separate figures**, because they are not the same t
 - **Annual Leave** — this year's days. They do not expire during the year.
 - **Carry Forward** — days brought over from last year. **These can expire**, and the date
   is right there. If your company has set no expiry it reads **Expiry Date: N/A**.
+- **Given this year** and **Taken** — what you were credited and what you have used
+  **this calendar year**. They used to be running totals across every year you have
+  worked here, which is why they could look enormous.
 
 Carry Forward stays on screen at **0** once they are used or expired, rather than
 disappearing — so the figure is always there to check.
@@ -92,6 +95,12 @@ a full day. Change any single day to **Morning only (AM)** or
 - **Backdated** — your start date is in the past. Normal for sick leave
 
 ---
+
+### HR can enter leave for you
+
+If you phoned in sick or handed HR a paper form, they can enter it for you. It appears in
+**My applications** like anything else, already approved, and the history shows it was
+entered by HR rather than by you. The days come off your balance the same way.
 
 ## After you submit
 
