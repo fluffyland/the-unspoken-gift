@@ -2444,6 +2444,15 @@ function ysExport(rows, year) {
 }
 
 /* CSV download helper (Excel-safe: BOM + quoted fields) */
+/* What each kind of manual change is called, in words. ONE definition: this used to be
+   written out separately in the Amendment records tab and in its CSV export, so a kind
+   added later (v19's company-wide annual credit) appeared in neither and both printed the
+   raw key `annual_bump` at the user. Anything unknown still falls back to the key rather
+   than to a blank cell. */
+const AMD_KIND = { entitlement: "Entitlement changed", oil_credit: "Off-in-lieu credited",
+                   type_days: "Company leave amendment", annual_bump: "Company annual leave credit",
+                   correction: "Correction" };
+const kindName = k => AMD_KIND[k] || k;
 function csvDownload(filename, rows) {
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")).join("\r\n");
   const a = document.createElement("a");
@@ -2499,8 +2508,6 @@ function hrAmend() {
     (a.emp_name || "whole company").toLowerCase().includes(q) ||
     (a.reason || "").toLowerCase().includes(q) ||
     ltName(a.leave_type).toLowerCase().includes(q));
-  const kindName = k => ({ entitlement: "Entitlement changed", oil_credit: "Off-in-lieu credited",
-                           type_days: "Company leave amendment", correction: "Correction" }[k] || k);
   return `<div class="card">
     <div class="frow" style="justify-content:space-between;align-items:center;margin-bottom:10px">
       <p class="meta" style="margin:0">Every change HR made by hand. Leave applications are in <b>All records</b>; this is everything else.</p>
@@ -3059,18 +3066,6 @@ async function runAction(el) {
       break;
     }
     case "submit": doSubmit(); break;
-    case "orgsave": {
-      const patch = {
-        company_name: (document.getElementById("org-company")?.value || "").trim(),
-        email_domain: (document.getElementById("org-domain")?.value || "").trim(),
-        default_annual_base: numOr(document.getElementById("org-base")?.value, 14)
-      };
-      if (!patch.company_name) return toast("Company name can't be empty");
-      const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
-      if (error) return rpcErr(error);
-      await reloadKeep(); toast("Company settings saved ✓");
-      break;
-    }
     // ---- generic confirm / result dialogs ----
     case "confirmno": delete vp.confirmModal; rerender(); break;
     case "confirmyes": {
@@ -3309,8 +3304,6 @@ async function runAction(el) {
     }
     case "amdcsv": {
       const rows = [["When", "Who changed it", "Employee", "Leave type", "What", "Change", "Reason"]];
-      const kindName = k => ({ entitlement: "Entitlement changed", oil_credit: "Off-in-lieu credited",
-                               type_days: "Company leave amendment", correction: "Correction" }[k] || k);
       for (const a of (db.amendments || [])) {
         rows.push([fmtTs(Date.parse(a.at)), a.by_name || "", a.emp_name || "Whole company",
                    ltName(a.leave_type), kindName(a.kind),
@@ -3445,7 +3438,11 @@ document.addEventListener("change", async ev => {
     toast(`${name}: Saturday is now ${on ? "a working day" : "a non-working day"}`);
     return;
   }
-  // Company settings now save via an explicit "Save changes" button (data-act="orgsave").
+  // Company settings save through the tab's own draft + "Save changes" bar (hrsave →
+  // saveDraft), which is where the guards live: the company maximum may not drop below
+  // anybody's entitlement, and the name may not be blank. There used to be a second
+  // handler here writing org_settings straight from the DOM; nothing rendered it any
+  // more, and it wrote only three of the seven settings with none of those checks.
   if (el.dataset.act === "deptname") {
     const oldName = el.dataset.old, newName = el.value.trim();
     if (!newName) { el.value = oldName; return toast("Team name cannot be empty"); }

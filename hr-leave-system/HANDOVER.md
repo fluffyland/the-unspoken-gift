@@ -306,6 +306,26 @@ happily agree with. Two habits keep it honest:
 - **A screenshot is a test.** The Annual Leave editor showed `1` in its days box while the
   button read an unstaged value and answered "Enter a number of days" — every assertion was
   green because the test staged the field first. Look at the screen before shipping.
+- **THE HR CONSOLE AUDIT (Aug 2026) — `t12.mjs` + `t13.mjs`, 164 assertions.** The user
+  asked whether every control "really makes changes or just displays". The method that
+  answered it, and the one to repeat: **stub `sb` and assert the WRITE**, not the label —
+  capture `from(t).insert/update/delete` with its `.eq()` filters and every `sb.rpc`, drive
+  each control, then check the payload *and* the target row. It covers all seven tabs, both
+  modals, every tick, every cancel path, whether stored values read BACK into each control,
+  and the pre-v18 Balance adjustments tab. Two things it found:
+  1. **`annual_bump` printed as a raw key** in Amendment records and its CSV, because
+     `kindName` was written out **twice** and v19's new kind was added to neither. Now one
+     `AMD_KIND` map. *A fact written down twice is a fact that will disagree with itself.*
+  2. **`case "orgsave"` was dead** — nothing rendered it since Company settings moved to the
+     draft + save-bar model, and it wrote three of the seven settings straight from the DOM
+     with **none** of the guards (blank name, maximum-below-entitlement). Removed. `t12.mjs`
+     §O now derives both directions from source: no control without a handler, no handler
+     without something to trigger it. It reads `case "x":` **unanchored** (two labels share
+     one block) and treats `act: "x"` in a confirmation dialog as a trigger.
+  Two stubbing traps worth knowing: **`sb.functions` is a getter** on the Supabase client,
+  so `sb.functions = {...}` silently does nothing — use `Object.defineProperty`. And when
+  asserting a filtered list, read the **name cell**, not the row: a row contains the
+  approver dropdown, which lists everybody.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.
