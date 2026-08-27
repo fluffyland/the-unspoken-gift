@@ -408,6 +408,27 @@ const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requir
   allowHalf: r.allow_half_day, sort: r.sort, note: r.note || "" });
 // Numeric-with-default that keeps a real 0 (unlike `Number(x) || d`); blank/invalid → default.
 const numOr = (v, d) => { const n = Number(v); return (v === "" || v == null || !Number.isFinite(n)) ? d : n; };
+// THE REVERSED TYPING. `<input type="number">` is not allowed to report a cursor position:
+// reading selectionStart on one returns null (and throws in some browsers), so render()'s
+// caret restore has nothing to put back and drops the cursor at character 0. Every box that
+// re-renders as you type therefore built its number BACKWARDS — you type 15, you get 51.
+// It was reported on the holiday paste box, fixed there for text inputs, and came straight
+// back on the first number box added afterwards, because the cause was never the box.
+//
+// So any number box that re-renders while you type is a TEXT box with a numeric keypad
+// instead — the same shape the Hire date field already uses. Boxes that only settle on
+// blur can stay type="number"; they never re-render mid-word, so they never had this.
+const NUMBOX = 'type="text" inputmode="decimal" autocomplete="off"';
+const isNumBox = el => el.type === "number" || el.inputMode === "decimal";
+// Keep only what can be part of a number, so a text box cannot hold "abc". One leading
+// minus (balance adjustments take -2) and one decimal point.
+function numText(v, allowNeg) {
+  let s = String(v == null ? "" : v).replace(allowNeg ? /[^0-9.\-]/g : /[^0-9.]/g, "");
+  if (allowNeg) s = (s[0] === "-" ? "-" : "") + s.replace(/-/g, "");
+  const i = s.indexOf(".");
+  if (i !== -1) s = s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "");
+  return s;
+}
 /* DB action codes → display strings the history/timeline renderers expect */
 const mapAction = c => ({
   submitted: "Submitted", resubmitted: "Resubmitted",
@@ -776,22 +797,65 @@ function capBelowBase() {
 /* Changing the entitlement now moves THIS year's balance, so it has to be stated before
    you press Save. Shown only when their allowance for this year has already been credited
    — before that there is nothing to correct and the new figure simply gets granted. */
+/* Days credited as ENTITLEMENT this year — the browser's copy of SQL annual_entitled_in_year().
+   Leave taken and cancellation refunds both carry ref_application, so both are excluded by
+   that alone; a refund is a POSITIVE row, and counting it as entitlement would make the
+   figure below claw those days off whoever cancelled. Year-end write-offs go by wording. */
+function annualEntitledThisYear(empId) {
+  const y = new Date().getFullYear();
+  let n = 0;
+  for (const l of db.ledger) {
+    if (l.empId !== empId || l.type !== "annual" || l.refApp) continue;
+    if (new Date(l.ts).getFullYear() !== y) continue;
+    if (HOUSEKEEPING.test(l.reason || "") || /^Offboarding/.test(l.reason || "")) continue;
+    n += l.delta;
+  }
+  return n;
+}
+function annualTakenThisYear(empId) {
+  const y = new Date().getFullYear();
+  let n = 0;
+  for (const l of db.ledger) {
+    if (l.empId !== empId || l.type !== "annual" || !l.refApp) continue;
+    if (new Date(l.ts).getFullYear() !== y) continue;
+    n -= l.delta;                       // deductions are negative, refunds positive
+  }
+  return n;
+}
+/* What saving this number will actually do. It used to say "this year's balance moves from
+   19 to 20" — where 19 was the WHOLE ledger history, not this year, and where the database
+   then wrote nothing at all for anyone added through this form, because it matched on the
+   exact wording of a reason string. Both are gone: the figure you type IS this year's
+   entitlement, and what is shown here is the arithmetic that follows from it. */
 function entChange(empId, typed) {
   const e = emp(empId); if (!e) return "";
   const before = Number(e.annualBase);
   const after = numOr(typed, before);
   if (!Number.isFinite(after) || after === before) return "";
-  const y = String(new Date().getFullYear());
-  const granted = db.ledger.some(l => l.empId === empId && l.type === "annual" &&
-    (l.reason === y + " annual allowance" || l.reason === y + " 年度配额"));
-  const b = bal(empId, "annual");
-  const diff = after - before;
-  return `<div class="callout ${diff < 0 ? "warn" : "acc"}" style="margin:8px 0 0">
-    <b>${fmtD(before)} → ${fmtD(after)} days.</b><br>
-    ${granted
-      ? `This year's balance moves from <b>${fmtD(b.avail)}</b> to <b>${fmtD(b.avail + diff)}</b> days, and it is recorded.`
-      : `${y} has not been credited yet, so nothing changes today — they will be granted <b>${fmtD(after)}</b> days when you start the year.`}</div>`;
+  const y = new Date().getFullYear();
+  const anyThisYear = db.ledger.some(l => l.empId === empId && l.type === "annual" &&
+    !l.refApp && new Date(l.ts).getFullYear() === y);
+  if (!anyThisYear) {
+    return `<div class="callout acc" style="margin:8px 0 0"><b>${fmtD(before)} → ${fmtD(after)} days.</b><br>
+      ${y} has not been credited yet, so nothing changes today — they will be granted <b>${fmtD(after)}</b> days when you start the year.</div>`;
+  }
+  const taken = annualTakenThisYear(empId), carry = db.orgV16 ? carryOf(empId) : 0;
+  const left = after + carry - taken;
+  const row = (k, v) => `<div style="display:flex;justify-content:space-between;max-width:260px"><span>${k}</span><b>${fmtD(v)} day${Math.abs(v) === 1 ? "" : "s"}</b></div>`;
+  return `<div class="callout ${after < before ? "warn" : "acc"}" style="margin:8px 0 0">
+    <b>${fmtD(before)} → ${fmtD(after)} days.</b>
+    <div style="margin-top:6px">
+      ${row("Entitled this year:", after)}
+      ${row("Already taken:", taken)}
+      ${carry ? row("Carried forward:", carry) : ""}
+      ${row("Remaining:", left)}
+    </div></div>`;
 }
+/* The days box on the Annual Leave editor. The box and the button read the SAME value —
+   they did not, and the box showed "1" while the button saw nothing staged and answered
+   "Enter a number of days" to a click on a field that plainly had one in it. */
+function albumpRaw() { return vp.albump == null ? "1" : vp.albump; }
+function albumpDays() { return numOr(albumpRaw(), 0); }
 function annualCapNow() {
   if (!db.orgV14) return null;
   const raw = oPick("annualCap");
@@ -805,7 +869,7 @@ function baseAboveCap(v) {
   if (cap == null) return "";
   const b = Number(v);
   if (!Number.isFinite(b) || b <= cap) return "";
-  return `Annual leave base can't be more than the company maximum of ${fmtD(cap)} days.`;
+  return `Annual Leave Entitled / Yr can't be more than the company maximum of ${fmtD(cap)} days.`;
 }
 
 function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : (o.defaultAnnualBase ?? 14); }
@@ -868,7 +932,18 @@ async function saveDraft() {
       if (a1 && a2 && a1 === a2) { toast("The 2nd level approver must be different from the 1st."); return false; }
       patch.approver1 = a1 || null; patch.approver2 = a2 || null; patch.two_level = !!(a1 && a2);
     }
-    if ("annualBase" in dv) patch.annual_base = numOr(dv.annualBase, 14);
+    // Same rule as the Edit form: the entitlement is never a plain column write, because
+    // changing it has to correct this year's balance and leave a record. This row-level box
+    // used to skip all of that, so the number changed and nobody was credited.
+    if ("annualBase" in dv) {
+      const nb = numOr(dv.annualBase, 14);
+      if (db.orgV18) {
+        if (Number(e.annualBase) !== nb) {
+          const { error: ee } = await sb.rpc("set_annual_entitlement", { p_emp: id, p_days: nb });
+          if (ee) { rpcErr(ee); return false; }
+        }
+      } else patch.annual_base = nb;
+    }
     if ("carryCap" in dv && db.orgV16) patch.carry_cap = numOr(dv.carryCap, 0);
     if (Object.keys(patch).length) { const { error } = await sb.from("employees").update(patch).eq("id", id); if (error) { rpcErr(error); return false; } } }
   if (d.org && Object.keys(d.org).length) {
@@ -1577,6 +1652,13 @@ function teamCard() {
    working-day counting, the balance line, the half-day rules and the MC rule all come
    from one renderer, and a change to any of them reaches both places at once. */
 function applySubject() { return (vp.forEmp && emp(vp.forEmp)) || me; }
+// WHERE THE APPLY FORM IS ON SCREEN. HR entering leave for someone runs the SAME renderer,
+// but at view "hr" / hrTab "apply" — while every field handler was written as
+// `view === "apply"`. So on HR's copy nothing was ever recorded: picking a date left the
+// old one, and so did the leave type, the half-days, the attachment and the remarks.
+// One helper, used by both listeners, so a form cannot be drawn somewhere its own fields
+// are dead.
+function onApplyView() { return view === "apply" || (view === "hr" && hrTab === "apply"); }
 function vApply() {
   const who = applySubject(), onBehalf = !!vp.hrApply;
   const editing = vp.editId ? db.applications.find(a => a.id === vp.editId) : null;
@@ -2020,7 +2102,7 @@ function hrEmployees() {
       <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
     </div>
     <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">${db.orgV18 ? "Entitlement" : "AL base"}</th><th></th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">${db.orgV18 ? "AL Entitled / Yr" : "AL base"}</th><th></th></tr></thead><tbody>
     ${shown.length ? shown.map(e => { const lock = !canEditSensitive(e); const dis = lock ? "disabled" : ""; return `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)}</td>
@@ -2031,7 +2113,7 @@ function hrEmployees() {
       <td class="num"><input type="number" step="0.5" min="0" value="${ePick(e, "annualBase") ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase" ${dis}></td>
       <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
     </tr>`; }).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
-    <p class="meta" style="margin-top:8px">Off-in-lieu credits and one-off corrections live in <b>Balance adjustments</b>. Offboarding is inside <b>Edit</b> (bottom of the form).</p>
+    <p class="meta" style="margin-top:8px">Off-in-lieu credits and the annual entitlement live inside <b>Edit</b>, which is also where offboarding is (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th></tr></thead><tbody>
       ${former.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.dept)}</td><td class="num">${fmtDMY(e.joinDate)}</td><td class="num">${e.lastDay ? fmtDMY(e.lastDay) : "—"}</td></tr>`).join("")}
@@ -2112,35 +2194,27 @@ function empModal() {
     </div>
     ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
-    <div class="field" style="max-width:260px"><label>${db.orgV18 ? "Total entitlement / year" : "Annual leave base (days/yr)"}</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
-      ${db.orgV18 ? `<span class="hint">The annual leave this person gets, in full. Nothing is added for years of service and nothing is pro-rated — what you type is what they get.${annualCapNow() != null ? ` Your company maximum is <b>${fmtD(annualCapNow())}</b>.` : ""}</span>` : ""}
+    <div class="field" style="max-width:260px"><label>${db.orgV18 ? "Annual Leave Entitled / Yr" : "Annual leave base (days/yr)"}</label><input ${NUMBOX} data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
+      ${db.orgV18 ? `<span class="hint">This is the total AL the employee entitle. It will direct credit all AL to this employee once saved. Proceed with care.${annualCapNow() != null ? ` Your company maximum is <b>${fmtD(annualCapNow())}</b>.` : ""}</span>` : ""}
       ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}
       ${db.orgV18 && !isAdd ? entChange(m.id, f.annualBase) : ""}</div>
-    ${db.orgV18 && !isAdd ? `<div class="field" style="max-width:300px"><label>Credit Off-in-Lieu</label>
+    ${db.orgV18 && !isAdd ? `<div class="field" style="max-width:300px"><label>Credit Off-in-Lieu<span class="req">*</span></label>
       <div class="frow" style="gap:6px;margin:0">
         <input type="number" step="0.5" data-f="em.oilDays" value="${f.oilDays ?? ""}" placeholder="days" style="max-width:90px">
         <input type="text" data-f="em.oilReason" value="${esc(f.oilReason || "")}" placeholder="Reason, e.g. worked 1 May" style="flex:1;min-width:0">
       </div>
-      <span class="hint">Only some staff earn off-in-lieu, so it is credited here rather than company-wide. Added when you press <b>Save changes</b>, and recorded. Their balance now: <b>${fmtD(bal(m.id, "oil").avail)}</b> days.</span></div>` : ""}
-    ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Foward AL (max days)</label><input type="number" step="0.5" min="0" data-f="em.carryCap" value="${f.carryCap ?? 0}" ${selfLock ? "disabled" : ""}>
-      <span class="hint">The most unused annual leave this person may carry into next year. Anything above it is forfeited when you start the new year. 0 means nothing carries over.</span></div>` : ""}
+      <span class="hint">Credit their off in lieu here. Their balance now: <b>${fmtD(bal(m.id, "oil").avail)}</b> days.</span></div>` : ""}
+    ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Forward AL Maximum Day</label><input type="number" step="0.5" min="0" data-f="em.carryCap" value="${f.carryCap ?? 0}" ${selfLock ? "disabled" : ""}>
+      <span class="hint">Setting to cap their maximum days.</span></div>` : ""}
     ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Required to work on Saturday<span class="req">*</span></label>
       <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
         ${(f.worksSat === true || f.worksSat === false) ? "" : `<option value="" disabled selected>— Select —</option>`}
         <option value="yes" ${f.worksSat === true ? "selected" : ""}>Yes</option>
         <option value="no"  ${f.worksSat === false ? "selected" : ""}>No</option>
       </select>
-      <span class="hint">Changes what leave costs: with Saturdays worked, Mon–Sat is 6 days, not 5.</span></div>` : ""}
-    ${isAdd ? `<div class="callout acc"><b>Annual leave: ${fmtD(numOr(f.annualBase, 14))} days/year.</b>
-        ${calc.prorated
-          ? `Joining ${esc(fmtDate(f.joinDate))}, they receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> for the rest of ${new Date().getFullYear()} (${esc(calc.note)}).
-             <br>From 1 Jan ${new Date().getFullYear() + 1} they receive the full ${fmtD(numOr(f.annualBase, 14))} days.`
-          : `They receive <b>${fmtD(calc.days)} day${calc.days === 1 ? "" : "s"}</b> this year — ${esc(calc.note)}.`}
-        <br>Other leave types are added at their standard amounts (see the Leave types tab).</div>` : (db.orgV18
-      // Changing it now moves THIS year's balance, so the old line ("only affects future
-      // years — use Balance adjustments") stopped being true, and Balance adjustments is
-      // gone anyway.
-      ? `<div class="callout acc">Changing this moves <b>this year's</b> balance too, not just next year's — you will see exactly how much before you save, and it is written to <b>Amendment records</b>.</div>`
+      <span class="hint">This setting allow system to recognize Saturday as working day for leave calculation.</span></div>` : ""}
+    ${isAdd ? `<div class="callout acc">You are crediting <b>${fmtD(numOr(f.annualBase, 14))}</b> days of AL to this employee. Other types of leave are will be added as standard amount</div>` : (db.orgV18
+      ? `<div class="callout acc">Save Changes to update details you changed.</div>`
       : `<div class="callout acc">Changing the base only affects future years. For corrections this year, use Balance adjustments.</div>`)}
     <div class="actions">
       <button class="btn" data-act="empsave">${isAdd ? "Add & credit leave" : "Save changes"}</button>
@@ -2208,7 +2282,16 @@ function ltModal() {
     <div class="hd"><h3>${isAdd ? "Add leave type" : "Edit leave type"}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
     <div class="field"><label>Name<span class="req">*</span></label><input type="text" id="lt-name" value="${esc(m.name || "")}" placeholder="e.g. Work Pass Matters"></div>
     <div class="frow">
-      <div class="field"><label>Default days / year</label><input type="number" step="0.5" min="0" id="lt-days" value="${m.days ?? 0}"></div>
+      <div class="field"><label>Default days / year</label>
+        ${db.orgV18 && (m.code === "annual" || m.code === "oil")
+          // Annual leave is one number per person, and off-in-lieu is earned by working —
+          // neither has a company-wide figure. The box used to accept one and the database
+          // then refused the save, which is a worse way to find out than not offering it.
+          ? `<input type="number" id="lt-days" value="" disabled placeholder="—">
+             <span class="hint">${m.code === "annual"
+               ? "Annual leave is set per employee, in <b>Edit employee → Annual Leave Entitled / Yr</b>."
+               : "Off-in-lieu is earned by working overtime — credit it per employee, in <b>Edit employee</b>."}</span>`
+          : `<input type="number" step="0.5" min="0" id="lt-days" value="${m.days ?? 0}">`}</div>
       <div class="field"><label>Eligibility</label><select id="lt-gender">
         <option value="" ${!m.gender ? "selected" : ""}>Everyone</option>
         <option value="F" ${m.gender === "F" ? "selected" : ""}>Female only</option>
@@ -2217,6 +2300,15 @@ function ltModal() {
     <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-deduct" ${m.deduct ? "checked" : ""}> Deducts from a yearly balance (uncheck for record-only types like Training)</label>
     <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-attach" ${m.attach ? "checked" : ""}> Attachment required when applying</label>
     <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-half" ${m.half ? "checked" : ""}> Half-day (AM/PM) allowed</label>
+    ${db.orgV18 && m.code === "annual" ? `<div class="field" style="margin-top:2px">
+      <label>Credit annual leave to everyone</label>
+      <div class="frow" style="gap:8px;margin:0;align-items:center;flex-wrap:nowrap">
+        <span class="meta" style="white-space:nowrap">Add</span>
+        <input ${NUMBOX} data-f="albump" value="${esc(albumpRaw())}" style="max-width:64px">
+        <span class="meta" style="white-space:nowrap">day(s) to everyone</span>
+        <button class="btn" style="white-space:nowrap" data-act="albumpall">Credit to all employees</button>
+      </div>
+      <span class="hint">Raises every employee's <b>Annual Leave Entitled / Yr</b> for good — next year they get the new figure automatically — and credits the same days to this year's balance. Anyone who would go over your company maximum is skipped and named.</span></div>` : ""}
     <div class="field" style="margin-top:10px"><label>Notes (optional)</label><input type="text" id="lt-note" value="${esc(m.note || "")}" placeholder="Shown under the type name"></div>
     <div class="actions">
       <button class="btn" data-act="ltsave">${isAdd ? "Add leave type" : "Save changes"}</button>
@@ -2257,9 +2349,9 @@ function hrSettings() {
   <div class="card"><h3>Defaults for new employees</h3>
     <p class="meta" style="margin:4px 0 12px">These only <b>pre-fill the Add employee form</b>. Changing them does not move anyone already in the system.</p>
     <div class="frow">
-      <div class="field" style="max-width:220px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
+      <div class="field" style="max-width:220px"><label>${db.orgV18 ? "Default Annual Leave Entitled / Yr" : "Default annual leave base"}</label><input ${NUMBOX} id="org-base" data-f="org.base" value="${oPick("base")}">
         <span class="hint">Starting days per year for someone new. Each employee's own base can be changed afterwards.</span></div>
-      ${db.orgV16 ? `<div class="field" style="max-width:220px"><label>Default Carry Foward AL</label><input type="number" step="0.5" min="0" data-f="org.carryCap" value="${oPick("carryCap")}">
+      ${db.orgV16 ? `<div class="field" style="max-width:220px"><label>Default Carry Forward AL Maximum Day</label><input ${NUMBOX} data-f="org.carryCap" value="${oPick("carryCap")}">
         <span class="hint">Starting carry-forward maximum for someone new. Each employee's own figure is on the Employees tab and in Edit employee.</span></div>` : ""}
     </div>
   </div>
@@ -2268,7 +2360,7 @@ function hrSettings() {
     <p class="meta" style="margin:4px 0 12px">These are <b>rules that apply to every employee</b>, not defaults — they take effect at the next yearly grant.</p>
     ${db.orgV14 ? `<div class="frow">
       <div class="field" style="max-width:260px"><label>Maximum annual leave (total)</label>
-        <input type="number" step="0.5" min="0" data-f="org.annualCap" value="${oPick("annualCap")}" placeholder="no maximum">
+        <input ${NUMBOX} data-f="org.annualCap" value="${oPick("annualCap")}" placeholder="no maximum">
         <span class="hint">The most annual leave anyone can reach in total, including long-service increases — nobody goes above it. With a base of 14 and a maximum of 21, someone reaches 21 after 7 years and stays there. Blank = no maximum (20 years on a base of 14 would reach 33).</span>
         ${capBelowBase() ? `<div class="callout warn" style="margin:8px 0 0">⚠ <b>${esc(capBelowBase())}</b></div>` : ""}</div>
       <div class="field" style="max-width:260px"><label>Credit annual leave</label>
@@ -2278,7 +2370,7 @@ function hrSettings() {
         </select>
         <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>
       ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carried days expire after (months)</label>
-        <input type="number" step="1" min="1" data-f="org.carryMonths" value="${oPick("carryMonths")}" placeholder="never expires">
+        <input ${NUMBOX} data-f="org.carryMonths" value="${oPick("carryMonths")}" placeholder="never expires">
         <span class="hint">Counted from 1 January, so <b>6</b> means carried days must be used by 30 June. <b>Leave it blank and they never expire.</b> Carried days are always used before the new year's, so nothing you have already taken is ever clawed back. How many days each person may carry is set per employee, on the Employees tab.</span></div>` : ""}
     </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
     <p class="hint" style="margin:10px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
@@ -2505,7 +2597,7 @@ function hrLedger() {
       <div class="field"><label>Leave type<span class="req">*</span></label><select data-f="led.type">
         ${f.type ? "" : `<option value="" disabled selected>— Select —</option>`}
         ${db.leaveTypes.map(t => `<option value="${t.code}" ${t.code === f.type ? "selected" : ""}>${esc(t.en)}</option>`).join("")}</select></div>
-      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input type="number" step="0.5" value="${f.delta === "" || f.delta == null ? "" : f.delta}" data-f="led.delta" placeholder="e.g. 1 or -2"></div>
+      <div class="field"><label>Days (+ credit / − deduct)<span class="req">*</span></label><input ${NUMBOX} value="${f.delta === "" || f.delta == null ? "" : f.delta}" data-f="led.delta" placeholder="e.g. 1 or -2"></div>
     </div>
     <div class="field"><label>Reason<span class="req">*</span></label><input type="text" value="${esc(f.reason)}" data-f="led.reason" placeholder="e.g. Overtime on 8 Mar — off-in-lieu credit"></div>
     ${ledPreview(f)}
@@ -2775,6 +2867,10 @@ async function runAction(el) {
       if (!f.gender) return toast("Please choose Female or Male — it decides which leave types apply.");
       if (!f.role) return toast("Please choose an account type");
       if (db.hasSat && f.worksSat !== true && f.worksSat !== false) return toast("Please choose whether this person works Saturdays");
+      // The database refuses a blank off-in-lieu reason. Saying so here means finding out
+      // before the profile is written, not after — and every credit keeps a why.
+      if (db.orgV18 && m.mode !== "add" && numOr(f.oilDays, 0) && !(f.oilReason || "").trim())
+        return toast("Please give a reason for the off-in-lieu credit — every credit is recorded with one.");
       let dept = f.dept;
       if (dept === "__new") {
         dept = (f.newDept || "").trim();
@@ -2794,27 +2890,31 @@ async function runAction(el) {
       // changing it has to move this year's balance too. On add there is no balance yet.
       if (m.mode === "add") row.annual_base = base;
       if (db.orgV16) row.carry_cap = Math.max(0, numOr(f.carryCap, 0));
+      // Saturdays: this used to be set on the EDIT branch only, so someone added through
+      // this form was saved with it blank — and the required question came back empty the
+      // next time you opened them. Both paths write it now.
+      if (db.hasSat) row.works_saturday = (f.worksSat === true || f.worksSat === false) ? f.worksSat : null;   // column added by v12
       if (db.empExtra) { row.emp_no = (f.empNo || "").trim() || null; row.alias = (f.alias || "").trim() || null; row.mobile = (f.mobile || "").trim() || null; }
       if (m.mode === "add") {
         const { data: ins, error } = await sb.from("employees").insert(row).select("id").single();
         if (error) return rpcErr(error);
-        const calc = annualCalc(f.joinDate, base);
-        // Credit joining entitlements (annual pro-rated; other types at their default)
+        // Credit joining entitlements. Annual leave is the figure HR typed, in full:
+        // v18 removed pro-rating from the database, and this mirror was the last place
+        // still halving it — so the screen and the data disagreed on a new joiner's days.
         const rows = [];
         for (const t of db.leaveTypes) {
           if (t.noDeduct || (t.gender && t.gender !== f.gender)) continue;
-          const amt = t.code === "annual" ? calc.days : t.days;
+          const amt = t.code === "annual" ? base : t.days;
           if (amt > 0) rows.push({ emp_id: ins.id, leave_type: t.code, delta_days: amt,
-            reason: t.code === "annual" ? "Pro-rated leave allowance (joined " + f.joinDate + ")" : "Leave allowance on joining", created_by: me.id });
+            reason: t.code === "annual" ? "Annual leave allowance on joining" : "Leave allowance on joining", created_by: me.id });
         }
         if (rows.length) { const { error: e2 } = await sb.from("leave_ledger").insert(rows); if (e2) return rpcErr(e2); }
-        const nm = f.name.trim(), addedMsg = nm + " has been added, with " + fmtD(calc.days) + " day" + (calc.days === 1 ? "" : "s") + " of annual leave.";
+        const nm = f.name.trim(), addedMsg = nm + " has been added, with " + fmtD(base) + " day" + (base === 1 ? "" : "s") + " of annual leave.";
         const login = await createLogin(row.email, ins.id);
         delete vp.empModal; await reload();
         if (login && login.password) { vp.loginResult = { name: nm, email: row.email, password: login.password }; rerender(); }
         else toast(addedMsg + " Their login wasn't auto-created" + (login && login.error ? " (" + login.error + ")" : "") + " — open their Edit form and click ‘Create login’.");
       } else {
-        if (db.hasSat) row.works_saturday = (f.worksSat === true || f.worksSat === false) ? f.worksSat : null;   // column added by v12
       // The profile and the login are linked by auth_user_id, not by matching email
       // text — so changing employees.email alone leaves the person still signing in
       // with the OLD address, and unable to self-reset with the new one.
@@ -2849,14 +2949,54 @@ async function runAction(el) {
       }
       break;
     }
+    case "albumpall": {
+      const d = albumpDays();
+      if (!d) return toast("Enter a number of days.");
+      const cap = annualCapNow(), list = activeEmps();
+      const over = cap == null ? [] : list.filter(e => numOr(e.annualBase, 0) + d > cap);
+      const n = list.length - over.length;
+      if (!n) return toast(cap == null ? "There are no active employees." :
+        `Nobody can be raised — everyone is already at your company maximum of ${fmtD(cap)} days.`);
+      vp.confirmModal = {
+        title: "Credit annual leave to everyone",
+        lines: [`Every employee's <b>Annual Leave Entitled / Yr</b> goes up by <b>${fmtD(d)} day${Math.abs(d) === 1 ? "" : "s"}</b>, permanently.`,
+          `<b>${n}</b> employee${n === 1 ? "" : "s"} will be raised, and the same days credited to this year's balance.`,
+          "Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]
+          .concat(over.length ? [`<b>Skipped</b> (already at your maximum of ${fmtD(cap)} days): ${over.map(e => esc(e.name)).join(", ")}.`] : []),
+        okLabel: "Credit to all employees", cancelLabel: "Cancel", act: "albumpgo"
+      };
+      rerender(); break;
+    }
+    case "albumpgo": {
+      const d = albumpDays();
+      const { data, error } = await sb.rpc("bump_annual_all", { p_days: d });
+      if (error) return rpcErr(error);
+      const r = data || {}, skipped = r.skipped || [];
+      delete vp.ltModal; delete vp.albump; await reload();
+      vp.resultModal = {
+        title: "Annual leave credited",
+        lines: [`<b>${fmtD(d)} day${Math.abs(d) === 1 ? "" : "s"}</b> added to <b>${r.affected || 0}</b> employee${r.affected === 1 ? "" : "s"}, and to this year's balance for <b>${r.credited || 0}</b> of them.`],
+        warn: skipped.length ? `Skipped, already at your company maximum: <b>${skipped.map(esc).join(", ")}</b>.` : ""
+      };
+      rerender(); break;
+    }
+    case "ltsaveok": { vp.ltDaysOk = true; await runAction({ dataset: { act: "ltsave" } }); break; }
     case "ltadd": vp.ltModal = { code: null, name: "", days: 0, gender: "", deduct: true, attach: false, half: false, note: "" }; rerender(); break;
     case "ltedit": { const t = lt(el.dataset.c); vp.ltModal = { code: t.code, name: t.en, days: t.days, gender: t.gender || "", deduct: !t.noDeduct, attach: !!t.mc, half: !!t.allowHalf, note: t.note || "" }; rerender(); break; }
     case "ltsave": {
       const name = (document.getElementById("lt-name")?.value || "").trim();
       if (!name) return toast("Please enter a name for the leave type.");
+      const m0 = vp.ltModal, t0 = m0.code ? lt(m0.code) : null;
+      // Days / year is not a column write. The table cell already routed it through the
+      // function that credits everybody; this box did not, so the same number changed here
+      // updated the label and reached nobody. Annual and off-in-lieu never carry a
+      // company-wide figure, so they are left out entirely.
+      const daysHere = numOr(document.getElementById("lt-days")?.value, 0);
+      const creditsDays = !!(db.orgV18 && t0 && !t0.noDeduct &&
+        t0.code !== "annual" && t0.code !== "oil" && Number(t0.days) !== daysHere);
       const payload = {
         name_en: name,
-        default_days: numOr(document.getElementById("lt-days")?.value, 0),
+        default_days: daysHere,
         gender_eligibility: document.getElementById("lt-gender")?.value || null,
         no_deduct: !document.getElementById("lt-deduct")?.checked,
         requires_attachment: !!document.getElementById("lt-attach")?.checked,
@@ -2865,6 +3005,31 @@ async function runAction(el) {
       };
       if (!db.ltHalf) delete payload.allow_half_day;   // column added by v8; omit until then
       const m = vp.ltModal;
+      if (m.code && (db.orgV18 && (m.code === "annual" || m.code === "oil"))) delete payload.default_days;
+      if (m.code && creditsDays) {
+        // Ask before it reaches everyone's balance, in the same words the tab uses.
+        if (!vp.ltDaysOk) {
+          const n = activeEmps().filter(e => eligible(t0, e)).length, d = daysHere - Number(t0.days);
+          // Keep what was typed, so Cancel returns you to your edit rather than silently
+          // rewinding the box to the old figure.
+          Object.assign(vp.ltModal, { name, days: daysHere, gender: payload.gender_eligibility || "",
+            deduct: !payload.no_deduct, attach: payload.requires_attachment,
+            half: !!payload.allow_half_day, note: payload.note || "" });
+          vp.confirmModal = {
+            title: "Confirm leave amendment",
+            lines: [`<b>${esc(t0.en)}</b>: ${fmtD(Number(t0.days))} → <b>${fmtD(daysHere)}</b> days per year.<br>` +
+              `<b style="color:${d > 0 ? "var(--good)" : "var(--bad)"}">${d > 0 ? "+" : ""}${fmtD(d)} day${Math.abs(d) === 1 ? "" : "s"}</b> ` +
+              `will be ${d > 0 ? "credited to" : "deducted from"} <b>${n}</b> employee${n === 1 ? "" : "s"}.`,
+              "Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."],
+            okLabel: "Save changes", cancelLabel: "Cancel", act: "ltsaveok"
+          };
+          rerender(); break;
+        }
+        delete vp.ltDaysOk;
+        const { error: de } = await sb.rpc("amend_leave_type_days", { p_code: m.code, p_days: daysHere });
+        if (de) return rpcErr(de);
+        delete payload.default_days;   // the function above already wrote it
+      }
       if (m.code) {
         const { error } = await sb.from("leave_types").update(payload).eq("code", m.code);
         if (error) return rpcErr(error);
@@ -3310,7 +3475,7 @@ document.addEventListener("change", async ev => {
   // arriving only as `change` — a <select>, or a paste with the mouse — and does nothing
   // when the value is already staged.
   if (f.startsWith("led.")) {
-    const k = f.slice(4), v = el.type === "number" ? Number(el.value) : el.value;
+    const k = f.slice(4), v = isNumBox(el) ? numText(el.value, true) : el.value;
     if (vp.ledForm[k] === v) return;                 // already staged while typing
     vp.ledForm[k] = v;
     if (f === "led.empId" || f === "led.type") vp.ledNegOk = false;   // new target, re-confirm
@@ -3318,8 +3483,9 @@ document.addEventListener("change", async ev => {
     return;
   }
   if (f.startsWith("org.")) {
-    if (vp.draft && vp.draft.org && vp.draft.org[f.slice(4)] === el.value) return;
-    stageOrg(f.slice(4), el.value); rerender(); return;
+    const ov = isNumBox(el) ? numText(el.value) : el.value;
+    if (vp.draft && vp.draft.org && vp.draft.org[f.slice(4)] === ov) return;
+    stageOrg(f.slice(4), ov); rerender(); return;
   }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
@@ -3333,13 +3499,13 @@ document.addEventListener("change", async ev => {
       vp.empModal.form.worksSat = el.value === "yes" ? true : el.value === "no" ? false : undefined;
       rerender(); return;
     }
-    vp.empModal.form[k] = el.type === "checkbox" ? el.checked : el.value;
+    vp.empModal.form[k] = el.type === "checkbox" ? el.checked : (isNumBox(el) ? numText(el.value) : el.value);
     if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
     if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) rerender(); // refresh pro-rate preview / dependent selects / new-team field
     return;
   }
   if (f.startsWith("off.") && vp.offModal) { vp.offModal[f.slice(4)] = el.value; return; }
-  if (view === "apply" && vp.form) {
+  if (onApplyView() && vp.form) {
     if (f === "reason") { vp.form.reason = el.value; return; } // synced live via input; skipping re-render here keeps the submit click from being swallowed
     if (f === "attfile") {
       const file = el.files && el.files[0];
@@ -3365,7 +3531,7 @@ document.addEventListener("toggle", ev => {
 
 document.addEventListener("input", ev => {
   const el = ev.target;
-  if (view === "apply" && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
+  if (onApplyView() && vp.form && el.dataset.f === "reason") vp.form.reason = el.value;
   const f = el.dataset.f || "";
   // Type a year, go to that year. Only acts on a COMPLETE four-digit year: reacting to
   // "20" on the way to "2029" would jump to year 20 and throw away what you were typing.
@@ -3397,7 +3563,8 @@ document.addEventListener("input", ev => {
   }
   // Sync modal text fields live so the save click (which blurs the field) never loses input
   if (vp.empModal && f.startsWith("em.") && el.type !== "checkbox") {
-    vp.empModal.form[f.slice(3)] = el.value;
+    const ek = f.slice(3);
+    vp.empModal.form[ek] = isNumBox(el) ? numText(el.value) : el.value;
     // The joining-leave callout is computed from these two. Without a re-render it
     // kept showing the figure from when the modal opened — telling HR "6 days" while
     // the database correctly granted 6.5. A screen that disagrees with the data is
@@ -3436,16 +3603,18 @@ document.addEventListener("input", ev => {
   }
   // The preview has to track what is typed, so this re-renders on every keystroke.
   // rerender() keeps the modal's scroll and the caret (see rerender()).
+  if (f === "albump") { vp.albump = numText(el.value); rerender(); return; }
   if (vp.phBulk && f === "phb.text") { vp.phBulk.text = el.value; rerender(); return; }
   // Staged live rather than on blur — see the long note in the `change` listener. Text and
   // number boxes only: a <select> or checkbox has no half-typed state, and its `change` is
   // a deliberate choice rather than a side effect of clicking somewhere else.
   if (vp.ledForm && f.startsWith("led.") && (el.type === "text" || el.type === "number")) {
-    vp.ledForm[f.slice(4)] = el.type === "number" ? Number(el.value) : el.value;
+    const lk = f.slice(4);
+    vp.ledForm[lk] = isNumBox(el) ? numText(el.value, true) : el.value;   // a deduction is -2
     rerender(); return;
   }
   if (f.startsWith("org.") && (el.type === "text" || el.type === "number")) {
-    stageOrg(f.slice(4), el.value); rerender(); return;
+    stageOrg(f.slice(4), isNumBox(el) ? numText(el.value) : el.value); rerender(); return;
   }
   if (vp.offModal && f.startsWith("off.") && el.type !== "radio") vp.offModal[f.slice(4)] = el.value;
 });

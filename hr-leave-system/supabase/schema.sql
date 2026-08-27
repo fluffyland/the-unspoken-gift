@@ -702,6 +702,89 @@ create table if not exists departments (
   created_at timestamptz not null default now()
 );
 
+-- v12：周六是否为工作日。部门给默认值，员工可以覆盖（NULL = 跟部门）。
+-- 这两列一直只存在于 migration_app_v12 里，schema.sql 的建表语句没有 ——
+-- 于是「从零建库」建出来的库连 emp_works_saturday 都建不起来。
+alter table departments add column if not exists works_saturday boolean not null default false;
+alter table employees   add column if not exists works_saturday boolean;   -- null = 跟随部门
+comment on column departments.works_saturday is 'Department default: does this department work Saturdays?';
+comment on column employees.works_saturday   is 'Per-person override. NULL = inherit the department default.';
+
+-- v12 的「每人一份的周六」一族：emp_works_saturday / is_working_day / working_days。
+-- schema.sql 少了这三个，而折进来的 v18 submit_application 依赖它们 —— 从零建库
+-- 建出来的系统一提交申请就报 function does not exist。
+create or replace function emp_works_saturday(p_emp uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(e.works_saturday, d.works_saturday, false)
+  from employees e
+  left join departments d on d.name = e.dept
+  where e.id = p_emp;
+$$;
+
+-- ---------- 2. 唯一权威：这天对这个人算不算工作日 ----------
+-- 周日永远不算；周六只有该员工「上班」才算；公共假期对任何人都不算。
+-- p_emp 传 null = 按公司默认（周一至周五），供不针对个人的场景使用。
+create or replace function is_working_day(p_emp uuid, p_date date)
+returns boolean language sql stable security definer set search_path = public as $$
+  select (
+           extract(isodow from p_date) <= 5
+           or (extract(isodow from p_date) = 6 and coalesce(emp_works_saturday(p_emp), false))
+         )
+     and not exists (select 1 from public_holidays where holiday = p_date);
+$$;
+
+comment on function is_working_day(uuid, date) is
+  'THE single authority on whether a date is a working day for an employee. Every other place — SQL, frontend, calendar — must defer to this. Do not re-derive the weekend/public-holiday rule anywhere else.';
+
+-- ---------- 3. 天数折算改为调用权威函数（新增带 emp 的重载） ----------
+create or replace function working_days(p_emp uuid, p_start date, p_end date, p_sh boolean, p_eh boolean)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+declare d date; n numeric := 0; first_wd date; last_wd date;
+begin
+  if p_end < p_start then return 0; end if;
+  d := p_start;
+  while d <= p_end loop
+    if is_working_day(p_emp, d) then
+      n := n + 1;
+      if first_wd is null then first_wd := d; end if;
+      last_wd := d;
+    end if;
+    d := d + 1;
+  end loop;
+  if p_sh and first_wd = p_start then n := n - 0.5; end if;
+  if p_eh and last_wd  = p_end   then n := n - 0.5; end if;
+  if n <= 0 and last_wd is not null then n := 0.5; end if;
+  return n;
+end $$;
+
+-- 每人一份的工作日计算（v12 起：周六是否上班按员工/团队定）。
+-- schema.sql 里一直只有下面那个三参数版本，可是折进来的 submit_application 调用的是
+-- **四参数**版本 —— 只有跑迁移链才装得上。于是「从零建库」建出来的 submit_application
+-- 一遇到半天申请就报 function does not exist，而这正是 schema.sql 存在的场景。
+create or replace function working_days_hd(p_emp uuid, p_start date, p_end date, p_half jsonb)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+declare d date; n numeric := 0;
+begin
+  if p_end < p_start then return 0; end if;
+  d := p_start;
+  while d <= p_end loop
+    if is_working_day(p_emp, d) then
+      n := n + 1;
+      if exists (select 1 from jsonb_array_elements(coalesce(p_half,'[]'::jsonb)) e
+                 where (e->>'d')::date = d and lower(e->>'part') in ('am','pm')) then
+        n := n - 0.5;
+      end if;
+    end if;
+    d := d + 1;
+  end loop;
+  if n <= 0 then n := 0.5; end if;
+  return n;
+end $$;
+revoke execute on function working_days_hd(uuid, date, date, jsonb) from anon;
+grant  execute on function working_days_hd(uuid, date, date, jsonb) to authenticated;
+
+
+
 -- 把已有员工的部门回填进列表，然后加外键（幂等，可重复执行）
 insert into departments (name)
 select distinct dept from employees where dept is not null
@@ -1330,41 +1413,133 @@ begin
           coalesce(p_reason, ''));
 end $$;
 
--- ---------- 3. 改额度 → 立刻调整当年余额 ----------
--- 以前改了只影响「下一次发放」，当年余额纹丝不动 —— 界面上还写着一行字叫你去用
--- Balance adjustments。现在改了就是改了，差额当场入账，全站同步。
+-- ---------- 3. 年假额度：填进去的数字就是当年的总额度（v19） ----------
+-- ---------- 1. 当年「算作额度」的天数 ----------
+-- 什么算额度：年度发放、入职发放、历次额度调整、按月累积。
+-- 什么不算：
+--   · 请假扣减、销假返还 —— 这两种都写了 ref_application，一并排除，
+--     这比按文字匹配可靠（返还是**正数**，不排除就会被当成额度）。
+--   · 年末清零、结转到期、超出结转上限作废、离职结算 —— 是账务，不是额度。
+create or replace function annual_entitled_in_year(p_emp uuid, p_year int)
+returns numeric language sql stable as $$
+  select coalesce(sum(delta_days), 0)
+    from leave_ledger
+   where emp_id = p_emp
+     and leave_type = 'annual'
+     and extract(year from created_at)::int = p_year
+     and ref_application is null
+     and reason not like '%expired (unused)%'
+     and reason not like '%above the carry-over cap%'
+     and reason not like '%reset — use it or lose it%'
+     and reason not like '%excess forfeited%'
+     and reason not like '%expired carry-over%'
+     and reason not like 'Offboarding%'
+     and reason not like '%结转%'
+     and reason not like '%作废%';
+$$;
+comment on function annual_entitled_in_year(uuid, int) is
+  'Days credited as ENTITLEMENT this year — grants, joining credits and entitlement changes. Leave taken and refunds carry ref_application and are excluded; year-end write-offs are excluded by wording.';
+revoke execute on function annual_entitled_in_year(uuid, int) from anon;
+grant  execute on function annual_entitled_in_year(uuid, int) to authenticated;
+
+-- ---------- 2. 设定年假额度：对账到这个数字 ----------
 create or replace function set_annual_entitlement(p_emp uuid, p_days numeric)
 returns numeric language plpgsql security definer set search_path = public as $$
-declare e employees%rowtype; cap numeric; before_days numeric; diff numeric; y int := extract(year from current_date)::int;
+declare e employees%rowtype; cap numeric; before_days numeric; ent numeric; adj numeric;
+        y int := extract(year from current_date)::int;
 begin
   if not is_hr() and session_user <> 'postgres' then raise exception 'Only HR can change an entitlement'; end if;
   select * into e from employees where id = p_emp;
   if e.id is null then raise exception 'Employee not found'; end if;
+  if p_days is null or p_days < 0 then raise exception 'Annual leave cannot be negative'; end if;
   cap := (select annual_cap from org_settings where id = 1);
   if cap is not null and p_days > cap then
-    raise exception 'Annual leave cannot be more than the company maximum of % days', cap;
+    raise exception 'Annual leave cannot be more than the company maximum of % days', fmt_days(cap);
   end if;
-  if p_days < 0 then raise exception 'Annual leave cannot be negative'; end if;
-  before_days := e.annual_base;
-  if p_days = before_days then return 0; end if;
 
+  before_days := e.annual_base;
   update employees set annual_base = p_days where id = p_emp;
 
-  -- 只有本年度已经发过额度的人才需要补差额；没发过的，下次发放自然就是新数字。
-  if exists (select 1 from leave_ledger where emp_id = p_emp and leave_type = 'annual'
-             and reason in (y || ' 年度配额', y || ' annual allowance')) then
-    diff := p_days - before_days;
-    insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
-    values (p_emp, 'annual', diff,
-            y || ' entitlement changed ' || fmt_days(before_days) || ' → ' || fmt_days(p_days), current_emp_id());
-  else
-    diff := 0;
+  -- 今年还一天额度都没发过的人：不补。等年初发放时自然就是新数字。
+  -- （v18 是拿 reason 字符串去认那一行，认不出来就整个跳过 —— 这就是「系统里加进来的人
+  --   改了额度却什么都没发生」的原因。现在按**总额**判断，与措辞无关。）
+  if not exists (select 1 from leave_ledger
+                  where emp_id = p_emp and leave_type = 'annual'
+                    and extract(year from created_at)::int = y
+                    and ref_application is null) then
+    perform log_amendment(p_emp, e.name, 'annual', 'entitlement', before_days, p_days, 0, 1, '');
+    return 0;
   end if;
-  perform log_amendment(p_emp, e.name, 'annual', 'entitlement', before_days, p_days, diff, 1, '');
-  return diff;
+
+  ent := annual_entitled_in_year(p_emp, y);
+  adj := p_days - ent;                      -- 对账：把当年额度**补成**填进去的数字
+  if adj <> 0 then
+    insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
+    values (p_emp, 'annual', adj,
+            y || ' annual entitlement set to ' || fmt_days(p_days), current_emp_id());
+  end if;
+  perform log_amendment(p_emp, e.name, 'annual', 'entitlement', before_days, p_days, adj, 1, '');
+  return adj;
 end $$;
 revoke execute on function set_annual_entitlement(uuid, numeric) from anon, public;
 grant  execute on function set_annual_entitlement(uuid, numeric) to authenticated;
+
+-- ---------- 3. 一键给全公司加年假 ----------
+-- 用户原话：「one click then it will credit whole company with one day of annual leave」，
+-- 并选了「永久」：每人的 Annual Leave Entitled / Yr 加 N（明年自动就是新数字），
+-- 当年余额同时补 N。会超过公司上限的人**跳过并列名**，不静默截断 ——
+-- 「max AL is link, it cannot goes over the max AL i set」。
+create or replace function bump_annual_all(p_days numeric, p_preview boolean default false)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare cap numeric; r record; n int := 0; credited int := 0;
+        skipped text[] := '{}'; y int := extract(year from current_date)::int;
+begin
+  if not is_hr() and session_user <> 'postgres' then raise exception 'Only HR can credit annual leave'; end if;
+  if p_days is null or p_days = 0 then raise exception 'Enter a number of days'; end if;
+  cap := (select annual_cap from org_settings where id = 1);
+
+  for r in select id, name, annual_base from employees where active order by name loop
+    if cap is not null and r.annual_base + p_days > cap then
+      skipped := skipped || r.name;
+      continue;
+    end if;
+    if r.annual_base + p_days < 0 then
+      skipped := skipped || r.name;
+      continue;
+    end if;
+    n := n + 1;
+    -- 只给今年已经发过额度的人补当年余额；没发过的，改额度就够了。
+    if exists (select 1 from leave_ledger
+                where emp_id = r.id and leave_type = 'annual'
+                  and extract(year from created_at)::int = y
+                  and ref_application is null) then
+      credited := credited + 1;
+      if not p_preview then
+        insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by)
+        values (r.id, 'annual', p_days,
+                y || ' annual leave ' || case when p_days > 0 then '+' else '' end ||
+                fmt_days(p_days) || ' — company-wide', current_emp_id());
+      end if;
+    end if;
+    if not p_preview then
+      update employees set annual_base = annual_base + p_days where id = r.id;
+    end if;
+  end loop;
+
+  -- n = 0 表示一个人都没加成（例如全部卡在公司上限）。这种情况**不写记录**：
+  -- 否则修订记录里会留下一条「+1 day to every employee」，而实际上谁都没拿到。
+  if not p_preview and n > 0 then
+    -- 全公司一条记录，不逐个列名字（用户明确要求）。
+    perform log_amendment(null, null, 'annual', 'annual_bump', null, null, p_days, n,
+      'Company annual leave amendment — ' || case when p_days > 0 then '+' else '' end ||
+      fmt_days(p_days) || ' day' || case when abs(p_days) = 1 then '' else 's' end ||
+      ' to every employee');
+  end if;
+  return jsonb_build_object('days', p_days, 'affected', n, 'credited', credited,
+                            'skipped', to_jsonb(skipped));
+end $$;
+revoke execute on function bump_annual_all(numeric, boolean) from anon, public;
+grant  execute on function bump_annual_all(numeric, boolean) to authenticated;
 
 -- ---------- 4. 改假别天数 → 按差额补发给所有人 ----------
 -- 用户原话：「if previously i set as 60days for Hospitalization leave, then i change to

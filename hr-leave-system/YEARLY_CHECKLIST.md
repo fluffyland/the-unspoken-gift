@@ -105,7 +105,7 @@ It does four things, in the only order that works:
 
 1. **Expires** any carried days that have passed their date
 2. **Carries forward** what's left of last year's annual leave, up to **each person's own
-   maximum** (Edit employee → Carry Foward AL)
+   maximum** (Edit employee → Carry Forward AL Maximum Day)
 3. **Resets** every other leave type to zero — sick, hospitalisation, childcare and the
    rest — because those are use-it-or-lose-it
 4. **Credits** the new year's allowances to everyone
@@ -169,11 +169,13 @@ own — you would need a manual adjustment to bridge them. Switch at 1 January.
 
 Automation is easiest to trust when you've looked at actual numbers. Pick:
 
-- someone who joined **mid-last-year** → should be pro-rated, not a full year
+- someone who joined **mid-last-year** → whatever figure you typed for them; nothing is
+  pro-rated automatically
 - someone **long-serving** → base plus service-based extra
 - someone who **didn't use all** last year's leave → carried-forward days visible
 
-If any look wrong, fix the person's **Total entitlement / year** in Edit employee — it moves this year's balance and is recorded in **Amendment records**.
+If any look wrong, fix the person's **Annual Leave Entitled / Yr** in Edit employee — what
+you type becomes this year's entitlement exactly, and it is recorded in **Amendment records**.
 
 ---
 

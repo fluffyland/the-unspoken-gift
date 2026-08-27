@@ -83,6 +83,7 @@ Wait for "Success" before starting the next.
 | 8 | `migration_app_v15.sql` | cancelling leave that has no approver confirms immediately |
 | 9 | `migration_app_v16.sql` | carry-forward per employee, configurable expiry, **the yearly reset**, and the one-button "Start a new year" with its permanent log |
 | 10 | `migration_app_v18.sql` | **the Leave types page finally does something** — changing Days / year credits the difference to everyone; annual leave becomes one number you type; HR can apply leave for an employee; every manual change is recorded |
+| 11 | `migration_app_v19.sql` | **the typed figure IS the year's entitlement** — saving it reconciles this year to that number instead of guessing from a reason string (v18 wrote nothing at all for anyone added through the app); plus one-click "+N days to every employee" |
 
 ⚠️ **v9 is easy to skip and it bites later.** It is the only place
 `org_settings.prorate_cap` is created, and v14 rewrites a function that reads that
@@ -366,7 +367,7 @@ Optionally add a second monitor for the website itself.
 3. **HR Console → Company settings**:
    - Company name (appears in the top bar)
    - Email domain (auto-fills addresses when adding staff)
-   - Default annual leave base
+   - Default Annual Leave Entitled / Yr
 4. **HR Console → Leave types** — check the types and day allowances match your
    company policy.
 5. **HR Console → Employees & approval routes** — add your people. Each one needs
@@ -451,8 +452,11 @@ Don't call it done until **every** line passes.
       (`select keepalive_ping();` twice should return N then N+1)
 - [ ] `migration_app_v18.sql` ran — the HR Console shows **Leave Application** and
       **Amendment records** tabs (not "Balance adjustments"), Edit employee says
-      **Total entitlement / year**, and `select count(*) from hr_amendments;` returns a
+      **Annual Leave Entitled / Yr**, and `select count(*) from hr_amendments;` returns a
       number rather than an error
+- [ ] `migration_app_v19.sql` ran — `select bump_annual_all(0);` fails with "Enter a number
+      of days" (it exists), and Leave types → Annual Leave → Edit shows a greyed, empty
+      **Days / year** with **Credit to all employees** under it
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

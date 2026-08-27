@@ -157,6 +157,7 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ✅ v10 | `purge_employee`, `clear_employee_records`, offboard hardening, guard bypass GUC | probed: functions exist |
 | ✅ v11 | ALL DB messages/ledger reasons/announcements → English | probed: English errors |
 | ❓ `reset_all_passwords.sql` | one-time reset of all logins to `Ssu123@` | user asked for it; not re-verified |
+| ⏳ v16 / v18 / v19 + `keepalive_ping_v3` | carry-forward and the yearly reset · Leave types crediting everyone, HR applying on behalf, amendment records · the typed figure IS the year's entitlement + one-click company credit | **written, tested against a real Postgres, NOT yet run by the user.** The frontend feature-detects all three (`db.orgV16`, `db.orgV18`), so the deployed site works without them and simply shows the older screens. Order matters: **v16 → v18 → v19** |
 
 v9 is **optional** — the frontend feature-detects (`db.orgProrate`) and hides
 the pro-rate-cap field until it's applied. Don't assume it; don't chase it
@@ -293,6 +294,18 @@ happily agree with. Two habits keep it honest:
   the actual statements. `insert_holidays_2027.sql` was checked that way: 12 inserted,
   2026 still 14, idempotent on a second run. Never ship SQL on a read-through alone — v14
   shipped that way and failed on the user's first attempt.
+- **Build the SQL through the real migration chain, and separately from `schema.sql`.**
+  `chain19.sh` runs `shim.sql` (roles + `auth.uid()`), then `schema.sql`, then every
+  `migration_app_v*.sql` in order — that is what the user's database actually is.
+  `schema.sql` alone is what a *new company* gets. **They drifted apart and no test noticed
+  for months** (see §12: the missing v12 Saturday family). Run both.
+- **Drive the browser the way a person does.** `pg.fill()` sets `.value` in one assignment
+  and sails straight past the whole class of caret bugs; `pg.keyboard.type(text, {delay})`
+  after a real `click()` reproduces them. The reversed-typing fault was invisible to
+  `fill()` and obvious to `type()`.
+- **A screenshot is a test.** The Annual Leave editor showed `1` in its days box while the
+  button read an unstaged value and answered "Enter a number of days" — every assertion was
+  green because the test staged the field first. Look at the screen before shipping.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.
@@ -481,9 +494,61 @@ SOP manual + bootstrap/reset scripts.
   figure the user cannot derive from what is on screen will eventually be reported as a
   bug** — and they will be right, even when the arithmetic is correct.
 - **Changing the entitlement now moves THIS year's balance.** `set_annual_entitlement()`
-  writes the difference to the ledger and logs it. The screen used to carry a line saying
+  writes the correction to the ledger and logs it. The screen used to carry a line saying
   "only affects future years — use Balance adjustments", which was true and useless: two
   places to change one fact.
+- **v19: THE TYPED FIGURE IS THE TOTAL, and matching on a reason string was the bug.**
+  v18's `set_annual_entitlement` only wrote a correction when it found a ledger row whose
+  reason was *exactly* `'<year> annual allowance'`. Employees added through the app carry
+  `'Pro-rated leave allowance (joined …)'` — no match, **so it silently wrote nothing while
+  the screen said "This year's balance moves from 19 to 20, and it is recorded."** Two
+  lessons, and the second is the bigger one:
+  1. **Never key behaviour off a human-readable string another code path writes.** v19
+     defines entitlement structurally instead: `annual_entitled_in_year()` sums this year's
+     annual rows where `ref_application is null`. Leave taken *and* cancellation refunds
+     both carry `ref_application` — and a refund is **positive**, so counting it as
+     entitlement would have clawed those days off whoever cancelled. That single column
+     separates the two categories exactly; only year-end write-offs still go by wording.
+  2. **Reconcile beats delta when the user's mental model is a total.** Typing 15 makes
+     this year's entitlement *equal* 15, which is what the user asked for in those words,
+     and it self-heals a ledger inflated by a grant that ran repeatedly (their live data
+     read `972 / 528`). A test seeds four stacked grants and asserts one save corrects it.
+- **`bump_annual_all(days)` — one click, whole company, permanent.** Raises every active
+  employee's `annual_base` and credits the same days to this year. Anyone who would exceed
+  `annual_cap` is **skipped and returned by name**, never silently capped. It writes **no**
+  amendment record when nobody was raised — a record saying "+1 day to every employee" when
+  everybody was skipped is worse than no record.
+- **THE REVERSED TYPING CAME BACK, and it was never the holiday box.**
+  `<input type="number">` is not allowed to report a cursor position — `selectionStart`
+  returns null — so `render()`'s caret restore silently gives up and the cursor lands at 0.
+  Every number box that re-renders as you type therefore builds its number **backwards**
+  ("15" → "51"). Fixed for text inputs two rounds earlier, and it returned on the first
+  number box added afterwards. **Rule: a box that re-renders while you type must be
+  `type="text" inputmode="decimal"` (the `NUMBOX` constant), staged through `numText()`.**
+  Boxes that only settle on blur can stay `type="number"` — they never re-render mid-word.
+- **`view === "apply"` was the wrong question.** HR's "Enter leave for an employee" is the
+  *same renderer* at `view === "hr"` / `hrTab === "apply"`, but every field handler asked
+  `view === "apply"` — so on HR's copy the date, the leave type, the half-days, the
+  attachment and the remarks were **all** dead: picking a date left the old one. Use
+  `onApplyView()`. **Sharing a renderer means sharing its handlers' conditions too.**
+- **Three routes changed one number and only one of them credited anybody.** The
+  entitlement had the Edit form (RPC), the Employees-table box (`saveDraft` → plain
+  `annual_base` write) and the leave type's Days / year had the table cell (RPC) and the
+  **Edit box** (plain `default_days` write). When one fact has several editors, **grep for
+  every writer** — the user found both of the silent ones, not the tests.
+- **`works_saturday` was written on the edit branch only**, so anyone added through the
+  form saved it blank and the required question came back empty next time. It sat inside
+  `} else {` where it read as if it applied to both.
+- **`schema.sql` could not build a working system from scratch, and had not been able to
+  for a while.** It was missing v12's whole per-employee-Saturday family
+  (`emp_works_saturday`, `is_working_day`, `working_days(uuid,…)`,
+  `working_days_hd(uuid,…)`) *and* the two `works_saturday` columns — while the v18
+  `submit_application` folded into it calls them. A from-scratch build therefore produced a
+  system that failed on the first half-day application. Nobody noticed because every test
+  ran against the **migration chain**. **Run the suites against both paths** — `chain19.sh`
+  and a bare `schema.sql` build — they are not the same database. Note also that helper
+  functions written in `language sql` are parsed at CREATE time, so they must appear
+  *after* the tables they read; plpgsql ones do not and will happily hide the problem.
 - **`bal()` returns `yGranted` / `yUsed` as well as `avail`.** "Allowance" and "Used" were
   all-time sums while every label said "this year" — the source of *19 / 22* (a +1 credit
   raised the "entitlement") and of *972 / 528* after several years. They are now scoped to

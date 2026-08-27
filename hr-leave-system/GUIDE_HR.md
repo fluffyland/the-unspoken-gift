@@ -84,11 +84,17 @@ Gender is the one worth pausing on. It used to default to Female, so half of all
 hires were set up with the wrong parental leave — and because the field *looked*
 answered, nothing prompted anyone to check.
 
-The **annual leave base** is pre-filled from Company settings and can be changed. It
+**Annual Leave Entitled / Yr** is pre-filled from Company settings and can be changed. It
 cannot exceed the company maximum, if you've set one.
 
-Saving does three things automatically: creates their profile, creates their
-login, and credits this year's leave (pro-rated if they joined mid-year).
+The blue box at the foot of the form says exactly what will happen:
+
+> You are crediting **18** days of AL to this employee. Other types of leave are will be
+> added as standard amount
+
+Saving does three things automatically: creates their profile, creates their login, and
+credits that leave — **the whole figure you typed, not a part-year share of it**. If a
+joiner should get less for their first part-year, work it out and type that number.
 
 A popup shows the temporary password — **`Ssu123@`** by default. Pass it to
 them and tell them to change it on first sign-in.
@@ -154,9 +160,13 @@ are refused for you exactly as they would be for them.
 
 **HR Console → Employees → Edit → Credit Off-in-Lieu**
 
+> Credit their off in lieu here. Their balance now: **1.5** days.
+
 Days and a reason, credited when you press **Save changes**. It is inside the employee's
 own form because only some staff earn it — a company-wide box would invite crediting
-everybody. Their balance updates immediately and it is written to **Amendment records**.
+everybody. **The reason is required** — every credit keeps a why, and the form now says so
+before you save rather than the database refusing afterwards. Their balance updates
+immediately and it is written to **Amendment records**.
 
 **Nothing is pre-selected.** Employee, leave type, days and reason are all required.
 The form used to open on the first employee alphabetically with Off-in-Lieu and 1 day
@@ -199,7 +209,8 @@ allowed, whether an MC attachment is compulsory, and who is eligible.
 **This is the one that used to do nothing.** Editing "Days / year" only affected the
 *next* yearly credit — everyone already employed kept the old number, and nothing said so.
 
-Now it **credits the difference to every eligible employee, immediately**:
+Now it **credits the difference to every eligible employee, immediately** — from the table
+cell *and* from inside **Edit**, which was still doing a plain label change until v19:
 
 > Hospitalisation Leave: 60 → **62** days per year.
 > **+2 days** will be credited to **21 employees**.
@@ -210,7 +221,9 @@ the same way, and says so first. Nothing is written until you confirm, and the w
 is recorded as **one** line in Amendment records — not twenty-one lines with names.
 
 **Two types have no days box, on purpose.** **Annual Leave** is set per employee (Edit
-employee → Total entitlement / year), and **Off-in-Lieu** is earned rather than granted.
+employee → Annual Leave Entitled / Yr), and **Off-in-Lieu** is earned rather than granted.
+Both boxes are greyed out and empty in the leave type's **Edit** form, and say where the
+number really lives.
 
 ---
 
@@ -443,26 +456,52 @@ mid-year joiner accrues from their joining month.
 
 ## Annual leave: the number you type
 
-**HR Console → Employees → Edit → Total entitlement / year**
+**HR Console → Employees → Edit → Annual Leave Entitled / Yr**
 
-Whatever you type is what that person gets. **Nothing is added for years of service and
-nothing is pro-rated** — if a new joiner should get 6 days for their first part-year, you
-work that out and type 6, then type their full figure next January.
+> This is the total AL the employee entitle. It will direct credit all AL to this employee
+> once saved. Proceed with care.
 
-> **This changed in v18.** Before it, the field was called "Annual leave base" and the
-> system quietly added **1 day per year of service** on top. Somebody showing 14 was
-> actually getting 20, and no screen connected the two. That rule is gone.
+Whatever you type **is** that person's annual leave for this year. Nothing is added for
+years of service and nothing is pro-rated — if a new joiner should get 6 days for their
+first part-year, type 6, then type their full figure next January.
 
-**Your company maximum still applies**, and now it caps the number you type — set it to 21
-and the field refuses 25, saying why.
+Saving makes this year's entitlement *equal* that number. It writes the one correcting
+line needed to get there, so the figure on screen and the figure in the database cannot
+disagree. The box under the field shows the arithmetic before you save:
 
-**Changing it moves this year's balance too**, not just next year's. You see how much
-before you save:
+> Alice Tan — 14 → 15 days.
+> Entitled this year: 15 days
+> Already taken: 3 days
+> Carried forward: 2 days
+> Remaining: 14 days
 
-> Alice Tan — Total entitlement / year: 20 → 16
-> This year's balance moves from 17 to 13 days.
+**Days already taken are never disturbed.** Raising 14 to 15 gives one more day; it does
+not reset anybody to 15.
 
-It is written to **Amendment records**, never applied silently.
+**Your company maximum caps the number you type** — set it to 21 and the field refuses 25,
+saying why. That applies on all three routes: this form, the box in the Employees table,
+and the company-wide button below.
+
+Every change is written to **Amendment records**, never applied silently.
+
+> **This changed twice.** Before v18 the field was called "Annual leave base" and the
+> system quietly added **1 day per year of service** on top — somebody showing 14 was
+> getting 20, and no screen connected the two. v18 removed that. v19 then made the number
+> a *total* rather than a starting point, because v18 still only wrote a correction when it
+> recognised the exact wording of a ledger line — so for anyone added through the app it
+> changed the label and credited nobody, while the screen said it had.
+
+### One more day for everybody
+
+**HR Console → Leave types → Annual Leave → Edit → Credit annual leave to everyone**
+
+Type the days, press **Credit to all employees**. Everyone's **Annual Leave Entitled / Yr**
+goes up by that much **permanently** — next January they get the new figure automatically —
+and the same days land in this year's balance.
+
+You are told how many people it reaches before it happens. Anyone who would go over your
+company maximum is **skipped and named**, not silently capped. It is recorded as one
+company-wide line in **Amendment records**, not one line per person.
 
 ## Carry-forward, expiry, and what resets each year
 
@@ -470,14 +509,14 @@ It is written to **Amendment records**, never applied silently.
 
 **Per employee, not per company** — different people carry different amounts.
 
-**HR Console → Employees → Edit → Carry Foward AL (max days)**, next to the entitlement.
+**HR Console → Employees → Edit → Carry Forward AL Maximum Day**, next to the entitlement.
 (It used to be a column on the Employees table; that pushed the **Edit** button off the
 side of the screen, so it lives in the form instead.)
 
 Anything above that person's figure is **forfeited** when you start the new year, and you
 see exactly who loses what before it happens.
 
-**Company settings → Defaults for new employees → Default Carry Foward AL** sets the
+**Company settings → Defaults for new employees → Default Carry Forward AL Maximum Day** sets the
 starting figure for *someone new*. As that card says, changing it moves nobody already in
 the system.
 

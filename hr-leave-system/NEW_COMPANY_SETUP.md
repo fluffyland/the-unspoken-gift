@@ -119,12 +119,12 @@ same two lines in the current repo's `index.html` and push.
 1. Open the site → log in with the Owner email + `Ssu123@`.
 2. Top-right **🔑 Password** → change away from the default.
 3. **HR Console → Company settings**: company name, email domain,
-   default annual-leave base, pro-rate cap if wanted. **Save changes**.
+   Default Annual Leave Entitled / Yr, company maximum if wanted. **Save changes**.
 4. **HR Console → Leave types**: tick/untick attachment-required,
    half-day allowed; add company-specific types if any.
 5. **HR Console → Employees & approval routes → Add employee** for each
    person. On save the app:
-   - credits their pro-rated annual leave + standard entitlements, and
+   - credits the annual leave figure you typed, in full, + standard entitlements, and
    - **auto-creates their login** with password `Ssu123@` (popup shows it).
    Add managers before their team members, so approvers exist when you
    assign approval routes.
