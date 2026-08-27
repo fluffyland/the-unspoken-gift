@@ -52,8 +52,18 @@ If you approve leave for other people you'll also see **Approvals**.
 
 **Apply** tab.
 
-**1. Leave type.** Once picked, your available balance appears underneath —
-broken down into this year's days, anything carried forward, used, and pending.
+**1. Leave type.** Once picked, your available balance appears underneath. For annual
+leave it is split into **two separate figures**, because they are not the same thing:
+
+> Available Balance: **19** days (Annual Leave: 17 · Carry Forward: 2 (Expiry Date:
+> 30 Jun 2027) · Allowance: 19 · Used: 0 · Pending: 0)
+
+- **Annual Leave** — this year's days. They do not expire during the year.
+- **Carry Forward** — days brought over from last year. **These can expire**, and the date
+  is right there. If your company has set no expiry it reads **Expiry Date: N/A**.
+
+Carry Forward stays on screen at **0** once they are used or expired, rather than
+disappearing — so the figure is always there to check.
 
 **2. Start and end date.** The system totals the working days for you.
 **Weekends and Singapore public holidays are excluded automatically** — a
@@ -197,8 +207,10 @@ Reset it yourself from the sign-in page — see above. Ask HR only if you can't 
 into your work email either.
 
 **Do carried-forward days expire?**
-Yes. Use them before this year's allowance — the system already does that for
-you when it counts.
+It depends what your company has set. Look at **Carry Forward** on the Apply tab: it
+either names a date or says **Expiry Date: N/A**. Either way they are used **before** this
+year's days automatically — you do not have to do anything to make that happen, and leave
+you have already taken is never taken back off you.
 
 **My application has sat Pending for days.**
 Chase your approver directly. LeaveDesk doesn't escalate on its own.

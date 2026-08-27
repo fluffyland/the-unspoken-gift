@@ -81,6 +81,7 @@ Wait for "Success" before starting the next.
 | 6 | `migration_app_v13.sql` | holiday sync stops taking over manually added dates |
 | 7 | `migration_app_v14.sql` | annual-leave maximum, and monthly accrual as an option |
 | 8 | `migration_app_v15.sql` | cancelling leave that has no approver confirms immediately |
+| 9 | `migration_app_v16.sql` | carry-forward per employee, configurable expiry, **the yearly reset**, and the one-button "Start a new year" with its permanent log |
 
 ⚠️ **v9 is easy to skip and it bites later.** It is the only place
 `org_settings.prorate_cap` is created, and v14 rewrites a function that reads that
@@ -91,7 +92,12 @@ The column has **no control in the app** — a first year is already base × mon
 which is below the base, so capping it could only ever reduce a new joiner further.
 It exists, it is `null`, and the SQL still reads it.
 
-**v12–v15 are all idempotent** — running one twice changes nothing the second time,
+> **v16 matters even if you skip the rest.** Without it, every leave type keeps
+> accumulating: 14 sick days credited in 2026 plus 14 in 2027 is 28, because nothing has
+> ever cleared the old year. v16 is what resets them. Until you run it, the app says so on
+> the Company settings tab rather than pretending otherwise.
+
+**v12–v16 are all idempotent** — running one twice changes nothing the second time,
 and each ends with verification queries. If you are unsure whether one ran, run it
 again rather than guessing.
 
@@ -433,6 +439,11 @@ Don't call it done until **every** line passes.
 - [ ] `migration_app_v12.sql` ran — working-day authority, Saturday columns, safer cancellation
 - [ ] `migration_app_v13.sql` ran — `public_holidays.updated_at` exists, manual dates survive a sync
 - [ ] `migration_app_v14.sql` ran — `annual_cap` and `accrual_mode` exist in Company settings → Leave policy
+- [ ] `migration_app_v16.sql` ran — Company settings shows **Start a new year** (not
+      "Credit leave of…"), the Employees tab has a **Carry-forward** column, and
+      `select count(*) from year_start_log;` returns a number rather than an error
+- [ ] `keepalive_ping_v3.sql` ran — the daily ping now also expires carried days
+      (`select keepalive_ping();` twice should return N then N+1)
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

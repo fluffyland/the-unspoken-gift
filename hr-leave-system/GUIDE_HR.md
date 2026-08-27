@@ -409,17 +409,75 @@ mid-year joiner accrues from their joining month.
 > mode refuses to run while the other is active, so you can't double-credit by
 > accident, but a year that's been part-credited one way needs reconciling by hand.
 
-## Yearly allowances
+## Carry-forward, expiry, and what resets each year
 
-**HR Console → Company settings → Yearly leave allowances**
+### How many days each person may carry
 
-Pick the year, click the button. Annual leave is worked out from each person's
-base plus years of service; new joiners are pro-rated.
+**Per employee, not per company** — different people carry different amounts.
 
-Safe to run twice — anyone already set up for that year is skipped.
+- **HR Console → Employees**, the **Carry-forward** column, next to their AL base and
+  approvers. Edit it there and press **Save changes** like anything else on that tab.
+- Or inside **Edit** → **Carry Foward AL (max days)**.
 
-Normally 31 December handles this automatically. Verify it did rather than
-assuming — again, [`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md).
+Anything above that person's figure is **forfeited** when you start the new year, and you
+see exactly who loses what before it happens.
+
+**Company settings → Defaults for new employees → Default Carry Foward AL** sets the
+starting figure for *someone new*. As that card says, changing it moves nobody already in
+the system.
+
+### When carried days expire
+
+**Company settings → Leave policy → Carried days expire after (months)**, company-wide.
+Counted from 1 January, so **6** means carried days must be used by 30 June. **Leave it
+blank and they never expire.**
+
+Two things happen automatically, and neither needs you:
+
+- **Carried days are used first.** Nothing you have to set, and leave someone has already
+  taken is never taken back off them — only the unused remainder expires.
+- **They stop counting on the date itself**, not when somebody presses a button. Staff
+  cannot book August leave with days that died in June.
+
+### What resets each year, and what doesn't
+
+| | |
+|---|---|
+| **Resets to its yearly figure** | Sick, Hospitalisation, Childcare, Maternity, Paternity, Shared Parental, Adoption, Unpaid Infant Care, Compassionate, Marriage |
+| **Carries forward** | Annual Leave, up to each person's maximum |
+| **Never touched** | Off-in-Lieu — those days were earned by working overtime |
+
+Resetting means exactly what you'd expect: sick leave is 14 a year, so 2 days left over
+does **not** become 16 next year — it goes back to 14. The figure credited is whatever you
+have set as **Days per year** on the **Leave types** tab. Change Childcare from 6 to 8
+there and the next reset lands on 8; nothing is hard-coded.
+
+> **Before `migration_app_v16.sql` this did not happen at all** — every type simply
+> accumulated, year on year, because nothing had ever cleared the old one. If your Company
+> settings tab still shows a warning saying so, run that migration.
+
+## Start a new year
+
+**HR Console → Company settings → Start a new year**
+
+Pick the year, press **Start …**, and it does all four steps in the only order that
+works: expire → carry forward → reset the other types → credit the new allowances.
+
+**Nothing is written until you confirm.** The preview names every employee: annual leave
+taken last year, what was left, their own maximum, what carries, **what they forfeit**
+(in red), and what expires. **⬇ Export CSV** if payroll wants the forfeited figures —
+LeaveDesk forfeits the days, it does not pay anything out.
+
+Safe to press twice: anyone already done for that year is skipped.
+
+### 📋 Past runs
+
+The permanent record — one row per employee per year, kept forever and never overwritten.
+Pick any past year, read the whole table, export it. "What happened at the end of 2027?"
+is answerable in 2030 without touching SQL.
+
+Normally you do this in the first week of January — see
+[`YEARLY_CHECKLIST.md`](YEARLY_CHECKLIST.md).
 
 ---
 

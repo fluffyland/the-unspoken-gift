@@ -16,7 +16,8 @@ supposed to do actually happen?"
 | Trust it | Verify it once a year |
 |---|---|
 | Working-day counting (weekends, holidays excluded) | **Next year's public holidays are entered — by you** |
-| Balance arithmetic — always the sum of its entries | **Rollover + new-year grant actually ran** |
+| Balance arithmetic — always the sum of its entries | **Start a new year has been pressed** |
+| Carried days expiring on their date | **Sick leave reads its yearly figure, not double** |
 | Permissions — enforced by the database, not the screen | **Keep-alive is still alive** |
 | Approval routing | **You still have two Owners** |
 | | **You have a recent CSV backup** |
@@ -95,27 +96,45 @@ read any more, and no schedule that can have stopped.
 
 ---
 
-## 2. Did everyone get this year's leave?
+## 2. Start the new year — one button
 
-31 December should have run rollover then grant, automatically.
+**HR Console → Company settings → Start a new year** → pick the year → **Start 2027…**
 
-**Check:** HR Console → **Balances**. Every active person should show a non-zero
-**entitled** figure for the new year. If the column is zeros, it didn't run.
+Nothing is written until you have read the preview and pressed **Run start of 2027**.
+It does four things, in the only order that works:
 
-**Fix:** HR Console → Company settings → **Yearly leave allowances** → pick the
-year → **Add … leave allowances**.
+1. **Expires** any carried days that have passed their date
+2. **Carries forward** what's left of last year's annual leave, up to **each person's own
+   maximum** (set per employee on the Employees tab)
+3. **Resets** every other leave type to zero — sick, hospitalisation, childcare and the
+   rest — because those are use-it-or-lose-it
+4. **Credits** the new year's allowances to everyone
 
-Safe to run even if it *did* work — anyone already set up is skipped.
+Off-in-lieu is never touched: staff earned those days by working.
 
-Equivalent in SQL (also safe to repeat):
+**Safe to press twice** — anyone already done for that year is skipped, and the second
+press reports zeros.
 
-```sql
-select rollover_annual_leave(2027);
-select grant_annual_entitlements(2027);
-```
+### Read the preview before you confirm
 
-> **Order matters:** rollover first, then grant. Rollover carries unused days
-> forward (capped, expiring); grant issues the new year's allowance.
+It lists **every employee by name**: how much annual leave they took last year, what was
+left, their own carry maximum, what carries over, **what they forfeit above it**, and what
+expires. Anything forfeited is in red. **⬇ Export CSV** if payroll needs the figures —
+LeaveDesk forfeits the days, it does not pay them out.
+
+### Afterwards, check three things
+
+- **HR Console → Balances** — every active person has a non-zero **entitled** figure
+- **Sick leave reads 14, not 28.** If it reads 28, the reset did not run — you are on a
+  build without `migration_app_v16.sql`
+- **📋 Past runs** — the permanent record. Pick any past year and it is all still there,
+  years later, with its own CSV export. This is the answer to "what happened at the end of
+  2027?" without touching SQL.
+
+> **Order matters, and that is the point of the button.** Carry-forward has to read last
+> year's leftover *before* the new year is credited, and the reset must not run after the
+> credit or it wipes what was just given. Running the halves by hand in the wrong order is
+> silent — nothing errors, the numbers are just wrong.
 
 ### If you switched to monthly accrual, this section works differently
 
@@ -253,7 +272,9 @@ If you only do five things in January:
 
 1. **Press ▶ and enter next year's public holidays** — paste MOM's table straight into
    **➕ Add whole year holiday**. Nothing else will do it. Fewer than 11 → not done.
-2. **Check Balances shows non-zero entitlements** for the new year.
+0. **Press Start a new year.** Carry-forward, the yearly resets and the new allowances all
+   happen there, in one press, in the right order.
+2. **Check Balances shows non-zero entitlements**, and that sick leave reads 14 and not 28.
 3. **Check `last_ping_at` is recent.**
 4. **Send yourself a test alert** and confirm it reaches your phone.
 5. **Export two CSVs** and put them somewhere else.

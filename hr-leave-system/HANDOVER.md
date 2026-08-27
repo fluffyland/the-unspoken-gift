@@ -254,7 +254,16 @@ Previous suites lived in the session scratchpad — **gone after the session end
 recreate on demand. As of 2026-08-26 there were seven, 152 assertions in total:
 `t.mjs` 17, `t2.mjs` 21, `t3.mjs` 13, `t4.mjs` 32, `t5.mjs` 11, `t6.mjs` 24,
 `t7.mjs` 34 (the caret, the holiday scroll jump, pasting MOM's table, year
-navigation), `t8.mjs` 34 (the popup/`render()` rule, the year search bar, layout). A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
+navigation), `t8.mjs` 34 (the popup/`render()` rule, the year search bar, layout),
+`t9.mjs` 38 (per-employee carry cap, the Apply split, Start a new year).
+
+**The v16 SQL is tested against a real Postgres, not the browser.** `pgup.sh` starts a
+throwaway instance, `shim.sql` stands in for what Supabase provides (roles, `auth.uid()`),
+then `schema.sql` + `migration_app_v16.sql` + `seed16.sql`, and `t16.sql` / `t16b.sql` /
+`t16c.sql` assert 43 outcomes — the reset, per-person caps, expiry by date, never-expires,
+idempotency, and that running the grant first cannot inflate the carried figure. The
+browser suite stubs `sb.rpc` with **the literal JSON that real Postgres returned**
+(`preview.json`), so the two halves cannot drift apart unnoticed. A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
 Also run `node --check` on the extracted script after every edit, and keep `$$`
 counts even in any SQL file you touch.
 
@@ -446,6 +455,36 @@ SOP manual + bootstrap/reset scripts.
   that re-renders as you type had it. Fixed in `render()`, where focus is already restored;
   `selectionStart` throws on `number`/`date` inputs, hence the try/catch on both sides.
   Third time in a row the answer was in the shared function and not in the caller.
+- **Every leave type accumulated for ever, and nobody wrote that.** `leave_balances` is
+  `sum(delta_days)` over the whole ledger with **no year boundary**, and
+  `grant_annual_entitlements` credits a fresh quota every January. Nothing removed the old
+  year, so 14 sick days in 2026 plus 14 in 2027 was 28. **It was a missing step, not a
+  feature** — which is the most dangerous kind of bug in this codebase, because there is
+  nothing to read that looks wrong. Fixed in v16 by `reset_statutory_leave`, which zeroes
+  every type with `resets_yearly` (all but `annual` and `oil`) *before* the new grant.
+  **When a system is defined as "the sum of everything", ask what removes things.**
+- **The value credited on reset is read from `leave_types.default_days`, never a constant.**
+  HR changes Childcare from 6 to 8 on the Leave types tab and the next reset lands on 8.
+  There is a test that changes it mid-run for exactly this reason — a hard-coded 6 would
+  have passed every other assertion.
+- **Carry-forward expiry lives in the VIEW, not in a scheduled job.** `leave_balances`
+  subtracts `due_unwritten_carry()` — carry whose `expires_on` has passed and which has not
+  yet been written off. So the moment the date passes the days stop counting, and
+  `submit_application` (which reads `available` from that view) refuses them **without any
+  scheduler having run**. `expire_due_carry()` then materialises it into the ledger so the
+  history is explicit; it is called from `keepalive_ping()` (already daily) and from
+  `run_year_start`. No double-subtraction: writing the row sets `expired_at`, which is what
+  the view's subquery filters on. **Given the July 2026 outage, anything whose correctness
+  depends on a scheduler still running is not correct.**
+- **`run_year_start(year, preview)` is ONE function for both the preview and the run.**
+  `preview => true` computes everything and skips only the writes. The preview and the
+  result therefore cannot disagree — that is a property of the code, not two
+  implementations kept in step by hand. Any future "show me what this would do" should copy
+  this shape rather than growing a second calculation.
+- **A table alias called `t` inside a PL/pgSQL function with a `record t` silently breaks.**
+  PL/pgSQL substitutes the variable into the query and you get
+  `record "t" is not assigned yet` — at run time, not at create time, and only on the branch
+  that reaches it. Cost an hour. Alias tables something the function does not declare.
 - **A POPUP IS NOT NAVIGATION. Opening or closing one must use `rerender()`.** This is the
   rule that ends the "page jumps" reports, and it was hiding in plain sight: `render()`
   scrolls to 0 by design, and **every** modal handler in the app called it. `.modalback` is

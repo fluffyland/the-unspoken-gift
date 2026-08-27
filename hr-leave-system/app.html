@@ -391,13 +391,18 @@ const fmtRange = (s, e) => {
 };
 const fmtTs = ts => { const d = new Date(ts); return fmtDate(iso(d)) + ", " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
 const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
+// Like fmtDate but ALWAYS keeps the year. For deadlines, "30 Jun" of which year is the
+// whole question — fmtDate drops the year exactly when it is the current one.
+const fmtDateY = s => { const [y, m, d] = String(s).split("-").map(Number); return d + " " + MON[m - 1] + " " + y; };
 
 /* ============ Supabase → in-memory cache (renderers read db.* unchanged) ============ */
 const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
   empNo: r.emp_no || "", alias: r.alias || "", mobile: r.mobile || "", hasLogin: !!r.auth_user_id,
   twoLevel: r.two_level, annualBase: Number(r.annual_base), active: r.active, lastDay: r.last_working_day || null,
-  worksSat: r.works_saturday });
+  worksSat: r.works_saturday,
+  // Per employee on purpose: different staff carry different amounts. undefined until v16 runs.
+  carryCap: (r.carry_cap == null ? null : Number(r.carry_cap)) });
 const mapType = r => ({ code: r.code, en: r.name_en, zh: r.name_zh, mc: r.requires_attachment,
   gender: r.gender_eligibility, noDeduct: r.no_deduct, days: Number(r.default_days),
   allowHalf: r.allow_half_day, sort: r.sort, note: r.note || "" });
@@ -457,7 +462,9 @@ async function loadAll() {
     defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
     prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)),
     annualCap:  (o.annual_cap  == null ? null : Number(o.annual_cap)),
-    accrualMode: o.accrual_mode || "annual" };
+    accrualMode: o.accrual_mode || "annual",
+    defaultCarryCap: (o.default_carry_cap == null ? null : Number(o.default_carry_cap)),
+    carryExpiryMonths: (o.carry_expiry_months == null ? null : Number(o.carry_expiry_months)) };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -509,6 +516,8 @@ async function loadAll() {
   db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
   // v14: cap on long-service growth, and monthly vs one-shot crediting
   db.orgV14     = !!(orgR.data && ("accrual_mode" in orgR.data));
+  // v16: per-employee carry cap, configurable expiry, yearly resets, the year-start log.
+  db.orgV16     = !!(orgR.data && ("carry_expiry_months" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -668,7 +677,7 @@ const ltName  = c  => ltSafe(c).en;
    wherever the result is DISPLAYED; keep bare emp()/lt() where the code genuinely needs
    to know whether the row exists (`if (!emp(id))`, `e && e.name…`). */
 const empSafe = id => emp(id) || { id, name: "(no longer listed)", email: "", dept: "", title: "",
-  role: "employee", gender: "", active: false, annualBase: 0, joinDate: "", approver1: null, approver2: null };
+  role: "employee", gender: "", active: false, annualBase: 0, carryCap: null, joinDate: "", approver1: null, approver2: null };
 const ltSafe  = c  => lt(c) || { code: c, en: c || "(unknown)", zh: "", days: 0, mc: false,
   noDeduct: false, allowHalf: false, gender: "", sort: 999, note: "" };
 /* Whether a leave type offers half-days. Derived in one place: the preview and the
@@ -713,7 +722,7 @@ const colToggle = k => { const s = colState(k);
 function stageEmp(id, k, v) { const d = ensureDraft(); d.emps[id] = Object.assign({}, d.emps[id], { [k]: v }); }
 function stageOrg(k, v) { const d = ensureDraft(); d.org[k] = v; }
 function tPick(t, k) { const dv = vp.draft && vp.draft.types[t.code]; return dv && (k in dv) ? dv[k] : ({ days: t.days, half: t.allowHalf, mc: t.mc }[k]); }
-function ePick(e, k) { const dv = vp.draft && vp.draft.emps[e.id]; return dv && (k in dv) ? dv[k] : ({ approver1: e.approver1, approver2: e.approver2, annualBase: e.annualBase }[k]); }
+function ePick(e, k) { const dv = vp.draft && vp.draft.emps[e.id]; return dv && (k in dv) ? dv[k] : ({ approver1: e.approver1, approver2: e.approver2, annualBase: e.annualBase, carryCap: e.carryCap }[k]); }
 /* ---- Annual-leave maximum vs individual bases -------------------------------------
    The company maximum is absolute: `annual_entitlement_for` is `least(base + years,
    annual_cap)`, so a maximum below somebody's base silently CUTS them at the next
@@ -763,7 +772,7 @@ function baseAboveCap(v) {
   return `Annual leave base can't be more than the company maximum of ${fmtD(cap)} days.`;
 }
 
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : (o.defaultAnnualBase ?? 14); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -775,11 +784,14 @@ function draftSummary() {
     if ("approver1" in dv) p.push(`1st approver → ${dv.approver1 ? ((emp(dv.approver1) || {}).name || "?") : "none"}`);
     if ("approver2" in dv) p.push(`2nd approver → ${dv.approver2 ? ((emp(dv.approver2) || {}).name || "?") : "none"}`);
     if ("annualBase" in dv) p.push(`AL base → ${fmtD(dv.annualBase)}`);
+    if ("carryCap" in dv) p.push(`carry-forward → ${fmtD(numOr(dv.carryCap, 0))} days`);
     out.push(`${e ? e.name : i}: ${p.join(", ")}`); }
   if (d.org && Object.keys(d.org).length) { const p = [];
     if ("company" in d.org) p.push(`company name → ${d.org.company}`);
     if ("domain" in d.org) p.push(`email domain → ${d.org.domain}`);
     if ("base" in d.org) p.push(`default AL base → ${fmtD(numOr(d.org.base, 14))}`);
+    if ("carryCap" in d.org) p.push(`default carry-forward → ${fmtD(numOr(d.org.carryCap, 0))} days`);
+    if ("carryMonths" in d.org) p.push(`carry-forward expiry → ${d.org.carryMonths === "" ? "never" : numOr(d.org.carryMonths, 12) + " months"}`);
     out.push(`Company settings: ${p.join(", ")}`); }
   return out;
 }
@@ -799,6 +811,7 @@ async function saveDraft() {
       patch.approver1 = a1 || null; patch.approver2 = a2 || null; patch.two_level = !!(a1 && a2);
     }
     if ("annualBase" in dv) patch.annual_base = numOr(dv.annualBase, 14);
+    if ("carryCap" in dv && db.orgV16) patch.carry_cap = numOr(dv.carryCap, 0);
     if (Object.keys(patch).length) { const { error } = await sb.from("employees").update(patch).eq("id", id); if (error) { rpcErr(error); return false; } } }
   if (d.org && Object.keys(d.org).length) {
     const company = ("company" in d.org) ? d.org.company : (db.org.company || "");
@@ -812,6 +825,13 @@ async function saveDraft() {
       const ac = ("annualCap" in d.org) ? d.org.annualCap : db.org.annualCap;
       patch.annual_cap = (ac === "" || ac == null) ? null : numOr(ac, null);
       patch.accrual_mode = (("accrualMode" in d.org) ? d.org.accrualMode : db.org.accrualMode) || "annual";
+    }
+    if (db.orgV16) {
+      const cc = ("carryCap" in d.org) ? d.org.carryCap : db.org.defaultCarryCap;
+      patch.default_carry_cap = Math.max(0, numOr(cc, 0));
+      // Blank means "never expires" — a real answer, not a missing one.
+      const cm = ("carryMonths" in d.org) ? d.org.carryMonths : db.org.carryExpiryMonths;
+      patch.carry_expiry_months = (cm === "" || cm == null) ? null : Math.max(1, Math.round(numOr(cm, 12)));
     }
     const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
     if (error) { rpcErr(error); return false; }
@@ -890,8 +910,14 @@ function zhToEn(m) {
   for (const [re, en] of ZH_ERR) if (re.test(m)) return m.replace(re, en).replace(/[（(]?acknowledge[）)]?/g, "").trim();
   return m;
 }
-function rpcErr(error) {
+// The readable text of a database error. rpcErr() toasts it; anything that needs to put
+// the same words on the page reads it from here, so there is only ever one translation.
+function rpcMsg(error) {
   const m = zhToEn((error && (error.message || error.hint || "")) || "Something went wrong");
+  return m.length > 300 ? m.slice(0, 300) + "…" : m;
+}
+function rpcErr(error) {
+  const m = rpcMsg(error);
   toast(m.length > 140 ? m.slice(0, 140) + "…" : m);
 }
 // System announcements created before v11 carried bilingual titles/bodies — strip the
@@ -1316,7 +1342,7 @@ function vDashboard() {
       <div style="font-size:15px;font-weight:700;margin-bottom:4px">🔑 Set your own password</div>
       <div style="color:var(--muted);font-size:13px;max-width:520px;margin:0 auto">If you're still using the temporary password, tap <b>🔑 Password</b> at the top-right to pick your own (at least 8 characters). Recommended, not required.</div>
       <div class="actions" style="justify-content:center;margin-top:12px"><button class="btn" data-act="pwopen">Change password now</button><button class="btn sec" data-act="pwhintdismiss">Change it later</button></div></div>`}
-    ${db.annualCarry && db.annualCarry.remaining > 0 ? `<div class="callout acc" style="margin-bottom:16px">🔄 <b>${fmtD(db.annualCarry.remaining)}</b> day${db.annualCarry.remaining === 1 ? "" : "s"} of annual leave carried over from ${db.annualCarry.year - 1}. Use them by <b>${fmtDate(db.annualCarry.expires_on)}</b> — carried days are used first and expire after that. (Included in your Annual Leave balance below.)</div>` : ""}
+    ${db.annualCarry && db.annualCarry.remaining > 0 ? `<div class="callout acc" style="margin-bottom:16px">🔄 <b>${fmtD(db.annualCarry.remaining)}</b> day${db.annualCarry.remaining === 1 ? "" : "s"} of annual leave carried over from ${db.annualCarry.year - 1}. ${db.annualCarry.expires_on ? `Use them by <b>${fmtDateY(db.annualCarry.expires_on)}</b> — carried days are used first and expire after that.` : "<b>Expiry Date: N/A</b> — they do not expire, and they are used before this year's days."} (Included in your Annual Leave balance below.)</div>` : ""}
     ${ib.count ? `<div class="callout warn" style="margin-bottom:16px">You have <b>${ib.count}</b> item${ib.count === 1 ? "" : "s"} waiting for your review <button class="btn warn" data-act="nav" data-v="approvals" style="margin-left:10px;padding:5px 14px">Review now</button></div>` : ""}
     <div class="balgrid">${main.map(balCard).join("")}</div>
     <details style="margin:-8px 0 20px"><summary style="cursor:pointer;color:var(--muted);font-size:13.5px">More leave types (Maternity / Paternity / Compassionate / Marriage …)</summary>
@@ -1330,6 +1356,81 @@ function chainText(e) {
   let s = emp(e.approver1) ? empName(e.approver1) : "—";
   if (e.twoLevel && e.approver2) s += " → " + empName(e.approver2) + " (2 levels)";
   return s;
+}
+/* Carried-forward annual leave shown as its OWN category, never folded into Annual Leave —
+   the two are different money: carried days can expire, this year's cannot. It stays on
+   screen at zero rather than vanishing, so the figure is always answerable. */
+function carryLine(code, b) {
+  if (code !== "annual" || !db.annualCarry) return "";
+  const avail = Number(b.avail) || 0;
+  const c = Math.max(0, Number(db.annualCarry.remaining) || 0);
+  const usable = Math.max(0, Math.min(c, avail));   // carry you can still actually book
+  const own = avail - usable;                        // the two always sum to Available
+  const exp = db.annualCarry.expires_on ? fmtDateY(db.annualCarry.expires_on) : "N/A";
+  return `Annual Leave: ${fmtD(own)} · Carry Forward: ${fmtD(usable)} (Expiry Date: ${exp}) · `;
+}
+/* ---- Start a new year: preview, result, and the permanent log --------------------
+   The preview and the run are the SAME database function called with preview=true/false,
+   so what you were shown and what was recorded cannot disagree — that is a property of
+   the code, not something two implementations have to be kept agreeing on. */
+function fmtDays(n) { return fmtD(Number(n) || 0); }
+const nPeople = n => (Number(n) || 0) + ((Number(n) || 0) === 1 ? " person" : " people");
+function ysRowsTable(rows, showRun) {
+  if (!rows || !rows.length) return `<p class="meta">Nobody to process — everyone is already done for this year.</p>`;
+  return `<div class="tablebox" style="max-height:320px;overflow-y:auto"><table>
+    <thead><tr><th>Employee</th><th class="num">AL taken</th><th class="num">AL left</th><th class="num">Max carry</th>
+      <th class="num">Carried</th><th class="num">Forfeited</th><th class="num">Expired</th><th>Carry expires</th><th class="num">Reset</th></tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td>${esc(r.name || r.emp_name || "")}</td>
+      <td class="num">${fmtDays(r.taken_prev ?? r.annual_taken_prev)}</td>
+      <td class="num">${fmtDays(r.left ?? r.annual_left)}</td>
+      <td class="num">${fmtDays(r.cap ?? r.cap_applied)}</td>
+      <td class="num">${fmtDays(r.carried)}</td>
+      <td class="num"${Number(r.forfeited) > 0 ? ' style="color:var(--bad);font-weight:600"' : ""}>${fmtDays(r.forfeited)}</td>
+      <td class="num">${fmtDays(r.expired)}</td>
+      <td>${r.expires_on ? fmtDate(r.expires_on) : "N/A"}</td>
+      <td class="num">${fmtDays(r.reset_days)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function ysPreviewBox(gy) {
+  const p = vp.ysPreview || {};
+  if (p.loading) return `<p class="meta">Working out what would change…</p>`;
+  if (p.error) return `<div class="callout warn">${esc(p.error)}<div class="actions"><button class="btn sec" data-act="yscancel">Close</button></div></div>`;
+  const d = p.data || {};
+  const rows = d.rows || [];
+  const done = p.done;
+  return `<div class="callout ${done ? "acc" : "warn"}" style="margin:12px 0">
+    <b>${done ? `${gy} has been started.` : `Start of ${gy} — nothing has been changed yet`}</b>
+    <div class="tablebox" style="margin:8px 0"><table><tbody>
+      <tr><td>Carried forward</td><td class="num">${nPeople(d.carried_people)}</td><td class="num"><b>${fmtDays(d.carried_days)}</b> days</td></tr>
+      <tr><td>Expired unused</td><td class="num">${nPeople(d.expired_people)}</td><td class="num"><b>${fmtDays(d.expired_days)}</b> days</td></tr>
+      <tr><td>Forfeited above the maximum</td><td class="num">${nPeople(d.forfeited_people)}</td><td class="num"><b>${fmtDays(d.forfeited_days)}</b> days</td></tr>
+      <tr><td>Other leave types reset</td><td class="num">${nPeople(d.reset_people)}</td><td class="num"></td></tr>
+      <tr><td>Allowances credited</td><td class="num">${(d.granted || 0)} ${(d.granted || 0) === 1 ? "entry" : "entries"}</td><td class="num"></td></tr>
+    </tbody></table></div>
+    ${d.accrual_mode === "monthly" ? `<p class="meta" style="margin:6px 0">You are on <b>monthly accrual</b>, so no yearly allowance is credited — leave arrives in twelve monthly instalments instead. Carry-forward and the resets still run. This is intended, not a failure.</p>` : ""}
+    ${ysRowsTable(rows, done)}
+    <div class="actions">
+      ${done ? `<button class="btn sec" data-act="yscancel">Close</button><button class="btn ghost" data-act="yscsv">⬇ Export CSV</button>`
+             : `<button class="btn" data-act="ysgo">Run start of ${gy}</button><button class="btn sec" data-act="yscancel">Cancel</button><button class="btn ghost" data-act="yscsv">⬇ Export CSV</button>`}
+    </div></div>`;
+}
+function ysLogBox() {
+  const l = vp.ysLog || {};
+  if (l.loading) return `<p class="meta">Loading…</p>`;
+  const years = l.years || [];
+  const yr = l.year || years[0] || "";
+  const rows = (l.rows || []).filter(r => String(r.year) === String(yr));
+  return `<div class="callout" style="margin:12px 0;border:1px solid var(--line)">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <b>Past runs</b>
+      ${years.length ? `<select data-act="yslogyear">${years.map(v => `<option value="${v}" ${String(v) === String(yr) ? "selected" : ""}>${v}</option>`).join("")}</select>` : ""}
+      <span class="meta">${rows.length ? `${rows.length} employee${rows.length === 1 ? "" : "s"}, run ${rows[0].run_at ? fmtTs(Date.parse(rows[0].run_at)) : ""}` : "No year has been started yet."}</span>
+      <span style="flex:1"></span>
+      ${rows.length ? `<button class="btn ghost" data-act="yslogcsv">⬇ Export CSV</button>` : ""}
+      <button class="btn sec" data-act="yslogclose">Close</button>
+    </div>
+    ${rows.length ? `<div style="margin-top:8px">${ysRowsTable(rows, true)}</div>` : ""}
+  </div>`;
 }
 function balCard(t) {
   const b = bal(me.id, t.code);
@@ -1434,7 +1535,7 @@ function vApply() {
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
               : "Recorded for HR's records only — it doesn't use any leave balance.")
-          : `Available Balance: <b>${fmtD(b.avail)}</b> days (Allowance: ${fmtD(b.granted)} · Used: ${fmtD(b.used)} · Pending: ${fmtD(b.pending)})`}</span>
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(t.code, b)}Allowance: ${fmtD(b.granted)} · Used: ${fmtD(b.used)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
@@ -1816,7 +1917,7 @@ function hrEmployees() {
       <div class="field"><button class="btn" data-act="empadd">+ Add employee</button></div>
     </div>
     <p class="meta" style="margin:0 0 8px">${shown.length} of ${activeEmps().length} employees${q || deptF !== "all" ? " (filtered)" : ""}</p>
-    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">AL base</th><th></th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>Employee</th><th>Team</th><th>Account type</th><th>Hire date</th><th>1st level approver</th><th>2nd level approver</th><th class="num">AL base</th>${db.orgV16 ? '<th class="num">Carry-forward</th>' : ""}<th></th></tr></thead><tbody>
     ${shown.length ? shown.map(e => { const lock = !canEditSensitive(e); const dis = lock ? "disabled" : ""; return `<tr data-emp="${e.id}">
       <td><b>${esc(e.name)}</b><div class="meta">${esc(e.title || "")}${e.title ? " · " : ""}${esc(e.email)}</div></td>
       <td>${esc(e.dept)}</td>
@@ -1825,8 +1926,9 @@ function hrEmployees() {
       <td><select data-act="empf" data-id="${e.id}" data-f="approver1" ${dis}>${apprOpts(e.id, ePick(e, "approver1"), ePick(e, "approver2"))}</select></td>
       <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${ePick(e, "approver1") && !lock ? "" : "disabled"}>${apprOpts(e.id, ePick(e, "approver2"), ePick(e, "approver1"))}</select></td>
       <td class="num"><input type="number" step="0.5" min="0" value="${ePick(e, "annualBase") ?? 14}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="annualBase" ${dis}></td>
+      ${db.orgV16 ? `<td class="num"><input type="number" step="0.5" min="0" value="${ePick(e, "carryCap") ?? 0}" style="width:70px" data-act="empf" data-id="${e.id}" data-f="carryCap" ${dis} title="Max annual leave days this person may carry into next year"></td>` : ""}
       <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
-    </tr>`; }).join("") : `<tr><td colspan="8"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
+    </tr>`; }).join("") : `<tr><td colspan="${db.orgV16 ? 9 : 8}"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
     <p class="meta" style="margin-top:8px">Off-in-lieu credits and one-off corrections live in <b>Balance adjustments</b>. Offboarding is inside <b>Edit</b> (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="tablebox" style="margin-top:8px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th></tr></thead><tbody>
@@ -1910,6 +2012,8 @@ function empModal() {
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
     <div class="field" style="max-width:260px"><label>Annual leave base (days/yr)</label><input type="number" step="0.5" min="0" data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
       ${baseAboveCap(f.annualBase) ? `<div class="callout warn" style="margin:8px 0 0">⚠ ${esc(baseAboveCap(f.annualBase))}</div>` : ""}</div>
+    ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Foward AL (max days)</label><input type="number" step="0.5" min="0" data-f="em.carryCap" value="${f.carryCap ?? 0}" ${selfLock ? "disabled" : ""}>
+      <span class="hint">The most unused annual leave this person may carry into next year. Anything above it is forfeited when you start the new year. 0 means nothing carries over.</span></div>` : ""}
     ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Required to work on Saturday<span class="req">*</span></label>
       <select data-f="em.worksSat" ${selfLock ? "disabled" : ""}>
         ${(f.worksSat === true || f.worksSat === false) ? "" : `<option value="" disabled selected>— Select —</option>`}
@@ -2037,6 +2141,8 @@ function hrSettings() {
     <div class="frow">
       <div class="field" style="max-width:220px"><label>Default annual leave base</label><input type="number" step="0.5" min="0" id="org-base" data-f="org.base" value="${oPick("base")}">
         <span class="hint">Starting days per year for someone new. Each employee's own base can be changed afterwards.</span></div>
+      ${db.orgV16 ? `<div class="field" style="max-width:220px"><label>Default Carry Foward AL</label><input type="number" step="0.5" min="0" data-f="org.carryCap" value="${oPick("carryCap")}">
+        <span class="hint">Starting carry-forward maximum for someone new. Each employee's own figure is on the Employees tab and in Edit employee.</span></div>` : ""}
     </div>
   </div>
 
@@ -2053,6 +2159,9 @@ function hrSettings() {
           <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
         </select>
         <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>
+      ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carried days expire after (months)</label>
+        <input type="number" step="1" min="1" data-f="org.carryMonths" value="${oPick("carryMonths")}" placeholder="never expires">
+        <span class="hint">Counted from 1 January, so <b>6</b> means carried days must be used by 30 June. <b>Leave it blank and they never expire.</b> Carried days are always used before the new year's, so nothing you have already taken is ever clawed back. How many days each person may carry is set per employee, on the Employees tab.</span></div>` : ""}
     </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
     <p class="hint" style="margin:10px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
@@ -2082,15 +2191,48 @@ function hrSettings() {
       <button class="btn sec" data-act="phadd">+ Add holiday</button>
     </div>
   </div>
-  <div class="card"><h3>Yearly leave allowances</h3>
-    <p class="meta" style="margin:4px 0 10px">Run this once a year to give everyone their leave for the year (annual leave is based on each person's base plus years of service; new joiners are pro-rated automatically). It's safe to run again — anyone already set up for that year is skipped.</p>
+  <div class="card"><h3>Start a new year</h3>
+    ${db.orgV16 ? `
+    <p class="meta" style="margin:4px 0 10px">Run this once, at the start of each year. It does all four steps in the order they have to happen — getting that order wrong by hand is easy and silent, which is why it is one button:</p>
+    <ol class="meta" style="margin:0 0 12px 18px;line-height:1.7">
+      <li>Expire any carried days that have passed their date</li>
+      <li>Carry forward what's left of last year's annual leave, up to <b>each person's own maximum</b></li>
+      <li>Reset every other leave type to zero — sick, hospitalisation, childcare and the rest</li>
+      <li>Credit the new year's allowances (annual leave from each person's base plus years of service; new joiners pro-rated)</li>
+    </ol>
+    <p class="meta" style="margin:0 0 12px">Off-in-lieu is never touched — those days were earned by working. <b>Safe to press twice:</b> anyone already done for that year is skipped.</p>
+    <div class="field" style="max-width:150px"><label>Target year</label>
+      <select data-act="grantyear">${Array.from({ length: PH_MAX - (y - 1) + 1 }, (_, i) => y - 1 + i).map(yy => `<option value="${yy}" ${yy === gy ? "selected" : ""}>${yy}</option>`).join("")}</select></div>
+    ${vp.ysPreview ? ysPreviewBox(gy) : `<div class="actions"><button class="btn sec" data-act="yspreview">Start ${gy}…</button>
+      <button class="btn ghost" data-act="yslogopen">📋 Past runs</button></div>`}
+    ${vp.ysLog ? ysLogBox() : ""}`
+    : `<p class="meta" style="margin:4px 0 10px">Run this once a year to give everyone their leave for the year (annual leave is based on each person's base plus years of service; new joiners are pro-rated automatically). It's safe to run again — anyone already set up for that year is skipped.</p>
+    <div class="callout warn" style="margin:0 0 12px">⚠️ <b>Carry-forward and the yearly resets are not installed yet.</b> Run <code>migration_app_v16.sql</code> in Supabase → SQL Editor and this becomes the one-button "Start a new year". Until then this button only credits the allowances — it does <b>not</b> carry annual leave forward and does <b>not</b> reset sick, hospitalisation or childcare, so those keep accumulating.</div>
     <div class="field" style="max-width:150px"><label>Target year</label>
       <select data-act="grantyear">${Array.from({ length: PH_MAX - (y - 1) + 1 }, (_, i) => y - 1 + i).map(yy => `<option value="${yy}" ${yy === gy ? "selected" : ""}>${yy}</option>`).join("")}</select></div>
     ${vp.grantConfirm ? `<div class="callout warn">This adds the <b>${gy}</b> leave allowances for all ${activeEmps().length} active employees. Are you sure?
       <div class="actions"><button class="btn" data-act="grantgo">Yes, credit leave of ${gy} to all Employee</button><button class="btn sec" data-act="grantcancel">Cancel</button></div></div>`
-    : `<button class="btn sec" data-act="grantask">Credit leave of ${gy} to all Employee</button>`}
+    : `<button class="btn sec" data-act="grantask">Credit leave of ${gy} to all Employee</button>`}`}
   </div></div>`;
 }
+/* One export for both the preview and the permanent log: the two carry the same fields
+   under slightly different names, which is why every row is read through `??`. */
+function ysExport(rows, year) {
+  if (!rows || !rows.length) return toast("Nothing to export");
+  const out = [["Employee", "Annual leave taken last year", "Annual leave left", "Max carry-forward",
+                "Carried forward", "Forfeited above the maximum", "Expired unused", "Carry expires",
+                "Days reset", "Leave types reset"]];
+  for (const r of rows) {
+    const resets = (r.resets || []).map(x => `${x.name} ${fmtD(Number(x.cleared) || 0)}→${fmtD(Number(x.credits) || 0)}`).join("; ");
+    out.push([r.name ?? r.emp_name ?? "", fmtD(Number(r.taken_prev ?? r.annual_taken_prev) || 0),
+              fmtD(Number(r.left ?? r.annual_left) || 0), fmtD(Number(r.cap ?? r.cap_applied) || 0),
+              fmtD(Number(r.carried) || 0), fmtD(Number(r.forfeited) || 0), fmtD(Number(r.expired) || 0),
+              r.expires_on ? fmtDate(r.expires_on) : "N/A", fmtD(Number(r.reset_days) || 0), resets]);
+  }
+  csvDownload(`start-of-year-${year || ""}.csv`, out);
+  toast("Exported");
+}
+
 /* CSV download helper (Excel-safe: BOM + quoted fields) */
 function csvDownload(filename, rows) {
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")).join("\r\n");
@@ -2378,8 +2520,8 @@ async function runAction(el) {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", emailPrefix: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, worksSat: undefined } }; rerender(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; rerender(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", emailPrefix: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, carryCap: db.org?.defaultCarryCap ?? 0, worksSat: undefined } }; rerender(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, carryCap: e.carryCap ?? 0, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; rerender(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -2439,6 +2581,7 @@ async function runAction(el) {
         role: f.role, join_date: f.joinDate, approver1: f.approver1 || null,
         approver2: (f.approver1 && f.approver2) ? f.approver2 : null,
         two_level: !!(f.approver1 && f.approver2), annual_base: base };
+      if (db.orgV16) row.carry_cap = Math.max(0, numOr(f.carryCap, 0));
       if (db.empExtra) { row.emp_no = (f.empNo || "").trim() || null; row.alias = (f.alias || "").trim() || null; row.mobile = (f.mobile || "").trim() || null; }
       if (m.mode === "add") {
         const { data: ins, error } = await sb.from("employees").insert(row).select("id").single();
@@ -2792,6 +2935,43 @@ async function runAction(el) {
       csvDownload("leave-records-" + todayStr() + ".csv", rows);
       toast("Records exported"); break;
     }
+    // ---- Start a new year ----
+    case "yspreview": {
+      const yr = numOr(vp.grantYear, new Date().getFullYear());
+      vp.ysPreview = { loading: true }; rerender();
+      const { data, error } = await sb.rpc("run_year_start", { p_year: yr, p_preview: true });
+      vp.ysPreview = error ? { error: rpcMsg(error) } : { data };
+      rerender(); break;
+    }
+    case "ysgo": {
+      const yr = numOr(vp.grantYear, new Date().getFullYear());
+      vp.ysPreview = { loading: true }; rerender();
+      const { data, error } = await sb.rpc("run_year_start", { p_year: yr, p_preview: false });
+      if (error) { vp.ysPreview = { error: rpcMsg(error) }; rerender(); break; }
+      vp.ysPreview = { data, done: true };
+      await reloadKeep();
+      break;
+    }
+    case "yscancel": delete vp.ysPreview; rerender(); break;
+    case "yscsv": {
+      const d = (vp.ysPreview || {}).data || {};
+      ysExport(d.rows || [], d.year || vp.grantYear);
+      break;
+    }
+    case "yslogopen": {
+      vp.ysLog = { loading: true }; rerender();
+      const { data, error } = await sb.from("year_start_log").select("*").order("year", { ascending: false }).order("emp_name");
+      if (error) { vp.ysLog = { rows: [], years: [] }; toast(rpcMsg(error)); rerender(); break; }
+      const years = [...new Set((data || []).map(r => r.year))];
+      vp.ysLog = { rows: data || [], years, year: years[0] };
+      rerender(); break;
+    }
+    case "yslogclose": delete vp.ysLog; rerender(); break;
+    case "yslogcsv": {
+      const l = vp.ysLog || {};
+      ysExport((l.rows || []).filter(r => String(r.year) === String(l.year)), l.year);
+      break;
+    }
     case "grantask": vp.grantConfirm = true; rerender(); break;
     case "grantcancel": delete vp.grantConfirm; rerender(); break;
     case "grantgo": {
@@ -2823,7 +3003,8 @@ document.addEventListener("change", async ev => {
     if (btn) btn.disabled = !el.checked;
     return;
   }
-  if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); rerender(); return; }
+  if (el.dataset.act === "grantyear") { vp.grantYear = numOr(el.value, new Date().getFullYear()); delete vp.ysPreview; rerender(); return; }
+  if (el.dataset.act === "yslogyear") { if (vp.ysLog) vp.ysLog.year = el.value; rerender(); return; }
   if (el.dataset.act === "empf") {
     const id = el.dataset.id, f = el.dataset.f;
     if (f === "annualBase") {
@@ -2835,6 +3016,7 @@ document.addEventListener("change", async ev => {
     }
     else if (f === "approver1") { stageEmp(id, "approver1", el.value || null); if (!el.value) stageEmp(id, "approver2", null); }
     else if (f === "approver2") stageEmp(id, "approver2", el.value || null);
+    else if (f === "carryCap") stageEmp(id, "carryCap", Math.max(0, numOr(el.value, 0)));
     rerender(); return;
   }
   if (el.dataset.act === "typeall") {   // column header checkbox → set every leave type
