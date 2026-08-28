@@ -326,6 +326,32 @@ happily agree with. Two habits keep it honest:
   so `sb.functions = {...}` silently does nothing — use `Object.defineProperty`. And when
   asserting a filtered list, read the **name cell**, not the row: a row contains the
   approver dropdown, which lists everybody.
+- **v20: bal() CLASSIFIED BY SIGN, and v18/v19 started writing negative corrections.**
+  Positive meant entitlement, negative meant leave taken. Then a leave type amended 17 → 14
+  began writing −3, and an entitlement corrected downwards wrote the difference — so both
+  were counted as leave somebody had taken. The second figure on Balances never came down
+  ("SL changed from 17 to 14 but still shows 17") and Taken was inflated by the same amount
+  ("-2 / 17"). **Classify by what an entry IS:** `ref_application` set → leave (refunds are
+  positive and net off); housekeeping wording → neither; everything else → entitlement,
+  **summed with its sign**. Same rule as SQL `annual_entitled_in_year`, and `entChange`'s
+  private copy was deleted rather than kept in step. One fix reached five screens.
+  *A sign is not a category. When new kinds of entry appear, the classifier must change too.*
+- **`numText()` ate the minus sign** — added in v19 to keep a text box numeric, applied to
+  every field including the two that take a negative. `-30` of off-in-lieu was staged as
+  `30`, and because staging does not redraw, the box still read `-30` until answering an
+  unrelated question redrew it. `NEG_OK` now names the two fields that allow one. *The v19
+  test for that box only ever typed positive numbers — a sanitiser needs a test for what it
+  must NOT strip.*
+- **The ledger had no screen for two rounds.** v18 replaced the *Balance adjustments* tab
+  with *Leave Application*, and that tab was the only place the ledger was ever displayed.
+  `offboard_employee` kept writing the encashment entries; nobody could read them. Now
+  **Amendment records → Full ledger**. *Replacing a tab silently deletes every view it held
+  — check what else was on it.*
+- **The offboarding record needs no table.** `offboard_employee` already writes one entry
+  per leave type with the remaining balance, the last day and encashed/cleared in the
+  reason. Reading it back needs no migration and covers everyone already offboarded, which
+  a new log table would not. Only the encashed/cleared **word** is parsed, and only for a
+  label — if the wording changes, the days and types still show.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.

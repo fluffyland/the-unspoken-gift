@@ -156,16 +156,51 @@ there and both forms follow it — there is no second copy to keep in step.
 The balance rules are the same too. Not enough days, overlapping dates, or a missing MC
 are refused for you exactly as they would be for them.
 
+## Where the leave records live
+
+Three books, deliberately separate:
+
+| | What is in it | Where |
+|---|---|---|
+| **All records** | every leave application — by the employee, or by HR on their behalf | its own tab |
+| **Amendment records** | every change HR made by hand: entitlements, off-in-lieu, company-wide leave amendments | its own tab |
+| **Full ledger** | **every entry that makes up a balance** — yearly credits, joining credits, leave taken, refunds, off-in-lieu, expiry, forfeits and **offboarding settlements** | **Amendment records → Full ledger** |
+
+A balance is always the sum of its entries. If a number looks wrong, the ledger is where
+you find out why — it is the only screen that shows every line.
+
+> This screen went missing for a while. It used to be the **Balance adjustments** tab, and
+> when that tab became **Leave Application** the ledger went with it — the entries were
+> still being written, and nothing displayed them. It is back, read-only, with search and
+> an export.
+
+## What happens to leave when someone leaves
+
+**HR Console → Employees → Edit → Offboard**, then choose **Encash** or **Clear**.
+
+Either way the system writes off every remaining balance, one entry per leave type, and
+you can see exactly what it did in **Employees → Former employees**:
+
+| Name | Last working day | Leave settled on leaving |
+|---|---|---|
+| Gone Person | 31/10/2026 | Annual Leave 7 days · Off-in-Lieu 1.5 days · Sick Leave 9 days · **Total encashed 17.5 days** |
+
+**Encashed** means the days are paid out — the figures above are what payroll needs, and
+there is an **Export CSV** beside the list. **Cleared** means they are forfeited. Either
+way the entries stay in the **Full ledger** permanently, and the person's history is kept.
+
 ## Off-in-lieu
 
 **HR Console → Employees → Edit → Credit Off-in-Lieu**
 
-> Credit their off in lieu here. Their balance now: **1.5** days.
+> Credit their off in lieu here. Their balance now: **1.5** days. Eg. If the employee
+> entitled for 3 days, type 3 and it will credit 3 days OIL
 
 Days and a reason, credited when you press **Save changes**. It is inside the employee's
 own form because only some staff earn it — a company-wide box would invite crediting
-everybody. **The reason is required** — every credit keeps a why, and the form now says so
-before you save rather than the database refusing afterwards. Their balance updates
+everybody. **The reason is required** — the `*` appears beside the Reason box as soon as you type a
+number of days, and nothing is demanded before that. A **negative** number takes days back
+(type `-2` to remove two). Their balance updates
 immediately and it is written to **Amendment records**.
 
 **Nothing is pre-selected.** Employee, leave type, days and reason are all required.
@@ -458,8 +493,9 @@ mid-year joiner accrues from their joining month.
 
 **HR Console → Employees → Edit → Annual Leave Entitled / Yr**
 
-> This is the total AL the employee entitle. It will direct credit all AL to this employee
-> once saved. Proceed with care.
+> This is the total AL the employee entitle. It will direct credit AL to this employee once
+> saved. (Eg. If employee gain extra 1 Day AL change it from 14 to 15. System will change
+> their total AL to 15)
 
 Whatever you type **is** that person's annual leave for this year. Nothing is added for
 years of service and nothing is pro-rated — if a new joiner should get 6 days for their
@@ -479,8 +515,8 @@ disagree. The box under the field shows the arithmetic before you save:
 not reset anybody to 15.
 
 **Your company maximum caps the number you type** — set it to 21 and the field refuses 25,
-saying why. That applies on all three routes: this form, the box in the Employees table,
-and the company-wide button below.
+saying why. That applies on both routes: this form and the company-wide button below. (The
+column on the Employees table is gone — one place to set it, not two.)
 
 Every change is written to **Amendment records**, never applied silently.
 

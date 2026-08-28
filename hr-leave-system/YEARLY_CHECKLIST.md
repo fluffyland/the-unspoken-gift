@@ -124,7 +124,7 @@ LeaveDesk forfeits the days, it does not pay them out.
 
 ### Afterwards, check three things
 
-- **HR Console → Balances** — every active person has a non-zero **given this year** figure
+- **HR Console → Balances** — every active person has a non-zero **entitled this year** figure
 - **Sick leave reads 14, not 28.** If it reads 28, the reset did not run — you are on a
   build without `migration_app_v16.sql`
 - **Everyone's annual leave is the figure you typed**, not that plus years of service —
