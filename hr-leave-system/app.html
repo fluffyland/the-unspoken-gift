@@ -127,6 +127,16 @@ td.num{font-variant-numeric:tabular-nums}
 .field label{font-size:13px;font-weight:600}
 .field .hint{font-size:12px;color:var(--muted)}
 .req{color:#e5484d;font-weight:700;margin-left:2px}
+/* The four account types, explained under the picker. The selected one is marked with a
+   left rule rather than a colour alone, so it survives a mono screen and a colour-blind
+   reader. */
+.roledesc{margin:8px 0 2px;font-size:12.5px;line-height:1.5}
+.roledesc>div{display:flex;gap:10px;padding:5px 9px;border-left:3px solid transparent;border-radius:0 6px 6px 0}
+.roledesc>div>b{flex:0 0 132px;color:var(--muted);font-weight:600}
+.roledesc>div>span{flex:1;color:var(--muted)}
+.roledesc>div.on{border-left-color:var(--accent);background:var(--accent-soft)}
+.roledesc>div.on>b,.roledesc>div.on>span{color:var(--ink)}
+@media(max-width:560px){.roledesc>div{flex-direction:column;gap:2px}.roledesc>div>b{flex:none}}
 .frow{display:flex;gap:14px;flex-wrap:wrap}
 .frow .field{flex:1;min-width:160px}
 .check{display:flex;align-items:center;gap:8px;font-size:13.5px}
@@ -405,6 +415,21 @@ const fmtD = n => (n % 1 === 0 ? n : n.toFixed(1));
 // whole question — fmtDate drops the year exactly when it is the current one.
 const fmtDateY = s => { const [y, m, d] = String(s).split("-").map(Number); return d + " " + MON[m - 1] + " " + y; };
 
+/* ---- v24: the carry-forward expiry is a day + month that repeats every year ---- */
+const MONFULL = ["January","February","March","April","May","June",
+                 "July","August","September","October","November","December"];
+// Days in a month, for a year that MIGHT be a leap year. The picker offers 29 for
+// February all the time; carry_expiry_for() in SQL clamps to 28 in a non-leap year,
+// so the setting can never produce a date that does not exist.
+const daysInMon = (m, y) => m === 2 ? (y == null ? 29 : (new Date(y, 2, 0).getDate()))
+                                    : [31,28,31,30,31,30,31,31,30,31,30,31][m - 1];
+// The date carried days would have to be used by, for the year carry is created in.
+function carryExpiryDate(mon, day, year) {
+  if (!mon || !day) return null;
+  const d = Math.min(day, daysInMon(mon, year));
+  return year + "-" + String(mon).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}
+
 /* ============ Supabase → in-memory cache (renderers read db.* unchanged) ============ */
 const mapEmp = r => ({ id: r.id, name: r.name, title: r.title || "", dept: r.dept || "", gender: r.gender,
   role: r.role, email: r.email, joinDate: r.join_date, approver1: r.approver1, approver2: r.approver2,
@@ -504,7 +529,10 @@ async function loadAll() {
     annualCap:  (o.annual_cap  == null ? null : Number(o.annual_cap)),
     accrualMode: o.accrual_mode || "annual",
     defaultCarryCap: (o.default_carry_cap == null ? null : Number(o.default_carry_cap)),
-    carryExpiryMonths: (o.carry_expiry_months == null ? null : Number(o.carry_expiry_months)) };
+    carryExpiryMonths: (o.carry_expiry_months == null ? null : Number(o.carry_expiry_months)),
+    // v24: the expiry is a day + month that repeats every year. Both null = never expires.
+    carryExpiryMonth: (o.carry_expiry_month == null ? null : Number(o.carry_expiry_month)),
+    carryExpiryDay:   (o.carry_expiry_day   == null ? null : Number(o.carry_expiry_day)) };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -558,6 +586,7 @@ async function loadAll() {
   db.orgV14     = !!(orgR.data && ("accrual_mode" in orgR.data));
   // v16: per-employee carry cap, configurable expiry, yearly resets, the year-start log.
   db.orgV16     = !!(orgR.data && ("carry_expiry_months" in orgR.data));
+  db.orgV24     = !!(orgR.data && ("carry_expiry_day" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -743,6 +772,19 @@ const ltSafe  = c  => lt(c) || { code: c, en: c || "(unknown)", zh: "", days: 0,
    hence the fallback list. */
 const allowsHalf = t => typeof (t || {}).allowHalf === "boolean" ? t.allowHalf : ["annual", "oil"].includes((t || {}).code);
 const roleName = r => ({ employee: "Employee", approver: "Manager / Supervisor", hr: "HR Admin", admin: "Owner / Super Admin" }[r] || r);
+// The user's own wording, kept beside the labels so the two cannot drift apart.
+const ROLE_DESC = {
+  employee: "Basic account to apply personal leave applications and balances",
+  approver: "Basic account function, with approval tabs to approve subordinate",
+  hr: "Manager account function, with HR console tab function (staff, offboarding, leave types, settings)",
+  admin: "Everything HR can, plus what HR deliberately cannot: create another Owner, and edit / offboard / delete / reset the password of an Owner."
+};
+// Only the types this person can actually grant are described — being told what an
+// account type does when the dropdown will not offer it is noise, not help.
+function roleDescList(opts, sel) {
+  return `<div class="roledesc">${opts.map(r =>
+    `<div class="${r === sel ? "on" : ""}"><b>${esc(roleName(r))}</b><span>${esc(ROLE_DESC[r] || "")}</span></div>`).join("")}</div>`;
+}
 // Only an Owner (admin) may change someone's own routing / leave base / account type; anyone can edit others.
 function canEditSensitive(e) { return me.role === "admin" || e.id !== me.id; }
 
@@ -878,7 +920,7 @@ function baseAboveCap(v) {
   return `Annual Leave Entitled / Yr can't be more than the company maximum of ${fmtD(cap)} days.`;
 }
 
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : (o.defaultAnnualBase ?? 14); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : k === "carryMon" ? (o.carryExpiryMonth ?? "") : k === "carryDay" ? (o.carryExpiryDay ?? "") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -897,6 +939,8 @@ function draftSummary() {
     if ("base" in d.org) p.push(`default AL base → ${fmtD(numOr(d.org.base, 14))}`);
     if ("carryCap" in d.org) p.push(`default carry-forward → ${fmtD(numOr(d.org.carryCap, 0))} days`);
     if ("carryMonths" in d.org) p.push(`carry-forward expiry → ${d.org.carryMonths === "" ? "never" : numOr(d.org.carryMonths, 12) + " months"}`);
+    if ("carryMon" in d.org || "carryDay" in d.org) { const e = expiryPick();
+      p.push(`carry-forward expiry → ${e.mon ? e.day + " " + MONFULL[e.mon - 1] : "never"}`); }
     out.push(`Company settings: ${p.join(", ")}`); }
   return out;
 }
@@ -915,6 +959,48 @@ function typeDayChanges() {
   }
   return out;
 }
+/* v24 — the carry-forward expiry: what is staged, and whether it differs from what is
+   stored. Both null is a real answer ("never expires"), not a missing one, so this
+   compares against the STORED pair rather than testing for truthiness. */
+function expiryPick() {
+  const d = (vp.draft || {}).org || {}, o = db.org || {};
+  const raw = k => (k in d) ? d[k] : (k === "carryMon" ? o.carryExpiryMonth : o.carryExpiryDay);
+  let mon = raw("carryMon"), day = raw("carryDay");
+  mon = (mon === "" || mon == null) ? null : Number(mon);
+  day = (day === "" || day == null) ? null : Number(day);
+  if (!mon) return { mon: null, day: null };
+  // A day the chosen month does not have can only come from switching month with a high
+  // day still staged (April, then the 31st). Pull it back rather than sending it.
+  return { mon, day: Math.min(day || 1, daysInMon(mon)) };
+}
+function expiryChanged() {
+  if (!db.orgV24) return false;
+  const d = (vp.draft || {}).org || {};
+  if (!("carryMon" in d) && !("carryDay" in d)) return false;
+  const e = expiryPick(), o = db.org || {};
+  return e.mon !== (o.carryExpiryMonth ?? null) || e.day !== (o.carryExpiryDay ?? null);
+}
+/* The confirmation's words, built from what set_carry_expiry's PREVIEW actually returned —
+   never from a guess made on this side. Moving the date earlier destroys days somebody is
+   holding right now, so that sentence has to be the truth or it is worse than useless. */
+function expiryLines(prev) {
+  const e = expiryPick();
+  const to = e.mon ? `<b>${e.day} ${MONFULL[e.mon - 1]}</b>, every year from now on` : "<b>never</b> — carried days stop expiring";
+  const n = Number((prev || {}).people) || 0;
+  const dying = Number((prev || {}).days_lost) || 0;
+  const dyingWho = Number((prev || {}).dying_people) || 0;
+  const already = Number((prev || {}).already_expired) || 0;
+  const nd = (prev || {}).new_date;
+  const out = [`Carried annual leave will expire on ${to}.`];
+  out.push(n === 0
+    ? "Nobody is holding carried leave right now, so only the setting changes."
+    : `<b>${n}</b> employee${n === 1 ? "" : "s"} holding carried leave ${n === 1 ? "has" : "have"} their date moved to <b>${nd ? fmtDateY(nd) : "no expiry"}</b>.`);
+  if (dying > 0) out.push(`<b style="color:var(--bad)">That date has already passed, so ${fmtD(dying)} day${dying === 1 ? "" : "s"} across ${dyingWho} ${dyingWho === 1 ? "person" : "people"} expire immediately.</b>`);
+  if (already > 0) out.push(`${already} employee${already === 1 ? "" : "s"} already had carried leave written off. Moving the date does not bring those days back.`);
+  out.push("Leave already taken is not affected.");
+  return out;
+}
+
 async function saveDraft() {
   const d = vp.draft; if (!d) return true;
   for (const code in (d.types || {})) { const dv = d.types[code], patch = {};
@@ -956,11 +1042,23 @@ async function saveDraft() {
       const cc = ("carryCap" in d.org) ? d.org.carryCap : db.org.defaultCarryCap;
       patch.default_carry_cap = Math.max(0, numOr(cc, 0));
       // Blank means "never expires" — a real answer, not a missing one.
-      const cm = ("carryMonths" in d.org) ? d.org.carryMonths : db.org.carryExpiryMonths;
-      patch.carry_expiry_months = (cm === "" || cm == null) ? null : Math.max(1, Math.round(numOr(cm, 12)));
+      if (!db.orgV24) {
+        const cm = ("carryMonths" in d.org) ? d.org.carryMonths : db.org.carryExpiryMonths;
+        patch.carry_expiry_months = (cm === "" || cm == null) ? null : Math.max(1, Math.round(numOr(cm, 12)));
+      }
     }
     const { error } = await sb.from("org_settings").update(patch).eq("id", 1);
     if (error) { rpcErr(error); return false; }
+    // The expiry date is NOT a plain column write: it also restamps the date on leave
+    // people are already holding, and clears anything now past it. One function does the
+    // preview and the write, so the figures on the confirmation and the rows actually
+    // changed come from the same arithmetic.
+    if (expiryChanged()) {
+      const e = expiryPick();
+      const { error: e2 } = await sb.rpc("set_carry_expiry",
+        { p_month: e.mon, p_day: e.day, p_preview: false });
+      if (e2) { rpcErr(e2); return false; }
+    }
   }
   return true;
 }
@@ -2257,11 +2355,17 @@ function empModal() {
         <option value="F" ${f.gender === "F" ? "selected" : ""}>Female</option>
         <option value="M" ${f.gender === "M" ? "selected" : ""}>Male</option></select>
         <span class="hint">Decides which leave types apply (maternity / paternity).</span></div>
-      <div class="field"><label>Account type<span class="req">*</span></label><select data-f="em.role" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
+      <div class="field"><label>Hire date</label><input type="text" data-f="em.joinDMY" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${f.joinDate ? fmtDMY(f.joinDate) : esc(f.joinDMY || "")}"><span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
+    </div>
+    ${/* Account type gets a row to itself: the four descriptions under it need the width,
+          and squeezed into a third of the form they read as the clumped text the user
+          calls out every time. */""}
+    <div class="frow">
+      <div class="field" style="max-width:560px"><label>Account type<span class="req">*</span></label><select data-f="em.role" style="max-width:300px" ${selfLock || (f.role === "admin" && !isOwner) ? "disabled" : ""}>
         ${f.role ? "" : `<option value="" disabled selected>— Select —</option>`}
         ${roleOpts.map(r => `<option value="${r}" ${f.role === r ? "selected" : ""}>${roleName(r)}</option>`).join("")}</select>
+        ${roleDescList(roleOpts, f.role)}
         <span class="hint">${selfLock ? "Only an Owner/Admin can change your own account type." : (!isOwner ? "Only an Owner can grant Owner / Super Admin." : "Sets system permissions. Job titles go in Occupation.")}</span></div>
-      <div class="field"><label>Hire date</label><input type="text" data-f="em.joinDMY" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${f.joinDate ? fmtDMY(f.joinDate) : esc(f.joinDMY || "")}"><span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
     </div>
     <div class="frow">
       <div class="field"><label>1st level approver<span class="req">*</span></label><select data-f="em.approver1" ${selfLock ? "disabled" : ""}>${appr1Opts(m.id, f.approver1, f.approver2)}</select>
@@ -2398,6 +2502,33 @@ function ltModal() {
    holiday add/edit would fail against an older database. */
 function phStamp() { return db.hasPhWhen ? { updated_at: new Date().toISOString() } : {}; }
 
+/* v24 — two dropdowns rather than a typed box. Three reasons, in order of how much
+   trouble they save: an impossible date cannot be picked at all; the Day list follows the
+   Month, so switching to April drops the 31st instead of storing it; and a <select> has
+   no caret to lose, so this control sidesteps THE CARET RULE rather than having to obey
+   it (a type="number" box that re-renders as you type is what turned 15 into 51). */
+function carryExpiryField() {
+  const e = expiryPick();
+  const nextYear = new Date().getFullYear() + 1;
+  const on = carryExpiryDate(e.mon, e.day, nextYear);
+  const days = e.mon ? daysInMon(e.mon) : 31;
+  return `<div class="field" style="max-width:300px"><label>Carry Forward AL expiry date</label>
+    <div style="display:flex;gap:8px">
+      <select data-f="org.carryMon" style="flex:2;min-width:0">
+        <option value="" ${e.mon ? "" : "selected"}>— Never expires —</option>
+        ${MONFULL.map((n, i) => `<option value="${i + 1}" ${e.mon === i + 1 ? "selected" : ""}>${n}</option>`).join("")}
+      </select>
+      <select data-f="org.carryDay" style="flex:1;min-width:0" ${e.mon ? "" : "disabled"}>
+        ${Array.from({ length: days }, (_, i) => i + 1).map(d =>
+          `<option value="${d}" ${e.day === d ? "selected" : ""}>${d}</option>`).join("")}
+      </select>
+    </div>
+    <span class="hint">${on
+      ? `Days carried into ${nextYear} must be used by <b>${fmtDateY(on)}</b>. It repeats every year — set it once.`
+      : `Carried days <b>never expire</b>. Pick a month to give them a deadline.`
+      } How many days each person may carry is set per employee, on the Employees tab.</span></div>`;
+}
+
 function hrSettings() {
   const o = db.org || {};
   const y = new Date().getFullYear();
@@ -2451,7 +2582,7 @@ function hrSettings() {
           <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
         </select>
         <span class="hint">🔒 Fixed — this is not something to change from here.</span></div>
-      ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Forward AL expire after (months)</label>
+      ${db.orgV24 ? carryExpiryField() : db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Forward AL expire after (months)</label>
         <input ${NUMBOX} data-f="org.carryMonths" value="${oPick("carryMonths")}" placeholder="never expires">
         <span class="hint">Counted from 1 January, so 6 means carried days must be used by 30 June. Leave it blank and they never expire.How many days each person may carry is set per employee, on the Employees tab.</span></div>` : ""}
     </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
@@ -2895,13 +3026,25 @@ async function runAction(el) {
       // A days-per-year change reaches everybody's balance at once, so it is stated in
       // full before it happens — the same rule as balance adjustments and the holiday paste.
       const ch = typeDayChanges();
-      if (ch.length && !vp.typeOk) {
-        vp.confirmModal = {
-          title: "Confirm leave amendment",
-          lines: ch.map(c => `<b>${esc(c.name)}</b>: ${fmtD(c.before)} → <b>${fmtD(c.after)}</b> days per year.<br>` +
+      const expPend = expiryChanged();
+      if ((ch.length || expPend) && !vp.typeOk) {
+        let lines = [];
+        if (ch.length) lines = ch.map(c => `<b>${esc(c.name)}</b>: ${fmtD(c.before)} → <b>${fmtD(c.after)}</b> days per year.<br>` +
             `<b style="color:${c.delta > 0 ? "var(--good)" : "var(--bad)"}">${c.delta > 0 ? "+" : ""}${fmtD(c.delta)} day${Math.abs(c.delta) === 1 ? "" : "s"}</b> ` +
             `will be ${c.delta > 0 ? "credited to" : "deducted from"} <b>${c.affected}</b> employee${c.affected === 1 ? "" : "s"}.`)
-            .concat(["Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]),
+            .concat(["Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]);
+        if (expPend) {
+          // Ask the database what it WOULD do, then say exactly that. The same function
+          // performs the write, so the count here cannot disagree with what happens.
+          const e = expiryPick();
+          const { data, error } = await sb.rpc("set_carry_expiry",
+            { p_month: e.mon, p_day: e.day, p_preview: true });
+          if (error) return rpcErr(error);
+          lines = lines.concat(expiryLines(data));
+        }
+        vp.confirmModal = {
+          title: ch.length ? "Confirm leave amendment" : "Change the expiry date?",
+          lines,
           okLabel: "Save changes", cancelLabel: "Cancel", act: "hrsaveok"
         };
         rerender(); break;
@@ -3715,7 +3858,9 @@ document.addEventListener("change", async ev => {
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : (isNumBox(el) ? numText(el.value, allowsNeg(el)) : el.value);
     if (k === "approver1" && !appr1Id(el.value)) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
-    if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) rerender(); // refresh pro-rate preview / dependent selects / new-team field
+    // v24: `role` joins this list because the description list under the picker has to
+    // follow it — without a redraw the highlight stays on whatever was chosen before.
+    if (["joinDate", "twoLevel", "approver1", "approver2", "dept", "role"].includes(k)) rerender(); // refresh pro-rate preview / dependent selects / new-team field / account-type description
     return;
   }
   if (f.startsWith("off.") && vp.offModal) { vp.offModal[f.slice(4)] = el.value; return; }

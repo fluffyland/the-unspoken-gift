@@ -457,6 +457,9 @@ Don't call it done until **every** line passes.
 - [ ] `migration_app_v19.sql` ran — `select bump_annual_all(0);` fails with "Enter a number
       of days" (it exists), and Leave types → Annual Leave → Edit shows a greyed, empty
       **Days / year** with **Credit to all employees** under it
+- [ ] `migration_app_v24.sql` ran — Company settings → Leave policy shows **Carry Forward
+      AL expiry date** as a Month + Day pair rather than a months box, and
+      `select carry_expiry_for(2027);` returns a date
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

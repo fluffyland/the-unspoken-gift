@@ -16,6 +16,10 @@ It decides what someone is allowed to *do in the system*. It is not their job ti
 that goes in **Occupation**. A Managing Director with nothing to administer can quite
 correctly be an Employee.
 
+The four are listed under the picker on the form itself, with the selected one highlighted,
+so you do not need this page open to choose. You are only shown the types you can grant —
+a plain HR Admin is not offered Owner.
+
 | Account type | What they can do |
 |---|---|
 | **Employee** | Apply for their own leave. See their own balances, their own records, the shared calendar. Nothing about anybody else. |
@@ -626,9 +630,22 @@ the system.
 
 ### When carried days expire
 
-**Company settings → Leave policy → Carried days expire after (months)**, company-wide.
-Counted from 1 January, so **6** means carried days must be used by 30 June. **Leave it
-blank and they never expire.**
+**Company settings → Leave policy → Carry Forward AL expiry date**, company-wide. Pick a
+**month and a day** — set **31 December** and carried leave must be used by 31 December.
+
+**It repeats every year on its own.** Set it once and you never touch it again: leave
+carried into 2027 expires 31 Dec 2027, into 2028 expires 31 Dec 2028, and so on. There is
+nothing to update each January.
+
+Set the Month to **— Never expires —** and carried days keep forever. The Day picker
+follows the Month, so a date that does not exist cannot be picked.
+
+> ⚠️ **Changing it moves leave people are already holding.** That is on purpose — what you
+> set is what everyone sees. It asks first, and tells you exactly how many employees are
+> affected and, if the new date has already passed, **how many days expire the moment you
+> agree**. Nothing is written until you press **Save changes** in that dialog. Days that
+> were already written off under an earlier date stay written off — moving the date later
+> does not bring them back.
 
 Two things happen automatically, and neither needs you:
 
@@ -674,8 +691,9 @@ Two things, both in **Company settings**, decide what happens:
 - **Carry Forward AL Maximum Day** — the most annual leave one person may keep.
   There is a company default, and each employee can have their own in **Edit employee**.
   Somebody with `5` keeps at most 5 days, however many they have left.
-- **Carry Forward AL expire after (months)** — how long the kept days survive.
-  `6` means they must be used by 30 June, or they are gone. Blank means they never expire.
+- **Carry Forward AL expiry date** — the day the kept days die.
+  Set **30 June** and they must be used by 30 June, or they are gone. It repeats every
+  year. **— Never expires —** means they never expire.
 
 Also make sure last year's leave is finished: nothing still sitting on **Pending**.
 Approve or reject those first, because pending days are not counted anywhere yet.
@@ -683,7 +701,7 @@ Approve or reject those first, because pending days are not counted anywhere yet
 ### What it does to one person, step by step
 
 Take **Siti**. She is entitled to 14 days a year, her maximum carry forward is 5,
-and expiry is set to 6 months. During 2026 she took 6 days.
+and the expiry date is set to 30 June. During 2026 she took 6 days.
 
 | Step | What LeaveDesk does | Siti |
 |---|---|---|
@@ -691,7 +709,7 @@ and expiry is set to 6 months. During 2026 she took 6 days.
 | **2** | Work out what she has left of last year's annual leave. | 14 entitled − 6 taken = **8 days left**. |
 | **3** | Compare that with her maximum. Whatever fits, **carries forward**. | Her maximum is 5, so **5 days carry into 2027**. |
 | **4** | Whatever does not fit is **forfeited** — written off, not paid out. | 8 − 5 = **3 days forfeited**. |
-| **5** | Stamp an expiry date on the days that carried. | 6 months from 1 Jan 2027 → **use by 30 June 2027**. |
+| **5** | Stamp the expiry date on the days that carried. | The date is set to 30 June → **use by 30 June 2027**. |
 | **6** | Every other leave type that starts fresh each year (sick, hospitalisation, and so on) is cleared to zero, whatever was left in it. | Her 9 unused sick days are written off. |
 | **7** | Write one permanent line into **Past runs** saying exactly all of the above, with her name on it. | Done — readable in 2030. |
 | **8** | Once everybody has been through steps 1–7, hand out the new year's allowances. | Siti is credited **14 days for 2027**, on top of the 5 she carried. |

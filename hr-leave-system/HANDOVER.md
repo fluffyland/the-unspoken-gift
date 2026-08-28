@@ -157,7 +157,9 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ✅ v10 | `purge_employee`, `clear_employee_records`, offboard hardening, guard bypass GUC | probed: functions exist |
 | ✅ v11 | ALL DB messages/ledger reasons/announcements → English | probed: English errors |
 | ❓ `reset_all_passwords.sql` | one-time reset of all logins to `Ssu123@` | user asked for it; not re-verified |
-| ⏳ v16 / v18 / v19 + `keepalive_ping_v3` | carry-forward and the yearly reset · Leave types crediting everyone, HR applying on behalf, amendment records · the typed figure IS the year's entitlement + one-click company credit | **written, tested against a real Postgres, NOT yet run by the user.** The frontend feature-detects all three (`db.orgV16`, `db.orgV18`), so the deployed site works without them and simply shows the older screens. Order matters: **v16 → v18 → v19** |
+| ✅ v16 / v18 / v19 | carry-forward and the yearly reset · Leave types crediting everyone, HR applying on behalf, amendment records · the typed figure IS the year's entitlement + one-click company credit | **APPLIED — probed 2026-08-28** with the anon key (§9): `run_year_start`, `bump_annual_all` and `annual_entitled_in_year` all answer (`42501 permission denied` = the function exists and is correctly revoked; `PGRST202` = wrong argument names, NOT absence — send the real ones before concluding anything). This row said "not yet run" for weeks after they had been. **Probe before you claim.** |
+| ❓ `keepalive_ping_v3` | daily call to `expire_due_carry()` | **Cannot be probed** — `keepalive_ping` exists and answers, but its source is not readable from outside, so whether it is v3 is unknown. It matters less than it looks: `due_unwritten_carry` is subtracted inside the `leave_balances` view, so **expired days are unusable even if no scheduled job ever runs**; the daily call only makes the written record tidy sooner, and `run_year_start` + `set_carry_expiry` both call it too. Check with `select prosrc like '%expire_due_carry%' from pg_proc where proname='keepalive_ping';` in the SQL Editor |
+| ⏳ v24 | the carry-forward expiry becomes a date you pick, not a count of months | **written, tested against a real Postgres (t24.sql, 37 assertions), NOT yet run by the user.** The frontend feature-detects it (`db.orgV24`), so the deployed site works without it and simply shows the old months box |
 
 v9 is **optional** — the frontend feature-detects (`db.orgProrate`) and hides
 the pro-rate-cap field until it's applied. Don't assume it; don't chase it
@@ -195,6 +197,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `HANDOVER.md` | this file |
 | `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
+| `supabase/migration_app_v24.sql` | **the carry-forward expiry becomes a date you pick** — `carry_expiry_month`/`_day` (repeating every year), `carry_expiry_for()`, `set_carry_expiry()` (preview + write + restamp + clear), `run_year_start` reading the date. Not yet run by the user |
 | `supabase/migration_app_v1..v15.sql` | incremental history. Applied on the live database: **v1–v15, including v9** (v9 was skipped for a long time and only went in with v14 on 2026-08-19 — see below) |
 | `supabase/bootstrap_owner.sql` | create first Owner (edit name/email inside) |
 | `supabase/reset_all_data.sql` | wipe all people/records/logins, keep types+holidays |
@@ -262,7 +265,8 @@ navigation), `t8.mjs` 34 (the popup/`render()` rule, the year search bar, layout
 on behalf, the year-scoped figures, the swallowed click), and later `t11`–`t15`, `t21`,
 `t22`. **As of 2026-08-28 there are 17 browser suites, 666 assertions**, all green:
 `t` 17, `t2` 21, `t3` 13, `t4` 32, `t5` 11, `t6` 24, `t7` 34, `t8` 34, `t9` 35, `t10` 52,
-`t11` 47, `t12` 105, `t13` 61, `t14` 47, `t15` 44, `t21` 47, `t22` 42.
+`t11` 47, `t12` 106, `t13` 62, `t14` 47, `t15` 44, `t21` 49, `t22` 42, `t23` 45 —
+**18 suites, 715 assertions** as of 2026-08-28.
 
 **The v16 SQL is tested against a real Postgres, not the browser.** `pgup.sh` starts a
 throwaway instance, `shim.sql` stands in for what Supabase provides (roles, `auth.uid()`),
@@ -284,8 +288,16 @@ only then run the suite. `t16b`/`t16c` reuse the helper functions **`t16` create
 all three share one database and must run in that order; `t20`'s last assertion needs
 `keepalive_ping_v3.sql` installed first. Skip the seed and every suite fails at setup with
 `null value in column "emp_id"` — that is a missing `seed16.sql`, not a broken migration.
-**As of 2026-08-28: 154 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
-`t18` 29, `t18b` 16, `t19` 44, `t20` 22.
+**As of 2026-08-28: 191 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
+`t18` 29, `t18b` 16, `t19` 44, `t20` 22, `t24` 37.
+
+**A SQL suite reports a broken function as a MISSING assertion, not a failing one.** A
+statement that raises never reaches its `chk()`, so the row is simply absent — and
+"35 passed, 0 failed" reads exactly like success. Found by mutating v24's leap-day clamp:
+every assertion still "passed". `t24.sql` now ends with an assertion on the **row count**
+itself, which is what turns a silently-skipped test back into a visible failure. Worth
+copying into the other suites. *Run a mutation before trusting a green suite: break the
+thing on purpose and check the test actually goes red.*
 
 **A test that asserts the old contract is not a regression — read it before "fixing"
 the code.** Making the year arrows unbounded turned two `t2.mjs` assertions red; they
@@ -437,6 +449,32 @@ happily agree with. Two habits keep it honest:
 - **Leave Application opens on nobody.** `vp.forEmp` starts unset with a `— Select —`
   placeholder and no form. Any suite that seeded `hrTab: 'apply'` and went straight for
   `[data-f="start"]` must now pick an employee first (`t11.mjs` §2).
+- **v24: the expiry is a DATE, and `annual_carry.expires_on` always was one.** The months
+  figure was only ever an input to one line inside `run_year_start`; every consumer — the
+  balance view's `due_unwritten_carry`, `expire_due_carry`, the employee's "use them by" —
+  already read the date. So replacing a count with a picker touched one calculation, not a
+  pipeline. *Before rewriting a setting, find out how far its value actually travels.*
+- **`carry_expiry_months` is deliberately still there.** `db.orgV16` is feature-detected
+  from that column; dropping it would blind the probe on any database that has not run
+  v24. v24 adds `carry_expiry_month` / `carry_expiry_day` beside it and backfills them, so
+  no date moves on the day it runs.
+- **Two `<select>`s beat a typed date box.** An impossible date cannot be picked, the Day
+  list follows the Month (April drops the 31st rather than storing it), and — the reason
+  that settles it — **a `<select>` has no caret to lose**, so the control sidesteps THE
+  CARET RULE instead of having to obey it.
+- **Changing the expiry restamps leave people are already holding.** The user's call
+  ("what I set is what I see"), which makes it destructive: moving the date earlier kills
+  days somebody holds right now. `set_carry_expiry(month, day, preview)` does the preview
+  and the write in one function — v16's `run_year_start` pattern — so the count on the
+  confirmation and the rows actually changed come from the same arithmetic. The confirmation
+  is built from what the PREVIEW returned, never from a guess made client-side.
+- **One gate, not two.** A leave-type day change and an expiry change pending together
+  produce a single confirmation. `hrsave` already had the gate and the `hrsaveok`
+  re-dispatch; extending it beat adding a second modal to click through.
+- **`role` had to join the rerender list.** `em.role` staged its value but never redrew,
+  so the account-type description list would have highlighted whatever was picked before.
+  A field only needs a rerender when something else on the form reads it — which is easy
+  to miss until you add the thing that reads it.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.
