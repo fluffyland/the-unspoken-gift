@@ -56,13 +56,13 @@ If you approve leave for other people you'll also see **Approvals**.
 leave it is split into **two separate figures**, because they are not the same thing:
 
 > Available Balance: **19** days (Annual Leave: 17 · Carry Forward: 2 (Expiry Date:
-> 30 Jun 2027) · Allowance: 19 · Used: 0 · Pending: 0)
+> 30 Jun 2027) · Entitled this year: 19 · Taken: 0 · Pending: 0)
 
 - **Annual Leave** — this year's days. They do not expire during the year.
 - **Carry Forward** — days brought over from last year. **These can expire**, and the date
   is right there. If your company has set no expiry it reads **Expiry Date: N/A**.
-- **Given this year** and **Taken** — what you were credited and what you have used
-  **this calendar year**. They used to be running totals across every year you have
+- **Entitled this year** and **Taken** — your days for this calendar year, and what you
+  have actually used of them. They used to be running totals across every year you have
   worked here, which is why they could look enormous.
 
 Carry Forward stays on screen at **0** once they are used or expired, rather than
@@ -172,14 +172,15 @@ history; you're not starting again.
 
 Your balance shows:
 
-- **Allowance** — everything credited to you: this year's grant, anything carried
-  forward, plus any corrections HR has made
-- **Used** — everything deducted: leave taken, and any corrections
+- **Balance** — your days for this year: the yearly grant plus any adjustment HR has made
+- **Taken** — leave you applied for and had approved, **this year**. Nothing applied for
+  means **0**. Cancel a booking and the days come straight back off this figure. Year-end
+  write-offs and HR corrections never appear here — they are not leave you took.
 - **Pending** — requested but not yet decided; already set aside for you
 
-**Available** is what you can actually book today — Allowance minus Used minus
-Pending. The same three figures appear in **My details → My leave entitlement**, and
-they will always agree.
+**Left** is what you can actually book today. The same figures appear in **My details →
+My leave entitlement**, which also lists **Carry Forward Annual Leave** on its own line
+with its expiry date, and they will always agree.
 
 Carried-forward days **expire**, so spend them first. When you have any, Overview
 shows the amount and the date they run out; they are already included in the figures

@@ -176,18 +176,19 @@ you find out why — it is the only screen that shows every line.
 
 ## What happens to leave when someone leaves
 
-**HR Console → Employees → Edit → Offboard**, then choose **Encash** or **Clear**.
+**HR Console → Employees → Edit → Offboard.** Set the last working day and confirm — there
+is no settlement choice to make. Whatever leave is left is written off on that day and kept
+on record.
 
-Either way the system writes off every remaining balance, one entry per leave type, and
-you can see exactly what it did in **Employees → Former employees**:
+To see what someone had left, go to **Employees → Former employees** and click **Leave
+left** beside their name:
 
-| Name | Last working day | Leave settled on leaving |
-|---|---|---|
-| Gone Person | 31/10/2026 | Annual Leave 7 days · Off-in-Lieu 1.5 days · Sick Leave 9 days · **Total encashed 17.5 days** |
+> **Gone Person** — last working day 31/10/2026
+> Annual Leave **7** · Off-in-Lieu **1.5** · Sick Leave **9** · **Total 17.5 days**
 
-**Encashed** means the days are paid out — the figures above are what payroll needs, and
-there is an **Export CSV** beside the list. **Cleared** means they are forfeited. Either
-way the entries stay in the **Full ledger** permanently, and the person's history is kept.
+Those are the figures payroll needs, and there is an **Export CSV** on the Former employees
+list for all leavers at once. The entries stay in the **Full ledger** permanently and the
+person's history is kept.
 
 ## Off-in-lieu
 

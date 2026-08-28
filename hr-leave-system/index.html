@@ -1349,7 +1349,7 @@ function shell() {
   </div></nav>
   ${noticeBanner()}
   <main><div class="wrap">${{ dashboard: vDashboard, profile: vProfile, apply: vApply, myapps: vMyApps, calendar: vCalendar, approvals: vApprovals, hr: vHR }[view]()}</div></main>
-  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.phBulk ? phBulkModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}${vp.confirmModal ? confirmModal() : ""}${vp.resultModal ? resultModal() : ""}`;
+  ${vp.detail ? detailModal(vp.detail) : ""}${vp.empModal ? empModal() : ""}${vp.offModal ? offModal() : ""}${vp.pwModal ? pwModal() : ""}${vp.phModal ? phModal() : ""}${vp.phBulk ? phBulkModal() : ""}${vp.ltModal ? ltModal() : ""}${vp.offView ? offViewModal() : ""}${vp.leaveTo ? leaveModal() : ""}${vp.loginResult ? loginResultModal() : ""}${vp.confirmModal ? confirmModal() : ""}${vp.resultModal ? resultModal() : ""}`;
 }
 
 // Unread in-app notices (e.g. public-holiday updates) — shown on every page until dismissed.
@@ -1603,16 +1603,34 @@ function vProfile() {
     ${teamCard()}
     <div class="card" style="margin-top:20px">
       <h3>My leave entitlement</h3>
-      <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Allowance</th><th class="num">Used</th><th class="num">Left</th></tr></thead><tbody>
+      <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Balance</th><th class="num">Taken</th><th class="num">Left</th></tr></thead><tbody>
         ${cards.map(t => { const b = bal(me.id, t.code); return `<tr>
           <td>${esc(t.en)}${t.noDeduct ? ` <span class="meta">· for records only</span>` : ""}</td>
           <td class="num">${t.noDeduct ? "—" : fmtD(b.yGranted)}</td>
-          <td class="num">${fmtD(b.used)}</td>
+          <td class="num">${fmtD(b.yUsed)}</td>
           <td class="num">${t.noDeduct ? "—" : fmtD(b.avail)}</td></tr>`; }).join("")}
+        ${carryRow()}
       </tbody></table></div>
+      <p class="meta" style="margin-top:8px"><b>Taken</b> is leave you applied for and had approved, this year. Cancelling gives the days straight back. Year-end write-offs and HR corrections are not leave you took, so they never appear here.</p>
     </div>`;
 }
 
+/* Carry Forward as its own line on My leave entitlement, next to the leave types.
+   Always shown, including at zero — the same rule as the Apply tab, so "you have none" is
+   never confused with "this app has no such thing". Balance is what was carried in, Taken
+   is what has gone from it, Left is what remains. */
+function carryRow() {
+  if (!db.orgV16) return "";
+  const c = db.annualCarry || {};
+  const carriedIn = Math.max(0, Number(c.carry_in) || 0);
+  const left = carryOf(me.id);
+  const expiry = c.expires_on ? fmtDateY(c.expires_on) : "N/A";
+  return `<tr>
+    <td>Carry Forward Annual Leave<div class="meta">Expiry Date: ${esc(expiry)}</div></td>
+    <td class="num">${fmtD(carriedIn)}</td>
+    <td class="num">${fmtD(Math.max(0, carriedIn - left))}</td>
+    <td class="num">${fmtD(left)}</td></tr>`;
+}
 // My team — everyone in the same department. Rendered from the live roster, so a new
 // team member appears for the whole team automatically after the next data refresh.
 function teamCard() {
@@ -2001,13 +2019,39 @@ function vHR() {
     ${draftDirty() ? saveBar() : ""}
     ${({ records: hrRecords, balances: hrBalances, employees: hrEmployees, types: hrTypes, ledger: hrLedger, apply: hrApply, amend: hrAmend, settings: hrSettings }[hrTab] || hrRecords)()}`;
 }
-function hrRecords() {
-  const f = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
+/* A record belongs to the year its leave STARTS in — the user's choice, and the one that
+   makes a year page agree with that year's balances. Leave from 28 Dec to 3 Jan is one
+   record and sits in December's year, where it began. */
+const recYearOf = a => String(a.start || "").slice(0, 4);
+function recFiltered() {
+  const f = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase(), y = recYearNow();
   let list = db.applications.slice().sort((a, b) => b.createdAt - a.createdAt);
+  list = list.filter(a => recYearOf(a) === y);
   if (f !== "all") list = list.filter(a => a.status === f);
   if (q) list = list.filter(a => { const e = emp(a.empId); return e && (e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q)); });
+  return list;
+}
+function recYearNow() {
+  return String(Math.min(PH_MAX, Math.max(PH_MIN, numOr(vp.recYear, new Date().getFullYear()))));
+}
+function hrRecords() {
+  const q = (vp.recSearch || "").toLowerCase();
+  const list = recFiltered();
+  const f = vp.stFilter || "all";
+  // The same control as Company settings → Public holidays, on purpose: same arrows, same
+  // year search, same PH_MIN..PH_MAX range, so both screens behave identically.
+  const y = recYearNow();
+  const prev = +y > PH_MIN ? String(+y - 1) : "";
+  const next = +y < PH_MAX ? String(+y + 1) : "";
+  const inYear = db.applications.filter(a => recYearOf(a) === y).length;
   const sts = ["all", "pending", "approved", "rejected", "returned", "withdrawn", "cancel_requested", "cancelled"];
   return `<div class="card">
+    <h3 style="display:flex;align-items:center;gap:8px;margin:0 0 10px">
+      <button class="btn ghost" style="padding:2px 9px" data-act="recyear" data-y="${prev}" ${prev ? "" : "disabled"} title="${prev || "No earlier year"}">◀</button>
+      <span>All records — ${inYear} record${inYear === 1 ? "" : "s"} in ${y}</span>
+      <button class="btn ghost" style="padding:2px 9px" data-act="recyear" data-y="${next}" ${next ? "" : "disabled"} title="${next || "No later year"}">▶</button>
+      <span class="phsearch" title="Type a year to go to it">🔍<input type="text" data-f="recYearSearch" inputmode="numeric" autocomplete="off" maxlength="4" value="${esc(vp.recYearSearch || "")}" placeholder="${y}" aria-label="Go to year"></span></h3>
+    <p class="meta" style="margin:0 0 10px">One year at a time — use ◀ ▶ to switch years. A record sits in the year its leave starts.</p>
     <div class="frow" style="align-items:flex-end;margin-bottom:10px">
       <div class="field" style="max-width:260px"><label>Search employee</label>
         <input type="search" id="recsearch" data-f="recSearch" value="${esc(vp.recSearch || "")}" placeholder="Type a name…"></div>
@@ -2015,7 +2059,7 @@ function hrRecords() {
         <select data-f="stFilter">${sts.map(s => `<option value="${s}" ${f === s ? "selected" : ""}>${s === "all" ? "All" : stName(s)}</option>`).join("")}</select></div>
       <div class="field"><button class="btn sec" data-act="reccsv">⬇ Export CSV</button></div>
     </div>
-    ${list.length ? appTable(list, true) : `<div class="empty">No records${q ? ` for “${esc(vp.recSearch)}”` : ""}</div>`}</div>`;
+    ${list.length ? appTable(list, true) : `<div class="empty">No records${q ? ` for “${esc(vp.recSearch)}”` : ""} in ${y}</div>`}</div>`;
 }
 function activeEmps() { return db.employees.filter(e => e.active !== false); }
 function apprOpts(self, sel, excl) {
@@ -2100,17 +2144,14 @@ function hrEmployees() {
     <p class="meta" style="margin-top:8px">Off-in-lieu credits and the annual entitlement live inside <b>Edit</b>, which is also where offboarding is (bottom of the form).</p>
     ${former.length ? `<details style="margin-top:14px"${vp.formerOpen ? " open" : ""} data-former><summary style="cursor:pointer;color:var(--muted)">Former employees (${former.length})</summary>
       <div class="frow" style="justify-content:space-between;align-items:center;margin:10px 0 4px">
-        <p class="meta" style="margin:0">What each leaver's balance was on their last day, and whether it was paid out or cleared.</p>
+        <p class="meta" style="margin:0">Click <b>Leave left</b> to see what someone's balance was on their last day.</p>
         <button class="btn sec" data-act="offcsv">⬇ Export CSV</button>
       </div>
-      <div class="tablebox" style="margin-top:4px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th><th>Leave settled on leaving</th></tr></thead><tbody>
-      ${former.map(e => { const o = offboardingOf(e.id); return `<tr>
+      <div class="tablebox" style="margin-top:4px"><table><thead><tr><th>Name</th><th>Dept</th><th>Hire date</th><th>Last working day</th><th></th></tr></thead><tbody>
+      ${former.map(e => `<tr>
         <td><b>${esc(e.name)}</b></td><td class="meta">${esc(e.dept)}</td>
         <td class="num">${fmtDMY(e.joinDate)}</td><td class="num">${e.lastDay ? fmtDMY(e.lastDay) : "—"}</td>
-        <td>${o ? `<div class="offset">
-              ${o.lines.map(x => `<div class="offrow"><span>${esc(x.name)}</span><b>${fmtD(x.days)} day${Math.abs(x.days) === 1 ? "" : "s"}</b></div>`).join("")}
-              <div class="offrow tot"><span>Total ${esc(o.mode)}</span><b>${fmtD(o.total)} day${Math.abs(o.total) === 1 ? "" : "s"}</b></div>
-            </div>` : `<span class="meta">No balance to settle</span>`}</td></tr>`; }).join("")}
+        <td><button class="btn sec" style="padding:4px 10px" data-act="offview" data-id="${e.id}">Leave left</button></td></tr>`).join("")}
       </tbody></table></div></details>` : ""}
     </div>`;
 }
@@ -2238,11 +2279,8 @@ function offModal() {
     <div class="callout warn" style="margin:0 0 12px"><b>Remaining balances to settle:</b>
       ${bals.length ? `<ul class="conflictlist">${bals.map(x => `<li>${esc(x.t.en)}: <b>${fmtD(x.avail)}</b> day${x.avail === 1 ? "" : "s"}</li>`).join("")}</ul>` : " none — all balances are zero."}
     </div>
-    <div class="field"><label>How to settle the remaining balance</label>
-      <label class="check"><input type="radio" name="offmode" data-f="off.mode" value="encash" ${m.mode === "encash" ? "checked" : ""}> Encash — pay out the days (recorded in the ledger for payroll)</label>
-      <label class="check"><input type="radio" name="offmode" data-f="off.mode" value="clear" ${m.mode === "clear" ? "checked" : ""}> Clear — forfeit the remaining days</label>
-    </div>
-    <p class="meta">Pending applications will be withdrawn automatically. The account is removed from sign-in and rosters; all history stays in the records.</p>
+    <p class="meta">The remaining days are written off on their last day and kept on record — you can see
+      what they were at any time from <b>Former employees</b>. Pending applications will be withdrawn automatically. The account is removed from sign-in and rosters; all history stays in the records.</p>
     <div class="actions">
       <button class="btn bad" data-act="offsave">Confirm offboarding</button>
       <button class="btn sec" data-act="closemodal">Cancel</button>
@@ -2344,9 +2382,12 @@ function hrSettings() {
   <div class="card"><h3>Defaults for new employees</h3>
     <p class="meta" style="margin:4px 0 12px">These only <b>pre-fill the Add employee form</b>. Changing them does not move anyone already in the system.</p>
     <div class="frow">
-      <div class="field" style="max-width:220px"><label>${db.orgV18 ? "Default Annual Leave Entitled / Yr" : "Default annual leave base"}</label><input ${NUMBOX} id="org-base" data-f="org.base" value="${oPick("base")}">
+      ${/* Both 300px, and wide enough for either label to sit on ONE line. At 220px the
+            longer of the two wrapped, which pushed its input a line lower than its
+            neighbour's and left the row looking crooked. */""}
+      <div class="field" style="max-width:300px"><label>${db.orgV18 ? "Default Annual Leave Entitled / Yr" : "Default annual leave base"}</label><input ${NUMBOX} id="org-base" data-f="org.base" value="${oPick("base")}">
         <span class="hint">Starting days per year for someone new. Each employee's own base can be changed afterwards.</span></div>
-      ${db.orgV16 ? `<div class="field" style="max-width:220px"><label>Default Carry Forward AL Maximum Day</label><input ${NUMBOX} data-f="org.carryCap" value="${oPick("carryCap")}">
+      ${db.orgV16 ? `<div class="field" style="max-width:300px"><label>Default Carry Forward AL Maximum Day</label><input ${NUMBOX} data-f="org.carryCap" value="${oPick("carryCap")}">
         <span class="hint">Starting carry-forward maximum for someone new. Each employee's own figure is on the Employees tab and in Edit employee.</span></div>` : ""}
     </div>
   </div>
@@ -2448,6 +2489,22 @@ const AMD_KIND = { entitlement: "Entitlement changed", oil_credit: "Off-in-lieu 
                    type_days: "Company leave amendment", annual_bump: "Company annual leave credit",
                    correction: "Correction" };
 const kindName = k => AMD_KIND[k] || k;
+/* What a leaver had left on their last day. Read from the settlement entries
+   offboard_employee writes, so everyone already offboarded is covered with no migration. */
+function offViewModal() {
+  const e = emp(vp.offView) || {};
+  const o = offboardingOf(vp.offView);
+  return `<div class="modalback" data-act="closemodal"><div class="modal" style="max-width:420px">
+    <div class="hd"><h3>${esc(e.name || "Former employee")}</h3><button class="iconbtn" data-act="closemodal" aria-label="Close">✕</button></div>
+    <p class="meta" style="margin:0 0 10px">Last working day <b>${e.lastDay ? fmtDMY(e.lastDay) : "—"}</b></p>
+    ${o ? `<div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Days left</th></tr></thead><tbody>
+        ${o.lines.map(x => `<tr><td>${esc(x.name)}</td><td class="num">${fmtD(x.days)}</td></tr>`).join("")}
+        <tr><td><b>Total</b></td><td class="num"><b>${fmtD(o.total)}</b></td></tr>
+      </tbody></table></div>`
+      : `<div class="empty">No leave left on their last day.</div>`}
+    <div class="actions"><button class="btn sec" data-act="closemodal">Close</button></div>
+  </div></div>`;
+}
 /* THE OFFBOARDING RECORD. offboard_employee writes one ledger entry per leave type — the
    remaining balance, negated, with the last day and whether it was encashed or cleared in
    the reason. That IS the record; there was simply no screen showing it, because v18 took
@@ -2462,9 +2519,10 @@ function offboardingOf(empId) {
                     .filter(x => x.days !== 0)
                     .sort((a, b) => (ltSafe(a.code).sort || 0) - (ltSafe(b.code).sort || 0));
   const first = rows[0].reason || "";
-  const mode = /encashed/i.test(first) ? "encashed" : /cleared/i.test(first) ? "cleared" : "settled";
+  // The mode word is deliberately not shown any more — the settlement choice is gone and
+  // every offboarding clears, so the record simply states the days that were left.
   const on = (first.match(/last day ([0-9]{4}-[0-9]{2}-[0-9]{2})/) || [])[1] || null;
-  return { lines, mode, on, total: lines.reduce((n, x) => n + x.days, 0) };
+  return { lines, on, total: lines.reduce((n, x) => n + x.days, 0) };
 }
 function csvDownload(filename, rows) {
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")).join("\r\n");
@@ -2808,7 +2866,7 @@ async function runAction(el) {
       render(); break;
     }
     case "detail": vp.detail = id; rerender(); break;
-    case "closemodal": delete vp.detail; delete vp.empModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.phBulk; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; rerender(); break;
+    case "closemodal": delete vp.detail; delete vp.offView; delete vp.empModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.phBulk; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; rerender(); break;
     case "createlogin": {
       const email = el.dataset.email, eid = el.dataset.id;
       toast("Creating login…");
@@ -3098,17 +3156,20 @@ async function runAction(el) {
       break;
     }
 
-    case "offopen": delete vp.empModal; vp.offModal = { empId: id, lastDay: todayStr(), mode: "encash" }; rerender(); break;
+    case "offview": vp.offView = id; rerender(); break;
+    case "offopen": delete vp.empModal; vp.offModal = { empId: id, lastDay: todayStr(), mode: "clear" }; rerender(); break;
     case "offsave": {
       const m = vp.offModal, e = emp(m.empId);
       if (e.id === me.id) return toast("You cannot offboard yourself");
-      const { error } = await sb.rpc("offboard_employee", { p_emp: m.empId, p_last_day: m.lastDay, p_mode: m.mode });
+      // The settlement choice was removed at the user's request — every offboarding clears.
+      // The parameter stays because the database function takes it; it never varies now.
+      const { error } = await sb.rpc("offboard_employee", { p_emp: m.empId, p_last_day: m.lastDay, p_mode: "clear" });
       if (error) return rpcErr(error);
       const rem = await removeLogin(e.email, e.id);
       delete vp.offModal; delete vp.empModal; await reload();
-      if (rem && rem.removed) toast(e.name + " has been offboarded — balances settled and their sign-in account removed.");
-      else if (rem && rem.error) toast(e.name + " has been offboarded and balances settled, but their login couldn't be removed automatically (" + rem.error + ") — remove it in Supabase → Authentication.");
-      else toast(e.name + " has been offboarded and their balances are settled. (No sign-in account needed removing.)");
+      if (rem && rem.removed) toast(e.name + " has been offboarded — remaining leave written off and their sign-in account removed.");
+      else if (rem && rem.error) toast(e.name + " has been offboarded and their leave written off, but their login couldn't be removed automatically (" + rem.error + ") — remove it in Supabase → Authentication.");
+      else toast(e.name + " has been offboarded and their remaining leave written off. (No sign-in account needed removing.)");
       break;
     }
     case "submit": doSubmit(); break;
@@ -3305,6 +3366,7 @@ async function runAction(el) {
     }
     // rerender(), not render(): the holidays card sits well down a long page and render()
     // scrolls back to the top. Same rule as the search boxes and the sort headers.
+    case "recyear": { if (el.dataset.y) { vp.recYear = el.dataset.y; delete vp.recYearSearch; rerender(); } break; }
     case "phyear": { if (el.dataset.y) { vp.phYear = el.dataset.y; delete vp.phYearSearch; rerender(); } break; }
     case "phbulkopen": vp.phBulk = { text: "" }; rerender(); break;
     case "phbulkgo": {
@@ -3372,12 +3434,12 @@ async function runAction(el) {
       toast("Ledger exported"); break;
     }
     case "offcsv": {
-      const rows = [["Name", "Team", "Hire date", "Last working day", "Leave type", "Days settled", "Settlement"]];
+      const rows = [["Name", "Team", "Hire date", "Last working day", "Leave type", "Days left on last day"]];
       for (const e of db.employees.filter(x => x.active === false)) {
         const o = offboardingOf(e.id);
-        if (!o) { rows.push([e.name, e.dept, e.joinDate || "", e.lastDay || "", "", "", "no balance to settle"]); continue; }
-        for (const l of o.lines) rows.push([e.name, e.dept, e.joinDate || "", e.lastDay || o.on || "", l.name, fmtD(l.days), o.mode]);
-        rows.push([e.name, e.dept, e.joinDate || "", e.lastDay || o.on || "", "TOTAL", fmtD(o.total), o.mode]);
+        if (!o) { rows.push([e.name, e.dept, e.joinDate || "", e.lastDay || "", "", "0"]); continue; }
+        for (const l of o.lines) rows.push([e.name, e.dept, e.joinDate || "", e.lastDay || o.on || "", l.name, fmtD(l.days)]);
+        rows.push([e.name, e.dept, e.joinDate || "", e.lastDay || o.on || "", "TOTAL", fmtD(o.total)]);
       }
       csvDownload("offboarding-" + todayStr() + ".csv", rows);
       toast("Offboarding records exported"); break;
@@ -3391,14 +3453,13 @@ async function runAction(el) {
     }
     case "reccsv": {
       const rows = [["Employee", "Team", "Leave type", "Start", "End", "Days", "Status", "Reason", "Submitted"]];
-      const fset = vp.stFilter || "all", q = (vp.recSearch || "").toLowerCase();
-      for (const a of db.applications) {
+      // Exactly what is on screen — same filter, same year — rather than a second copy of
+      // the rules that could disagree with the table above it.
+      for (const a of recFiltered()) {
         const e = emp(a.empId); if (!e) continue;
-        if (fset !== "all" && a.status !== fset) continue;
-        if (q && !e.name.toLowerCase().includes(q) && !e.email.toLowerCase().includes(q)) continue;
         rows.push([e.name, e.dept, (lt(a.type) || {}).en || a.type, a.start, a.end, fmtD(a.days), stName(a.status), a.reason, fmtTs(a.createdAt)]);
       }
-      csvDownload("leave-records-" + todayStr() + ".csv", rows);
+      csvDownload("leave-records-" + recYearNow() + ".csv", rows);
       toast("Records exported"); break;
     }
     // ---- Start a new year ----
@@ -3598,6 +3659,13 @@ document.addEventListener("input", ev => {
   const f = el.dataset.f || "";
   // Type a year, go to that year. Only acts on a COMPLETE four-digit year: reacting to
   // "20" on the way to "2029" would jump to year 20 and throw away what you were typing.
+  if (f === "recYearSearch") {
+    vp.recYearSearch = el.value.replace(/[^0-9]/g, "").slice(0, 4);
+    const n = +vp.recYearSearch;
+    if (vp.recYearSearch.length === 4 && n >= PH_MIN && n <= PH_MAX) vp.recYear = String(n);
+    rerender();
+    return;
+  }
   if (f === "phYearSearch") {
     vp.phYearSearch = el.value.replace(/[^0-9]/g, "").slice(0, 4);
     const n = +vp.phYearSearch;

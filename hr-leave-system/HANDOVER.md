@@ -352,6 +352,23 @@ happily agree with. Two habits keep it honest:
   reason. Reading it back needs no migration and covers everyone already offboarded, which
   a new log table would not. Only the encashed/cleared **word** is parsed, and only for a
   label — if the wording changes, the days and types still show.
+- **v21: the SAME bug, one screen further on — 957.** *My leave entitlement* printed
+  `bal().used` (all-time, and counting every negative entry ever: expiry write-offs, carry
+  forfeits, offboarding settlements, downward corrections) in a column beside *Allowance*,
+  which was this year's. v20 fixed `yUsed` and switched the Apply tab and Balances over;
+  this table was simply never switched. **When a shared figure changes meaning, grep every
+  reader of it** — `yGranted`/`yUsed`/`granted`/`used` — and check each one is asking for
+  the period its neighbours use.
+- **All records is paged by year** (`recYearOf` = the leave's START date, the user's
+  choice), reusing the public-holiday control verbatim: `PH_MIN`..`PH_MAX`, the same arrows
+  and the same 🔍 box. `recFiltered()` is shared by the table and its CSV so the export can
+  never disagree with what is on screen.
+- **Offboarding no longer asks how to settle.** The user removed the choice: everything
+  clears. `offboard_employee` keeps its `p_mode` parameter (no SQL change) and always
+  receives `clear`. The consequence, stated to them once: the record can no longer say
+  whether days were paid out. The settlement moved off the Former-employees list into a
+  **Leave left** popup, and the encashed/cleared word is gone from the screen entirely —
+  which also reads correctly for people offboarded before the change.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.
