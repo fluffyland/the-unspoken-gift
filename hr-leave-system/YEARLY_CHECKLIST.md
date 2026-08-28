@@ -101,7 +101,8 @@ read any more, and no schedule that can have stopped.
 **HR Console → Company settings → Start a new year** → pick the year → **Start 2027…**
 
 Nothing is written until you have read the preview and pressed **Run start of 2027**.
-It does four things, in the only order that works:
+It does four things, in the only order that works
+(step by step, with a worked example: [`year-start-flowchart.html`](year-start-flowchart.html)):
 
 1. **Expires** any carried days that have passed their date
 2. **Carries forward** what's left of last year's annual leave, up to **each person's own

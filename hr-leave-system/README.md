@@ -22,6 +22,7 @@
 |---|---|
 | `MIGRATION_GUIDE.md` | **新账号从零部署总指南**：要注册哪些网站、建哪些仓库、跑哪些 SQL、部署哪些函数、防休眠与监控怎么配、最后逐条验收。 |
 | `GUIDE_HR.md` / `GUIDE_EMPLOYEE.md` | HR 操作手册 / 员工使用手册（英文，与界面一致）。 |
+| `year-start-flowchart.html` | 「Start a new year」按钮到底做了什么 —— 逐步流程图 + 实例，双击即可打开。 |
 | `YEARLY_CHECKLIST.md` | 每年例行检查。重点是**不要盲信自动化**：公共假期同步、年度入账、防休眠、报警通道，逐项验证「结果」而不是「有没有排程」。 |
 | `app.html` | **生产版应用**（部署在 https://fluffyland.github.io/hrleavesystem/ ）。真实登录 + Supabase 数据库,持续维护更新。 |
 | `index.html` | 演示版（单文件、免安装,数据存浏览器）。**已冻结**,新功能只进 app.html。 |

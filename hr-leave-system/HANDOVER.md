@@ -186,6 +186,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `supabase.min.js` | vendored supabase-js v2 (same-origin; new sites must copy it too) |
 | `MIGRATION_GUIDE.md` | **stand the whole system up from zero on a new account** — accounts to register, repos to create (and which must be public vs private), SQL to run, functions to deploy, keep-alive + monitoring, final verification checklist |
 | `GUIDE_HR.md` | HR / Owner operations manual |
+| `year-start-flowchart.html` | standalone page — what **Start a new year** does, step by step, with a worked example. No internet needed; double-click it. Linked from `GUIDE_HR.md` |
 | `GUIDE_EMPLOYEE.md` | employee-facing manual — safe to hand to staff as-is |
 | `YEARLY_CHECKLIST.md` | annual routine. Verifies OUTCOMES rather than schedules: holiday sync, rollover + grant, keep-alive liveness, whether alerts still reach a human |
 | `README.md`, `DESIGN.md` | early design notes (partly outdated; trust code + this file) |
@@ -257,8 +258,11 @@ recreate on demand. As of 2026-08-26 there were seven, 152 assertions in total:
 `t7.mjs` 34 (the caret, the holiday scroll jump, pasting MOM's table, year
 navigation), `t8.mjs` 34 (the popup/`render()` rule, the year search bar, layout),
 `t9.mjs` 35 (per-employee carry cap, the Apply split, Start a new year),
-`t10.mjs` 51 (the Leave types credit, the entitlement, the two record books, HR applying
-on behalf, the year-scoped figures, the swallowed click).
+`t10.mjs` 52 (the Leave types credit, the entitlement, the two record books, HR applying
+on behalf, the year-scoped figures, the swallowed click), and later `t11`–`t15`, `t21`,
+`t22`. **As of 2026-08-28 there are 17 browser suites, 666 assertions**, all green:
+`t` 17, `t2` 21, `t3` 13, `t4` 32, `t5` 11, `t6` 24, `t7` 34, `t8` 34, `t9` 35, `t10` 52,
+`t11` 47, `t12` 105, `t13` 61, `t14` 47, `t15` 44, `t21` 47, `t22` 42.
 
 **The v16 SQL is tested against a real Postgres, not the browser.** `pgup.sh` starts a
 throwaway instance, `shim.sql` stands in for what Supabase provides (roles, `auth.uid()`),
@@ -273,6 +277,15 @@ browser suite stubs `sb.rpc` with **the literal JSON that real Postgres returned
 (`preview.json`), so the two halves cannot drift apart unnoticed. A shared `seed.js` builds a plausible `db`/`me` and calls `render()`.
 Also run `node --check` on the extracted script after every edit, and keep `$$`
 counts even in any SQL file you touch.
+
+**The SQL suites have an order and a seed — running one alone will look catastrophic.**
+`runsql.sh` (scratchpad) encodes it: rebuild with `chain19.sh`, load `seed16.sql`, and
+only then run the suite. `t16b`/`t16c` reuse the helper functions **`t16` creates**, so
+all three share one database and must run in that order; `t20`'s last assertion needs
+`keepalive_ping_v3.sql` installed first. Skip the seed and every suite fails at setup with
+`null value in column "emp_id"` — that is a missing `seed16.sql`, not a broken migration.
+**As of 2026-08-28: 154 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
+`t18` 29, `t18b` 16, `t19` 44, `t20` 22.
 
 **A test that asserts the old contract is not a regression — read it before "fixing"
 the code.** Making the year arrows unbounded turned two `t2.mjs` assertions red; they
@@ -403,6 +416,27 @@ happily agree with. Two habits keep it honest:
 - **Closing Edit / Add employee asks before discarding.** The form as opened is snapshotted
   (`snapEmp()`), so `empDirty()` is a comparison, not a guess — an untouched form still
   closes instantly with no pointless dialog.
+- **v23: the per-team Saturday tick reached nobody, and was removed rather than fixed.**
+  `deptsat` wrote `departments.works_saturday` correctly — the write was never the problem.
+  `emp_works_saturday()` prefers the employee's own column and only falls back to the team,
+  and since v22 made that field a required answer, every employee has one, so the team value
+  was dead weight on every row. The user's call was *"remove this fucntion from the
+  teams/department section"*. The column, the paragraph and the handler are gone; the SQL
+  column and the fallback stay, so nothing that predates the change breaks. *Before fixing a
+  control that "does nothing", find out whether anything downstream still reads it.*
+- **Teams: In use → Delete.** `deptdel` refuses an occupied team by name and member count
+  and writes nothing; an empty one goes through a confirmation to `deptdelgo`. **`confirmyes`
+  forwards only `act` and `id`** — it deletes the rest of `vp.confirmModal` before
+  dispatching — so the team name travels as `id`. Anything else you hang on that object is
+  gone by the time the handler runs.
+- **The company-wide credit box is a signed stepper.** `albumpSet()` always writes an
+  explicit sign (`+1`, `-1`, `0`) and the ▲▼ are buttons, not a native `type="number"`
+  spinner: a native spinner needs `type="number"`, which is the exact thing THE CARET RULE
+  forbids on a box that re-renders as you type. `numText()` now preserves a leading `+` as
+  well as `-` when `allowNeg`.
+- **Leave Application opens on nobody.** `vp.forEmp` starts unset with a `— Select —`
+  placeholder and no form. Any suite that seeded `hrTab: 'apply'` and went straight for
+  `[data-f="start"]` must now pick an employee first (`t11.mjs` §2).
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.

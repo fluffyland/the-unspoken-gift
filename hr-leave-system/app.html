@@ -197,6 +197,13 @@ td.num{font-variant-numeric:tabular-nums}
 .cal .dnum{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between}
 .cal .dnum .ph{color:var(--warn);font-weight:600;font-size:10.5px}
 .cal .phname{color:var(--warn);font-size:10px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.stepper input{border:0;width:56px;text-align:center;font-weight:600;background:transparent;padding:7px 4px}
+.stepper input:focus{outline:none}
+.steps{display:flex;flex-direction:column;border-left:1px solid var(--line)}
+.stepbtn{border:0;background:var(--surface);color:var(--muted);cursor:pointer;font-size:9px;line-height:1;padding:0 7px;flex:1}
+.stepbtn:hover{background:var(--line);color:var(--fg)}
+.stepbtn+.stepbtn{border-top:1px solid var(--line)}
 .offset{display:flex;flex-direction:column;gap:2px;min-width:190px}
 .offrow{display:flex;justify-content:space-between;gap:14px;font-size:13px}
 .offrow.tot{border-top:1px solid var(--line);margin-top:3px;padding-top:3px}
@@ -434,8 +441,9 @@ const isNumBox = el => el.type === "number" || el.inputMode === "decimal";
 // Keep only what can be part of a number, so a text box cannot hold "abc". One leading
 // minus (balance adjustments take -2) and one decimal point.
 function numText(v, allowNeg) {
-  let s = String(v == null ? "" : v).replace(allowNeg ? /[^0-9.\-]/g : /[^0-9.]/g, "");
-  if (allowNeg) s = (s[0] === "-" ? "-" : "") + s.replace(/-/g, "");
+  let s = String(v == null ? "" : v).replace(allowNeg ? /[^0-9.\-+]/g : /[^0-9.]/g, "");
+  // A leading + is kept where a minus is allowed, so the box can show its own sign.
+  if (allowNeg) { const sign = s[0] === "-" ? "-" : s[0] === "+" ? "+" : ""; s = sign + s.replace(/[-+]/g, ""); }
   const i = s.indexOf(".");
   if (i !== -1) s = s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "");
   return s;
@@ -852,6 +860,8 @@ function entChange(empId, typed) {
    "Enter a number of days" to a click on a field that plainly had one in it. */
 function albumpRaw() { return vp.albump == null ? "0" : vp.albump; }
 function albumpDays() { return numOr(albumpRaw(), 0); }
+// Written back with an explicit sign: +1 credits, -1 takes back, 0 does nothing.
+function albumpSet(n) { vp.albump = n > 0 ? "+" + fmtD(n) : fmtD(n); }
 function annualCapNow() {
   if (!db.orgV14) return null;
   const raw = oPick("annualCap");
@@ -2138,13 +2148,11 @@ function hrEmployees() {
     <div class="callout acc" style="margin-bottom:14px">This tab configures the approval workflow for each employee. By default, a request needs one approver. Add a 2nd level approver if a second approval is required. In-flight applications keep their original route.</div>
     <details style="margin:0 0 14px"${vp.teamsOpen ? " open" : ""} data-teams>
       <summary style="cursor:pointer"><b>Teams / departments (${db.departments.length})</b> — manage the list every employee picks from</summary>
-      <p class="meta" style="margin:8px 0 0">Ticking <b>Required to work on Saturday</b> makes Saturday a normal working day for that team — a Mon–Sat leave then costs 6 days instead of 5. Individuals can override it on their own profile. Public holidays are still excluded for everyone.</p>
-      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th>${db.hasSat ? `<th title="Everyone in this team works Saturdays unless their own profile overrides it">Required to work on Saturday</th>` : ""}<th></th></tr></thead><tbody>
+      <div class="tablebox" style="margin-top:10px;max-width:560px"><table><thead><tr><th>Team name (edit to rename — updates every member)</th><th class="num">Members</th><th></th></tr></thead><tbody>
         ${db.departments.map(d => `<tr>
           <td><input type="text" value="${esc(d)}" data-act="deptname" data-old="${esc(d)}" style="width:100%"></td>
           <td class="num">${deptCount(d)}</td>
-          ${db.hasSat ? `<td><input type="checkbox" data-act="deptsat" data-name="${esc(d)}" ${(db.deptSat || {})[d] ? "checked" : ""}></td>` : ""}
-          <td>${deptCount(d) === 0 ? `<button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button>` : `<span class="meta">in use</span>`}</td>
+          <td><button class="btn ghost" style="padding:4px 10px" data-act="deptdel" data-name="${esc(d)}">Delete</button></td>
         </tr>`).join("")}</tbody></table></div>
       <div class="actions" style="margin-top:8px">
         ${vp.teamConfirm ? `
@@ -2323,7 +2331,6 @@ function offModal() {
 function hrTypes() {
   return `<div class="card">
     <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible. This tab will changes the total leave for all employee in one go. (Eg, if you change Sick Leave from 14 to 15, all employee will have 15 day in total. Please note that it is not applicable for AL and OIL.)</div>
-    ${db.orgV18 ? `<div class="callout warn" style="margin-bottom:14px">📌 <b>Changing Days / year credits the difference to everyone, now.</b> Take Hospitalisation from 60 to 62 and every eligible employee gains <b>2 days</b> on top of what they have — somebody who already used 5 goes from 55 to 57. <b>Nobody is reset to 62.</b> You see exactly who and how many before it is saved.</div>` : ""}
     <div class="frow" style="margin-bottom:12px"><button class="btn" data-act="ltadd">+ Add leave type</button></div>
     <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th>
       <th style="text-align:center">Half-day allowed?${db.ltHalf ? colToggle("half") : ""}</th>
@@ -2364,17 +2371,23 @@ function ltModal() {
         <option value="F" ${m.gender === "F" ? "selected" : ""}>Female only</option>
         <option value="M" ${m.gender === "M" ? "selected" : ""}>Male only</option></select></div>
     </div>
-    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-deduct" ${m.deduct ? "checked" : ""}> Deducts from a yearly balance (uncheck for record-only types like Training)</label>
-    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-attach" ${m.attach ? "checked" : ""}> Attachment required when applying</label>
-    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-half" ${m.half ? "checked" : ""}> Half-day (AM/PM) allowed</label>
     ${db.orgV18 && m.code === "annual" ? `<div class="field" style="margin-top:2px">
       <label>Credit annual leave to everyone</label>
       <div class="frow" style="gap:8px;margin:0;align-items:center;flex-wrap:nowrap">
         <span class="meta" style="white-space:nowrap">Add</span>
-        <input ${NUMBOX} data-f="albump" value="${esc(albumpRaw())}" style="max-width:74px">
+        <span class="stepper">
+          <input ${NUMBOX} data-f="albump" value="${esc(albumpRaw())}">
+          <span class="steps">
+            <button class="stepbtn" data-act="albumpstep" data-d="1" title="One more day" aria-label="One more day">▲</button>
+            <button class="stepbtn" data-act="albumpstep" data-d="-1" title="One day less" aria-label="One day less">▼</button>
+          </span>
+        </span>
         <span class="meta" style="white-space:nowrap">day(s) to everyone</span>
       </div>
-      <span class="hint">Applied when you press <b>Save changes</b>, and confirmed first. Changes every employee's <b>Annual Leave Entitled / Yr</b> for good — next year they get the new figure automatically — and the same days reach this year's total. Type a <b>minus</b> to take days back off a mistake, e.g. <b>-1</b>. Leave it at <b>0</b> and nobody is touched. Anyone who would go over your company maximum, or below zero, is skipped and named.</span></div>` : ""}
+      <span class="hint">This AL changes will apply to all employees. To add only specific employee go to Employees & approval routes, edit. (Eg. If company wish to grant all employee 1 day annual leave at next year, type in 1 (if deduct, type -1) and click save changes. The one day will immidiately credited into all employee balance)</span></div>` : ""}
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-deduct" ${m.deduct ? "checked" : ""}> Deducts from a yearly balance (uncheck for record-only types like Training)</label>
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-attach" ${m.attach ? "checked" : ""}> Attachment required when applying</label>
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="lt-half" ${m.half ? "checked" : ""}> Half-day (AM/PM) allowed</label>
     <div class="field" style="margin-top:10px"><label>Notes (optional)</label><input type="text" id="lt-note" value="${esc(m.note || "")}" placeholder="Shown under the type name"></div>
     <div class="actions">
       <button class="btn" data-act="ltsave">${isAdd ? "Add leave type" : "Save changes"}</button>
@@ -2596,10 +2609,20 @@ function hrApply() {
   const list = activeEmps();
   if (!list.length) return `<div class="card"><div class="empty">No active employees to apply for.</div></div>`;
   vp.hrApply = true;
-  if (!vp.forEmp || !emp(vp.forEmp)) { vp.forEmp = list[0].id; vp.form = null; }
+  // Nobody is pre-selected. It used to open on whoever came first alphabetically, which is
+  // how leave gets filed against the wrong person — the same fault the old Balance
+  // adjustments form had. If they picked somebody who has since left, clear it.
+  if (vp.forEmp && !emp(vp.forEmp)) { delete vp.forEmp; vp.form = null; }
+  const who = vp.forEmp ? emp(vp.forEmp) : null;
   return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px">Enter leave <b>for</b> an employee — for someone who called in sick, or handed you a form on paper. It is <b>approved immediately</b>, deducted from their balance, and appears in their own <b>My applications</b>, in <b>All records</b> and on the <b>calendar</b>, marked as entered by you.</div>
-    ${vApply()}
+    <div class="callout acc" style="margin-bottom:14px">Enter leave for an employee manually it is for  for someone who called in sick, or handed you a form on paper. It is approved immediately, deduct from their balance, and update in the system.</div>
+    ${who ? vApply() : `<div class="field" style="max-width:340px"><label>Employee<span class="req">*</span></label>
+      <select data-f="forEmp">
+        <option value="" disabled selected>— Select —</option>
+        ${list.map(e => `<option value="${e.id}">${esc(e.name)}${e.dept ? " · " + esc(e.dept) : ""}</option>`).join("")}
+      </select>
+      <span class="hint">Everyone currently employed. Add someone and they appear here; offboard them and they go.</span></div>
+      <div class="empty">Choose an employee to enter leave for.</div>`}
   </div>`;
 }
 
@@ -2994,7 +3017,22 @@ async function runAction(el) {
     case "deptcancel": delete vp.teamConfirm; vp.teamsOpen = true; rerender(); break;
     case "deptdel": {
       const name = el.dataset.name;
-      if (db.employees.some(e => e.active !== false && e.dept === name)) return toast("This team still has members");
+      // Every row offers Delete now, so the refusal has to say what is in the way and what
+      // to do about it — "This team still has members" left you guessing at both.
+      const n = db.employees.filter(e => e.active !== false && e.dept === name).length;
+      if (n) return toast(`“${name}” still has ${n} member${n === 1 ? "" : "s"}. Move them to another team first.`);
+      vp.confirmModal = {
+        title: "Delete this team?",
+        lines: [`“<b>${esc(name)}</b>” will be removed from the list everyone picks from.`,
+                "Nobody is in it, so no employee is affected."],
+        // confirmyes forwards only `act` and `id`, so the team name travels as the id.
+        okLabel: "Delete team", cancelLabel: "Cancel", act: "deptdelgo", id: name
+      };
+      vp.teamsOpen = true; rerender(); break;
+    }
+    case "deptdelgo": {
+      const name = id;
+      if (!name) break;
       const { error } = await sb.from("departments").delete().eq("name", name);
       if (error) return rpcErr(error);
       vp.teamsOpen = true; await reload(); toast("Team \"" + name + "\" deleted");
@@ -3105,6 +3143,7 @@ async function runAction(el) {
       break;
     }
     case "empdiscard": delete vp.confirmModal; delete vp.empModal; rerender(); break;
+    case "albumpstep": { albumpSet(albumpDays() + Number(el.dataset.d || 0)); rerender(); break; }
     case "ltsaveok": { vp.ltDaysOk = true; vp.ltBumpOk = true; await runAction({ dataset: { act: "ltsave" } }); break; }
     case "ltadd": vp.ltModal = { code: null, name: "", days: 0, gender: "", deduct: true, attach: false, half: false, note: "" }; rerender(); break;
     case "ltedit": { delete vp.albump; delete vp.ltBumpOk; const t = lt(el.dataset.c); vp.ltModal = { code: t.code, name: t.en, days: t.days, gender: t.gender || "", deduct: !t.noDeduct, attach: !!t.mc, half: !!t.allowHalf, note: t.note || "" }; rerender(); break; }
@@ -3147,10 +3186,10 @@ async function runAction(el) {
         const up = bump > 0;
         vp.ltModal.name = name; vp.ltModal.note = payload.note || "";
         vp.confirmModal = {
-          title: up ? "Credit annual leave to everyone" : "Take annual leave back from everyone",
+          title: up ? "Crediting Annual leave" : "Deducting Annual leave",
           lines: [`Every employee's <b>Annual Leave Entitled / Yr</b> goes ${up ? "up" : "down"} by <b>${fmtD(Math.abs(bump))} day${Math.abs(bump) === 1 ? "" : "s"}</b>, permanently.`,
             `<b>${n}</b> employee${n === 1 ? "" : "s"} will be ${up ? "raised" : "reduced"}, and the number of days will be ${up ? "credited to" : "deducted from"} this year total.`,
-            "Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]
+            "Days already taken are not affected. This will be recorded as company-wide amendment."]
             .concat(blocked.length ? [`<b>Skipped</b>: ${blocked.map(e => esc(e.name)).join(", ")}.`] : []),
           okLabel: "Save changes", cancelLabel: "Cancel", act: "ltsaveok"
         };

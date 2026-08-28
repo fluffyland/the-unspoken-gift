@@ -9,18 +9,61 @@ Employees have their own, much shorter guide:
 
 ## The four account types
 
-| Account type | Can do |
+Every person in LeaveDesk has exactly one **Account type**. You set it in
+**HR Console → Employees & approval routes → Edit → Account type**.
+
+It decides what someone is allowed to *do in the system*. It is not their job title —
+that goes in **Occupation**. A Managing Director with nothing to administer can quite
+correctly be an Employee.
+
+| Account type | What they can do |
 |---|---|
-| **Employee** | apply for their own leave, see their own balances |
-| **Manager / Supervisor** | the above, plus approve for people assigned to them |
-| **HR Admin** | everything except changing an Owner |
-| **Owner / Super Admin** | everything, including managing other Owners |
+| **Employee** | Apply for their own leave. See their own balances, their own records, the shared calendar. Nothing about anybody else. |
+| **Manager / Supervisor** | Everything an Employee can, plus they get an **Approvals** tab. |
+| **HR Admin** | Everything above, plus the whole **HR Console**: add and edit staff, offboard, leave types, company settings, entitlements, start a new year, all records, all balances, all exports. |
+| **Owner / Super Admin** | Everything an HR Admin can, plus the things HR deliberately cannot: create another Owner, and edit, offboard, delete or reset the password of an Owner. |
 
-Anyone set as somebody's approver can approve, whatever their account type.
+### The one thing people get wrong
 
-**Keep at least two Owners.** If the only Owner leaves or is locked out, nobody
-can manage Owner accounts. HR Admins deliberately cannot reset an Owner's
-password — that's what stops an HR account from taking over the system.
+**Approving is not granted by the account type. It is granted by the approval route.**
+
+Somebody approves *Ahmad's* leave because they are set as **Ahmad's 1st level approver**
+in Ahmad's record — not because their account type says Manager. Those are two separate
+settings, and they do not talk to each other.
+
+That has two consequences worth remembering:
+
+- Give someone **Manager / Supervisor** and route nobody to them, and their Approvals
+  tab is simply empty. The title alone approves nothing.
+- Leave someone as **Employee** and name them as somebody's approver, and the
+  Approvals tab appears for them anyway, with real leave to approve. This is correct
+  and normal — a senior person who covers approvals while a manager is away does not
+  need their account type changed.
+
+So: **set the route first**. Change the account type only when you want to give
+somebody the HR Console.
+
+### Which one do I pick?
+
+- Just does their job and takes leave → **Employee**
+- Has people reporting to them → **Manager / Supervisor**, and set them as those
+  people's 1st level approver
+- Runs LeaveDesk day to day → **HR Admin**
+- The business owner, and one trusted deputy → **Owner / Super Admin**
+
+### Two rules about Owners
+
+**Keep at least two Owners.** If the only Owner leaves or is locked out, nobody can
+manage Owner accounts, and there is no way back in from inside the app.
+
+**HR Admins cannot touch an Owner.** Not their record, not their password, not their
+offboarding. That is deliberate — it is what stops an HR account from quietly taking
+over the system. If you see *"Only the Owner / Super Admin can …"*, that is this rule,
+working as intended.
+
+One more, which applies to everybody including Owners: **nobody can change their own**
+approvers, annual leave entitlement or account type. A 🔒 shows on your own row.
+Someone else has to make that change for you.
 
 ---
 
@@ -105,6 +148,15 @@ them and tell them to change it on first sign-in.
 
 **Existing employee with no login:** open their **Edit** → **Create login**.
 
+### Teams / departments
+
+**HR Console → Employees & approval routes → Teams / departments** — the list everyone
+picks from. Add one, rename one, or **Delete** one.
+
+Deleting asks first. A team that still has people in it **cannot** be deleted — you are
+told how many members it has, and nothing is written. Move them to another team first,
+then delete the empty one.
+
 ---
 
 ## Approving leave
@@ -139,8 +191,9 @@ keeping it off-system — it's the only copy that survives losing the database.
 
 **HR Console → Leave Application**
 
-For the person who phoned in sick, or handed you a paper form. Pick them from the list,
-fill in the same form they would, submit.
+For the person who phoned in sick, or handed you a paper form. The tab opens with
+**nobody chosen** — pick them from the list, and the leave form appears. Fill in the same
+form they would, and submit.
 
 - **Approved immediately** — you are HR; there is nobody to send it to.
 - It appears in **their own My applications**, in **All records**, and on the **calendar**.
@@ -322,16 +375,14 @@ Use **Offboard** for real departures. The other two destroy history you may need
 
 ## Staff who work Saturdays
 
-**HR Console → Employees & approval routes → Teams / departments** — tick
-**Required to work on Saturday** for a team, and Saturday becomes a normal working day
-for everyone in it.
+**It is set per person, and only per person.**
 
-**Per person:** their Edit form → **Required to work on Saturday** → **Yes** or **No**. This is now
-a required answer rather than an inherited one, so each person's record states it
-outright. Anyone whose record predates the change will be asked once, the first time
-you open their Edit form.
+**HR Console → Employees & approval routes → Edit** → **Required to work on Saturday**
+→ **Yes** or **No**. It is a required answer, so every record states it outright.
 
-The team-level tick still applies to those older records until they're answered.
+There used to be a tick for a whole team as well. It has been removed: because every
+employee now carries their own Yes/No, and their own answer always won, the team tick
+reached nobody. Set it on the person.
 
 > ⚠️ **This changes what leave costs.** For a Saturday worker, Mon–Sat is **6 days**,
 > not 5. Set it before people apply for leave, not after — existing applications keep
@@ -545,7 +596,12 @@ the form never credits anybody unless you meant to.
 Everyone's **Annual Leave Entitled / Yr** moves by that much **permanently** — next January
 they get the new figure automatically — and the same days reach this year's total.
 
-**Type a minus to take days back**, e.g. `-1`, if you credited by mistake.
+The box always shows a sign, so you can see at a glance which way it is going: `+1` credits,
+`-1` takes back, `0` does nothing. Use the **▲▼** buttons beside it, or type the figure
+yourself — **type a minus to take days back**, e.g. `-1`, if you credited by mistake.
+
+The confirmation is titled **Crediting Annual leave** or **Deducting Annual leave** so
+there is no doubt which one you are about to do.
 
 You are told how many people it reaches before it happens. Anyone who would go over your
 company maximum, or below zero, is **skipped and named**, not silently capped. It is
@@ -602,15 +658,97 @@ there and the next reset lands on 8; nothing is hard-coded.
 
 **HR Console → Company settings → Start a new year**
 
-Pick the year, press **Start …**, and it does all four steps in the only order that
-works: expire → carry forward → reset the other types → credit the new allowances.
+This is the one button you press each January. Everything below explains it from
+scratch — no jargon, one step at a time. There is a picture of it further down.
 
-**Nothing is written until you confirm.** The preview names every employee: annual leave
-taken last year, what was left, their own maximum, what carries, **what they forfeit**
-(in red), and what expires. **⬇ Export CSV** if payroll wants the forfeited figures —
-LeaveDesk forfeits the days, it does not pay anything out.
+### What it is for, in one sentence
 
-Safe to press twice: anyone already done for that year is skipped.
+Last year is finished, so LeaveDesk has to close it off and open the new one:
+carry over the annual leave people are allowed to keep, throw away the rest,
+clear the leave types that start fresh, and hand everybody their new allowance.
+
+### Before you press it
+
+Two things, both in **Company settings**, decide what happens:
+
+- **Carry Forward AL Maximum Day** — the most annual leave one person may keep.
+  There is a company default, and each employee can have their own in **Edit employee**.
+  Somebody with `5` keeps at most 5 days, however many they have left.
+- **Carry Forward AL expire after (months)** — how long the kept days survive.
+  `6` means they must be used by 30 June, or they are gone. Blank means they never expire.
+
+Also make sure last year's leave is finished: nothing still sitting on **Pending**.
+Approve or reject those first, because pending days are not counted anywhere yet.
+
+### What it does to one person, step by step
+
+Take **Siti**. She is entitled to 14 days a year, her maximum carry forward is 5,
+and expiry is set to 6 months. During 2026 she took 6 days.
+
+| Step | What LeaveDesk does | Siti |
+|---|---|---|
+| **1** | Look at anything carried into last year that has already passed its expiry date, and write those dead days off. | Nothing carried into 2026, so nothing happens. |
+| **2** | Work out what she has left of last year's annual leave. | 14 entitled − 6 taken = **8 days left**. |
+| **3** | Compare that with her maximum. Whatever fits, **carries forward**. | Her maximum is 5, so **5 days carry into 2027**. |
+| **4** | Whatever does not fit is **forfeited** — written off, not paid out. | 8 − 5 = **3 days forfeited**. |
+| **5** | Stamp an expiry date on the days that carried. | 6 months from 1 Jan 2027 → **use by 30 June 2027**. |
+| **6** | Every other leave type that starts fresh each year (sick, hospitalisation, and so on) is cleared to zero, whatever was left in it. | Her 9 unused sick days are written off. |
+| **7** | Write one permanent line into **Past runs** saying exactly all of the above, with her name on it. | Done — readable in 2030. |
+| **8** | Once everybody has been through steps 1–7, hand out the new year's allowances. | Siti is credited **14 days for 2027**, on top of the 5 she carried. |
+
+So on 2 January Siti opens LeaveDesk and sees **19 days**: 14 new, plus 5 carried
+that she must use by 30 June. Her 3 forfeited days and her leftover sick leave
+are gone, and both are written down in Past runs.
+
+> **Why step 8 is last.** If the new allowance were credited first, step 6 would
+> clear it away again the moment it arrived. The order is not optional.
+
+Two smaller points, so nothing surprises you:
+
+- Annual leave sits in **one pot**. If Siti had carried 2 days into 2026 and still
+  had them, step 2 would count them too — there is no separate bucket. Days that
+  had already passed their expiry date were taken out in step 1, so they cannot carry twice.
+- Someone who joined part-way through last year is credited their **pro-rated**
+  number in step 8, exactly as they were when they joined — not a full 14.
+
+### The same thing as a picture
+
+Open [`year-start-flowchart.html`](year-start-flowchart.html) in a browser —
+double-click the file, no internet needed.
+
+### Preview: seeing it before it is real
+
+**Nothing is written until you confirm.** Pressing the button first shows you a
+preview: every employee, one row each — annual leave taken last year, what was
+left, their own maximum, what carries, **what they forfeit** (in red), and what
+expires. **⬇ Export CSV** if payroll wants the forfeited figures.
+
+Preview works out every single number the real run would, and writes **nothing**.
+Read it, close it, change somebody's maximum in **Edit employee**, press it again.
+You can do that as many times as you like. Only the confirmation writes.
+
+### What if you press it twice?
+
+**Nothing happens twice.** It is safe.
+
+The moment the real run finishes with a person, it writes their name into the log
+for that year (step 7). Press it again and it reaches that name, sees it is already
+there, and skips straight past them. Press **Start 2026** again today and it will
+report **0 employees processed** — no leave carried, none forfeited, none cleared,
+nothing credited.
+
+This also means it is safe if it stops halfway — a laptop closing, the internet
+dropping. Press it again and it picks up exactly where it left off, finishing the
+people it never reached and leaving everyone else alone.
+
+### What it never touches
+
+- **Off-in-lieu.** Never cleared, never expired, never credited by the year start.
+  It is earned day by day, so it stays until it is used.
+- **Anyone who has left.** Offboarded employees are skipped entirely.
+- **Leave already taken.** Days used last year stay used. Nothing is refunded.
+- **Leave types you have set not to reset yearly.** Those keep their balance.
+- **The past.** Last year's records, applications and approvals are never altered.
 
 ### 📋 Past runs
 
