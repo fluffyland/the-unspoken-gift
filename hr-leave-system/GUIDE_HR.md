@@ -516,8 +516,14 @@ disagree. The box under the field shows the arithmetic before you save:
 not reset anybody to 15.
 
 **Your company maximum caps the number you type** — set it to 21 and the field refuses 25,
-saying why. That applies on both routes: this form and the company-wide button below. (The
+saying why. That applies on both routes: this form and the company-wide box below. (The
 column on the Employees table is gone — one place to set it, not two.)
+
+**If the figure on file and this year's balance ever disagree** — someone added before the
+pro-rating was removed, say, showing 14 but only ever credited 6 — the box tells you so and
+**pressing Save fixes it**, even though the number itself has not changed:
+
+> **6 → 14 days.** Entitled this year: 14 · Already taken: 1 · Remaining: 13
 
 Every change is written to **Amendment records**, never applied silently.
 
@@ -532,13 +538,18 @@ Every change is written to **Amendment records**, never applied silently.
 
 **HR Console → Leave types → Annual Leave → Edit → Credit annual leave to everyone**
 
-Type the days, press **Credit to all employees**. Everyone's **Annual Leave Entitled / Yr**
-goes up by that much **permanently** — next January they get the new figure automatically —
-and the same days land in this year's balance.
+Type the days and press **Save changes** — everything on that form is applied by Save
+changes, so there is no second button competing with it. The box starts at **0**, so saving
+the form never credits anybody unless you meant to.
+
+Everyone's **Annual Leave Entitled / Yr** moves by that much **permanently** — next January
+they get the new figure automatically — and the same days reach this year's total.
+
+**Type a minus to take days back**, e.g. `-1`, if you credited by mistake.
 
 You are told how many people it reaches before it happens. Anyone who would go over your
-company maximum is **skipped and named**, not silently capped. It is recorded as one
-company-wide line in **Amendment records**, not one line per person.
+company maximum, or below zero, is **skipped and named**, not silently capped. It is
+recorded as one company-wide line in **Amendment records**, not one line per person.
 
 ## Carry-forward, expiry, and what resets each year
 

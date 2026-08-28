@@ -369,6 +369,40 @@ happily agree with. Two habits keep it honest:
   whether days were paid out. The settlement moved off the Former-employees list into a
   **Leave left** popup, and the encashed/cleared word is gone from the screen entirely —
   which also reads correctly for people offboarded before the change.
+- **v22: comparing against the STORED number hid a whole class of mismatch.** Both
+  `entChange` and the `empsave` entitlement branch asked `typed !== employees.annual_base`.
+  For someone whose stored figure was already 14 while the ledger had only credited 6 (a
+  pro-rated joiner added before v20), typing 14 did nothing at all — no preview, no RPC —
+  and Balances kept reading 5 / 6. The screen that exists to FIX a mismatch could not see
+  it. Both now also compare against `entNow()` = `bal().yGranted`, the same figure Balances
+  prints. *A control that repairs state must be driven by the state it repairs, not by the
+  setting that was supposed to produce it.*
+- **`numText()` was called directly in one more place.** `NEG_OK` was added in v20 so only
+  two fields keep a leading minus — but the `albump` handler called `numText(el.value)` with
+  no flag, so the company-wide credit silently lost its minus, exactly as off-in-lieu had.
+  Every call site now passes `allowsNeg(el)`. *A guard list only works if nothing routes
+  around it; grep for the bare helper, not just the list.*
+- **Carry-forward expiry was verified end to end, not read** (`t20.sql`, 22 assertions):
+  carried days are consumed first because "what remains" is *carry-in minus annual leave
+  taken since 1 January* — there is no separate bucket to drain. The balance excludes
+  expired days **before** the job runs (`due_unwritten_carry` inside `leave_balances`), the
+  job writes a `"<year> carry-over expired (unused)"` ledger line, records `expired_days`
+  and `expired_at`, is idempotent, and leaves days used before the date alone. **Watch the
+  test's own dates**: the first version hard-coded a 30 June expiry, which is already in the
+  past for most of the year, so three assertions failed for a reason that had nothing to do
+  with the code. Date fixtures must be relative to `current_date`.
+- **Monthly accrual is switched off to users** at the user's instruction ("i no longer want
+  to open this function to user"). The dropdown is `disabled`; the column and all the SQL
+  behind it are untouched, so re-enabling it is deleting one attribute.
+- **Add employee: the 1st level approver is a required decision.** It used to default to
+  *(auto-approve)*, so clicking through filed somebody with no approval route. Three states
+  now — unset (a `— Select —` placeholder), `APPR_NONE` (auto-approve, chosen on purpose),
+  or an id — normalised by `appr1Id()`. Deliberately a **separate** `appr1Opts()` from
+  `apprOpts()`, because the 2nd-level select and the Employees-table selects already treat
+  `""` as "nobody" and must not change.
+- **Closing Edit / Add employee asks before discarding.** The form as opened is snapshotted
+  (`snapEmp()`), so `empDirty()` is a comparison, not a guess — an untouched form still
+  closes instantly with no pointless dialog.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.

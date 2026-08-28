@@ -428,7 +428,7 @@ const NUMBOX = 'type="text" inputmode="decimal" autocomplete="off"';
 // still read -30 until something else redrew the page: answering "Required to work on
 // Saturday" did, and 30 appeared. Days entitled and the carry-forward cap still refuse a
 // minus; these two do not.
-const NEG_OK = new Set(["em.oilDays", "led.delta"]);
+const NEG_OK = new Set(["em.oilDays", "led.delta", "albump"]);
 const allowsNeg = el => NEG_OK.has(el.dataset.f || "");
 const isNumBox = el => el.type === "number" || el.inputMode === "decimal";
 // Keep only what can be part of a number, so a text box cannot hold "abc". One leading
@@ -808,6 +808,10 @@ function capBelowBase() {
 /* Changing the entitlement now moves THIS year's balance, so it has to be stated before
    you press Save. Shown only when their allowance for this year has already been credited
    — before that there is nothing to correct and the new figure simply gets granted. */
+/* This year's annual entitlement as the ledger has it — the same figure Balances prints
+   as the second number. The screen that exists to fix a mismatch has to be able to SEE
+   the mismatch, so both the preview and the save read this, not just employees.annual_base. */
+function entNow(empId) { return bal(empId, "annual").yGranted; }
 /* What saving this number will actually do. It used to say "this year's balance moves from
    19 to 20" — where 19 was the WHOLE ledger history, not this year, and where the database
    then wrote nothing at all for anyone added through this form, because it matched on the
@@ -817,7 +821,11 @@ function entChange(empId, typed) {
   const e = emp(empId); if (!e) return "";
   const before = Number(e.annualBase);
   const after = numOr(typed, before);
-  if (!Number.isFinite(after) || after === before) return "";
+  if (!Number.isFinite(after)) return "";
+  // Compare against what the LEDGER holds as well as the stored number. Someone added
+  // before v20 can carry a stored 14 while this year only ever credited 6 (a pro-rated
+  // joiner); the two agreeing is not the same as there being nothing to do.
+  if (after === before && after === entNow(empId)) return "";
   const y = new Date().getFullYear();
   const anyThisYear = db.ledger.some(l => l.empId === empId && l.type === "annual" &&
     !l.refApp && new Date(l.ts).getFullYear() === y);
@@ -829,8 +837,9 @@ function entChange(empId, typed) {
   const taken = bl.yUsed, carry = db.orgV16 ? carryOf(empId) : 0;
   const left = after + carry - taken;
   const row = (k, v) => `<div style="display:flex;justify-content:space-between;max-width:260px"><span>${k}</span><b>${fmtD(v)} day${Math.abs(v) === 1 ? "" : "s"}</b></div>`;
-  return `<div class="callout ${after < before ? "warn" : "acc"}" style="margin:8px 0 0">
-    <b>${fmtD(before)} → ${fmtD(after)} days.</b>
+  const now = entNow(empId);
+  return `<div class="callout ${after < now ? "warn" : "acc"}" style="margin:8px 0 0">
+    <b>${fmtD(now === after ? before : now)} → ${fmtD(after)} days.</b>
     <div style="margin-top:6px">
       ${row("Entitled this year:", after)}
       ${row("Already taken:", taken)}
@@ -841,7 +850,7 @@ function entChange(empId, typed) {
 /* The days box on the Annual Leave editor. The box and the button read the SAME value —
    they did not, and the box showed "1" while the button saw nothing staged and answered
    "Enter a number of days" to a click on a field that plainly had one in it. */
-function albumpRaw() { return vp.albump == null ? "1" : vp.albump; }
+function albumpRaw() { return vp.albump == null ? "0" : vp.albump; }
 function albumpDays() { return numOr(albumpRaw(), 0); }
 function annualCapNow() {
   if (!db.orgV14) return null;
@@ -2062,6 +2071,30 @@ function hrRecords() {
     ${list.length ? appTable(list, true) : `<div class="empty">No records${q ? ` for “${esc(vp.recSearch)}”` : ""} in ${y}</div>`}</div>`;
 }
 function activeEmps() { return db.employees.filter(e => e.active !== false); }
+/* Closing Edit / Add employee used to throw away everything typed without a word. The form
+   as it was OPENED is snapshotted, so "has anything changed?" is a comparison rather than a
+   guess — and Cancel on an untouched form still closes instantly, with no pointless dialog. */
+function snapEmp() { if (vp.empModal) vp.empModal.orig = JSON.stringify(vp.empModal.form); }
+function empDirty() {
+  return !!(vp.empModal && vp.empModal.orig != null &&
+            JSON.stringify(vp.empModal.form) !== vp.empModal.orig);
+}
+/* The 1st level approver is a DECISION, like Gender — it used to arrive pre-set to
+   (auto-approve), so clicking through filed somebody with no approval route and nothing
+   prompted anyone to check. Three states now: unset (the — Select — placeholder),
+   "__none" (auto-approve, chosen on purpose), or an approver's id.
+   Kept separate from apprOpts() so the 2nd-level select and the Employees-table selects,
+   where "" already means "nobody", are untouched. */
+const APPR_NONE = "__none";
+function appr1Opts(self, sel, excl) {
+  const unset = sel == null || sel === "";
+  return (unset ? `<option value="" disabled selected>— Select —</option>` : "") +
+    `<option value="${APPR_NONE}" ${sel === APPR_NONE ? "selected" : ""}>(auto-approve)</option>` +
+    activeEmps().filter(x => x.id !== self && x.id !== excl)
+      .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+}
+// The real value to store: an id, or null for a deliberate auto-approve.
+const appr1Id = v => (v && v !== APPR_NONE) ? v : null;
 function apprOpts(self, sel, excl) {
   return `<option value="">(auto-approve)</option>` + activeEmps().filter(x => x.id !== self && x.id !== excl)
     .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
@@ -2223,11 +2256,12 @@ function empModal() {
       <div class="field"><label>Hire date</label><input type="text" data-f="em.joinDMY" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" value="${f.joinDate ? fmtDMY(f.joinDate) : esc(f.joinDMY || "")}"><span class="hint">Type it as day/month/year, e.g. 15/07/2026</span></div>
     </div>
     <div class="frow">
-      <div class="field"><label>1st level approver</label><select data-f="em.approver1" ${selfLock ? "disabled" : ""}>${apprOpts(m.id, f.approver1, f.approver2)}</select></div>
-      <div class="field"><label>2nd level approver</label><select data-f="em.approver2" ${f.approver1 && !selfLock ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select>
+      <div class="field"><label>1st level approver<span class="req">*</span></label><select data-f="em.approver1" ${selfLock ? "disabled" : ""}>${appr1Opts(m.id, f.approver1, f.approver2)}</select>
+        <span class="hint">Choose an approver, or <b>(auto-approve)</b> if this person's leave needs nobody's approval.</span></div>
+      <div class="field"><label>2nd level approver</label><select data-f="em.approver2" ${appr1Id(f.approver1) && !selfLock ? "" : "disabled"}>${apprOpts(m.id, f.approver2, f.approver1)}</select>
         <span class="hint">Optional — adding one enables a second approval step.</span></div>
     </div>
-    ${f.approver1 ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
+    ${appr1Id(f.approver1) ? "" : `<p class="hint" style="margin:-6px 0 10px">No 1st level approver = leave is auto-approved (e.g. Managing Director).</p>`}
     ${selfLock ? `<p class="hint" style="margin:-6px 0 10px">🔒 Only an Owner/Admin can change your own approver, leave base and account type.</p>` : ""}
     <div class="field" style="max-width:260px"><label>${db.orgV18 ? "Annual Leave Entitled / Yr" : "Annual leave base (days/yr)"}</label><input ${NUMBOX} data-f="em.annualBase" value="${f.annualBase}" ${selfLock ? "disabled" : ""}>
       ${db.orgV18 ? `<span class="hint">This is the total AL the employee entitle. It will direct credit AL to this employee once saved. (Eg. If employee gain extra 1 Day AL change it from 14 to 15. System will change their total AL to 15)${annualCapNow() != null ? ` Your company maximum is <b>${fmtD(annualCapNow())}</b>.` : ""}</span>` : ""}
@@ -2288,7 +2322,7 @@ function offModal() {
 }
 function hrTypes() {
   return `<div class="card">
-    <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible.</div>
+    <div class="callout acc" style="margin-bottom:14px">Leave types are yours to configure. Add a type, set its yearly amount, whether it needs an attachment, whether half-days are allowed, and who's eligible. This tab will changes the total leave for all employee in one go. (Eg, if you change Sick Leave from 14 to 15, all employee will have 15 day in total. Please note that it is not applicable for AL and OIL.)</div>
     ${db.orgV18 ? `<div class="callout warn" style="margin-bottom:14px">📌 <b>Changing Days / year credits the difference to everyone, now.</b> Take Hospitalisation from 60 to 62 and every eligible employee gains <b>2 days</b> on top of what they have — somebody who already used 5 goes from 55 to 57. <b>Nobody is reset to 62.</b> You see exactly who and how many before it is saved.</div>` : ""}
     <div class="frow" style="margin-bottom:12px"><button class="btn" data-act="ltadd">+ Add leave type</button></div>
     <div class="tablebox"><table><thead><tr><th>Type</th><th class="num">Default days / year</th><th>Deducts balance?</th>
@@ -2337,11 +2371,10 @@ function ltModal() {
       <label>Credit annual leave to everyone</label>
       <div class="frow" style="gap:8px;margin:0;align-items:center;flex-wrap:nowrap">
         <span class="meta" style="white-space:nowrap">Add</span>
-        <input ${NUMBOX} data-f="albump" value="${esc(albumpRaw())}" style="max-width:64px">
+        <input ${NUMBOX} data-f="albump" value="${esc(albumpRaw())}" style="max-width:74px">
         <span class="meta" style="white-space:nowrap">day(s) to everyone</span>
-        <button class="btn" style="white-space:nowrap" data-act="albumpall">Credit to all employees</button>
       </div>
-      <span class="hint">Raises every employee's <b>Annual Leave Entitled / Yr</b> for good — next year they get the new figure automatically — and credits the same days to this year's balance. Anyone who would go over your company maximum is skipped and named.</span></div>` : ""}
+      <span class="hint">Applied when you press <b>Save changes</b>, and confirmed first. Changes every employee's <b>Annual Leave Entitled / Yr</b> for good — next year they get the new figure automatically — and the same days reach this year's total. Type a <b>minus</b> to take days back off a mistake, e.g. <b>-1</b>. Leave it at <b>0</b> and nobody is touched. Anyone who would go over your company maximum, or below zero, is skipped and named.</span></div>` : ""}
     <div class="field" style="margin-top:10px"><label>Notes (optional)</label><input type="text" id="lt-note" value="${esc(m.note || "")}" placeholder="Shown under the type name"></div>
     <div class="actions">
       <button class="btn" data-act="ltsave">${isAdd ? "Add leave type" : "Save changes"}</button>
@@ -2393,21 +2426,21 @@ function hrSettings() {
   </div>
 
   <div class="card"><h3>Leave policy</h3>
-    <p class="meta" style="margin:4px 0 12px">These are <b>rules that apply to every employee</b>, not defaults — they take effect at the next yearly grant.</p>
+    <p class="meta" style="margin:4px 0 12px">Automatically credit 1/12 of the Annual Leave entitlement each month. Please note: Modifying this setting mid-year may cause negative balances if employees have already taken unaccrued leave.</p>
     ${db.orgV14 ? `<div class="frow">
       <div class="field" style="max-width:260px"><label>Maximum annual leave (total)</label>
         <input ${NUMBOX} data-f="org.annualCap" value="${oPick("annualCap")}" placeholder="no maximum">
-        <span class="hint">The most annual leave anyone can reach in total, including long-service increases — nobody goes above it. With a base of 14 and a maximum of 21, someone reaches 21 after 7 years and stays there. Blank = no maximum (20 years on a base of 14 would reach 33).</span>
+        <span class="hint">The max limit of annual leave anyone can reach in total. Blank = no maximum. (Eg. if set at 20 all employee will be capped at 20days AL limit)</span>
         ${capBelowBase() ? `<div class="callout warn" style="margin:8px 0 0">⚠ <b>${esc(capBelowBase())}</b></div>` : ""}</div>
       <div class="field" style="max-width:260px"><label>Credit annual leave</label>
-        <select data-f="org.accrualMode">
+        <select data-f="org.accrualMode" disabled>
           <option value="annual" ${oPick("accrualMode") === "annual" ? "selected" : ""}>All at once (1 Jan)</option>
           <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
         </select>
-        <span class="hint">Monthly credits 1/12 each month. Staff who take more than they have earned so far will show a <b>negative</b> balance — that is intended, not a fault.</span></div>
-      ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carried days expire after (months)</label>
+        <span class="hint">🔒 Fixed — this is not something to change from here.</span></div>
+      ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Forward AL expire after (months)</label>
         <input ${NUMBOX} data-f="org.carryMonths" value="${oPick("carryMonths")}" placeholder="never expires">
-        <span class="hint">Counted from 1 January, so <b>6</b> means carried days must be used by 30 June. <b>Leave it blank and they never expire.</b> Carried days are always used before the new year's, so nothing you have already taken is ever clawed back. How many days each person may carry is set per employee, on the Employees tab.</span></div>` : ""}
+        <span class="hint">Counted from 1 January, so 6 means carried days must be used by 30 June. Leave it blank and they never expire.How many days each person may carry is set per employee, on the Employees tab.</span></div>` : ""}
     </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
     <p class="hint" style="margin:10px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
@@ -2866,7 +2899,16 @@ async function runAction(el) {
       render(); break;
     }
     case "detail": vp.detail = id; rerender(); break;
-    case "closemodal": delete vp.detail; delete vp.offView; delete vp.empModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.phBulk; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; rerender(); break;
+    case "closemodal":
+      if (empDirty()) {
+        vp.confirmModal = {
+          title: "Discard your changes?",
+          lines: ["You have entered details that have not been saved.", "Closing now throws them away."],
+          okLabel: "Discard", cancelLabel: "Keep editing", act: "empdiscard"
+        };
+        rerender(); break;
+      }
+      delete vp.detail; delete vp.offView; delete vp.empModal; delete vp.offModal; delete vp.pwModal; delete vp.phModal; delete vp.phBulk; delete vp.ltModal; delete vp.loginResult; delete vp.confirmModal; delete vp.resultModal; rerender(); break;
     case "createlogin": {
       const email = el.dataset.email, eid = el.dataset.id;
       toast("Creating login…");
@@ -2932,8 +2974,8 @@ async function runAction(el) {
       if (w) w.location = data.signedUrl; else location.href = data.signedUrl;
       break;
     }
-    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", emailPrefix: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, carryCap: db.org?.defaultCarryCap ?? 0, worksSat: undefined } }; rerender(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || "", twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, carryCap: e.carryCap ?? 0, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; rerender(); break; }
+    case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", emailPrefix: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, carryCap: db.org?.defaultCarryCap ?? 0, worksSat: undefined } }; snapEmp(); rerender(); break;
+    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || APPR_NONE, twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, carryCap: e.carryCap ?? 0, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; snapEmp(); rerender(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -2978,6 +3020,7 @@ async function runAction(el) {
       if (!f.gender) return toast("Please choose Female or Male — it decides which leave types apply.");
       if (!f.role) return toast("Please choose an account type");
       if (db.hasSat && f.worksSat !== true && f.worksSat !== false) return toast("Please choose whether this person works Saturdays");
+      if (!f.approver1) return toast("Please choose a 1st level approver, or (auto-approve) if their leave needs nobody's approval.");
       // The database refuses a blank off-in-lieu reason. Saying so here means finding out
       // before the profile is written, not after — and every credit keeps a why.
       if (db.orgV18 && m.mode !== "add" && numOr(f.oilDays, 0) && !(f.oilReason || "").trim())
@@ -2993,10 +3036,11 @@ async function runAction(el) {
       if (!dept) return toast("Please choose a team");
       const base = numOr(f.annualBase, 14);
       { const m = baseAboveCap(base); if (m) return toast(m); }
+      const a1 = appr1Id(f.approver1);
       const row = { name: f.name.trim(), email: f.email.trim(), dept, title: f.title.trim(), gender: f.gender,
-        role: f.role, join_date: f.joinDate, approver1: f.approver1 || null,
-        approver2: (f.approver1 && f.approver2) ? f.approver2 : null,
-        two_level: !!(f.approver1 && f.approver2) };
+        role: f.role, join_date: f.joinDate, approver1: a1,
+        approver2: (a1 && f.approver2) ? f.approver2 : null,
+        two_level: !!(a1 && f.approver2) };
       // annual_base is written by set_annual_entitlement on the edit path (below), because
       // changing it has to move this year's balance too. On add there is no balance yet.
       if (m.mode === "add") row.annual_base = base;
@@ -3045,7 +3089,7 @@ async function runAction(el) {
         // The entitlement is not a plain column write: changing it moves THIS year's
         // balance and writes an amendment record. One function does both, so the number
         // and the balance can never end up telling different stories.
-        if (db.orgV18 && prev && Number(prev.annualBase) !== base) {
+        if (db.orgV18 && prev && (Number(prev.annualBase) !== base || entNow(m.id) !== base)) {
           const { error: ee } = await sb.rpc("set_annual_entitlement", { p_emp: m.id, p_days: base });
           if (ee) return rpcErr(ee);
         } else if (!db.orgV18) {
@@ -3060,40 +3104,10 @@ async function runAction(el) {
       }
       break;
     }
-    case "albumpall": {
-      const d = albumpDays();
-      if (!d) return toast("Enter a number of days.");
-      const cap = annualCapNow(), list = activeEmps();
-      const over = cap == null ? [] : list.filter(e => numOr(e.annualBase, 0) + d > cap);
-      const n = list.length - over.length;
-      if (!n) return toast(cap == null ? "There are no active employees." :
-        `Nobody can be raised — everyone is already at your company maximum of ${fmtD(cap)} days.`);
-      vp.confirmModal = {
-        title: "Credit annual leave to everyone",
-        lines: [`Every employee's <b>Annual Leave Entitled / Yr</b> goes up by <b>${fmtD(d)} day${Math.abs(d) === 1 ? "" : "s"}</b>, permanently.`,
-          `<b>${n}</b> employee${n === 1 ? "" : "s"} will be raised, and the same days credited to this year's balance.`,
-          "Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]
-          .concat(over.length ? [`<b>Skipped</b> (already at your maximum of ${fmtD(cap)} days): ${over.map(e => esc(e.name)).join(", ")}.`] : []),
-        okLabel: "Credit to all employees", cancelLabel: "Cancel", act: "albumpgo"
-      };
-      rerender(); break;
-    }
-    case "albumpgo": {
-      const d = albumpDays();
-      const { data, error } = await sb.rpc("bump_annual_all", { p_days: d });
-      if (error) return rpcErr(error);
-      const r = data || {}, skipped = r.skipped || [];
-      delete vp.ltModal; delete vp.albump; await reload();
-      vp.resultModal = {
-        title: "Annual leave credited",
-        lines: [`<b>${fmtD(d)} day${Math.abs(d) === 1 ? "" : "s"}</b> added to <b>${r.affected || 0}</b> employee${r.affected === 1 ? "" : "s"}, and to this year's balance for <b>${r.credited || 0}</b> of them.`],
-        warn: skipped.length ? `Skipped, already at your company maximum: <b>${skipped.map(esc).join(", ")}</b>.` : ""
-      };
-      rerender(); break;
-    }
-    case "ltsaveok": { vp.ltDaysOk = true; await runAction({ dataset: { act: "ltsave" } }); break; }
+    case "empdiscard": delete vp.confirmModal; delete vp.empModal; rerender(); break;
+    case "ltsaveok": { vp.ltDaysOk = true; vp.ltBumpOk = true; await runAction({ dataset: { act: "ltsave" } }); break; }
     case "ltadd": vp.ltModal = { code: null, name: "", days: 0, gender: "", deduct: true, attach: false, half: false, note: "" }; rerender(); break;
-    case "ltedit": { const t = lt(el.dataset.c); vp.ltModal = { code: t.code, name: t.en, days: t.days, gender: t.gender || "", deduct: !t.noDeduct, attach: !!t.mc, half: !!t.allowHalf, note: t.note || "" }; rerender(); break; }
+    case "ltedit": { delete vp.albump; delete vp.ltBumpOk; const t = lt(el.dataset.c); vp.ltModal = { code: t.code, name: t.en, days: t.days, gender: t.gender || "", deduct: !t.noDeduct, attach: !!t.mc, half: !!t.allowHalf, note: t.note || "" }; rerender(); break; }
     case "ltsave": {
       const name = (document.getElementById("lt-name")?.value || "").trim();
       if (!name) return toast("Please enter a name for the leave type.");
@@ -3117,6 +3131,31 @@ async function runAction(el) {
       if (!db.ltHalf) delete payload.allow_half_day;   // column added by v8; omit until then
       const m = vp.ltModal;
       if (m.code && (db.orgV18 && (m.code === "annual" || m.code === "oil"))) delete payload.default_days;
+      // The company-wide credit used to be its own button sitting next to Save changes, and
+      // the two read as rivals. Everything on this form now ends with Save changes.
+      const bump = (db.orgV18 && m.code === "annual") ? albumpDays() : 0;
+      if (bump && !vp.ltBumpOk) {
+        const cap = annualCapNow(), list = activeEmps();
+        const blocked = list.filter(e => {
+          const nb = numOr(e.annualBase, 0) + bump;
+          return (cap != null && nb > cap) || nb < 0;
+        });
+        const n = list.length - blocked.length;
+        if (!n) return toast(bump > 0
+          ? `Nobody can be raised — everyone is already at your company maximum${cap == null ? "" : ` of ${fmtD(cap)} days`}.`
+          : "Nobody can be reduced — it would take somebody below zero.");
+        const up = bump > 0;
+        vp.ltModal.name = name; vp.ltModal.note = payload.note || "";
+        vp.confirmModal = {
+          title: up ? "Credit annual leave to everyone" : "Take annual leave back from everyone",
+          lines: [`Every employee's <b>Annual Leave Entitled / Yr</b> goes ${up ? "up" : "down"} by <b>${fmtD(Math.abs(bump))} day${Math.abs(bump) === 1 ? "" : "s"}</b>, permanently.`,
+            `<b>${n}</b> employee${n === 1 ? "" : "s"} will be ${up ? "raised" : "reduced"}, and the number of days will be ${up ? "credited to" : "deducted from"} this year total.`,
+            "Days already taken are not affected — nobody is reset. This is recorded as one company-wide amendment."]
+            .concat(blocked.length ? [`<b>Skipped</b>: ${blocked.map(e => esc(e.name)).join(", ")}.`] : []),
+          okLabel: "Save changes", cancelLabel: "Cancel", act: "ltsaveok"
+        };
+        rerender(); break;
+      }
       if (m.code && creditsDays) {
         // Ask before it reaches everyone's balance, in the same words the tab uses.
         if (!vp.ltDaysOk) {
@@ -3152,7 +3191,20 @@ async function runAction(el) {
         const { error } = await sb.from("leave_types").insert({ code, name_zh: "", sort: maxSort + 1, ...payload });
         if (error) return rpcErr(error);
       }
-      delete vp.ltModal; await reload(); toast(m.code ? "Leave type saved." : "Leave type added.");
+      if (bump) {
+        const { data, error: be } = await sb.rpc("bump_annual_all", { p_days: bump });
+        if (be) return rpcErr(be);
+        const res = data || {}, skipped = res.skipped || [];
+        delete vp.ltModal; delete vp.albump; delete vp.ltBumpOk; await reload();
+        vp.resultModal = {
+          title: bump > 0 ? "Annual leave credited" : "Annual leave taken back",
+          lines: [`<b>${fmtD(Math.abs(bump))} day${Math.abs(bump) === 1 ? "" : "s"}</b> ${bump > 0 ? "added to" : "taken from"} <b>${res.affected || 0}</b> employee${res.affected === 1 ? "" : "s"}, and ${bump > 0 ? "credited to" : "deducted from"} this year total for <b>${res.credited || 0}</b> of them.`],
+          warn: skipped.length ? `Skipped: <b>${skipped.map(esc).join(", ")}</b>.` : ""
+        };
+        rerender(); break;
+      }
+      delete vp.ltModal; delete vp.albump; delete vp.ltBumpOk; await reload();
+      toast(m.code ? "Leave type saved." : "Leave type added.");
       break;
     }
 
@@ -3623,7 +3675,7 @@ document.addEventListener("change", async ev => {
       rerender(); return;
     }
     vp.empModal.form[k] = el.type === "checkbox" ? el.checked : (isNumBox(el) ? numText(el.value, allowsNeg(el)) : el.value);
-    if (k === "approver1" && !el.value) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
+    if (k === "approver1" && !appr1Id(el.value)) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
     if (["joinDate", "twoLevel", "approver1", "approver2", "dept"].includes(k)) rerender(); // refresh pro-rate preview / dependent selects / new-team field
     return;
   }
@@ -3734,7 +3786,9 @@ document.addEventListener("input", ev => {
   }
   // The preview has to track what is typed, so this re-renders on every keystroke.
   // rerender() keeps the modal's scroll and the caret (see rerender()).
-  if (f === "albump") { vp.albump = numText(el.value); rerender(); return; }
+  // allowsNeg(el), not a bare numText: this box takes a minus, and hard-coding the call
+  // here is exactly how the field slipped past NEG_OK in the first place.
+  if (f === "albump") { vp.albump = numText(el.value, allowsNeg(el)); rerender(); return; }
   if (vp.phBulk && f === "phb.text") { vp.phBulk.text = el.value; rerender(); return; }
   // Staged live rather than on blur — see the long note in the `change` listener. Text and
   // number boxes only: a <select> or checkbox has no half-typed state, and its `change` is
