@@ -159,7 +159,8 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ❓ `reset_all_passwords.sql` | one-time reset of all logins to `Ssu123@` | user asked for it; not re-verified |
 | ✅ v16 / v18 / v19 | carry-forward and the yearly reset · Leave types crediting everyone, HR applying on behalf, amendment records · the typed figure IS the year's entitlement + one-click company credit | **APPLIED — probed 2026-08-28** with the anon key (§9): `run_year_start`, `bump_annual_all` and `annual_entitled_in_year` all answer (`42501 permission denied` = the function exists and is correctly revoked; `PGRST202` = wrong argument names, NOT absence — send the real ones before concluding anything). This row said "not yet run" for weeks after they had been. **Probe before you claim.** |
 | ❓ `keepalive_ping_v3` | daily call to `expire_due_carry()` | **Cannot be probed** — `keepalive_ping` exists and answers, but its source is not readable from outside, so whether it is v3 is unknown. It matters less than it looks: `due_unwritten_carry` is subtracted inside the `leave_balances` view, so **expired days are unusable even if no scheduled job ever runs**; the daily call only makes the written record tidy sooner, and `run_year_start` + `set_carry_expiry` both call it too. Check with `select prosrc like '%expire_due_carry%' from pg_proc where proname='keepalive_ping';` in the SQL Editor |
-| ⏳ v24 | the carry-forward expiry becomes a date you pick, not a count of months | **written, tested against a real Postgres (t24.sql, 37 assertions), NOT yet run by the user.** The frontend feature-detects it (`db.orgV24`), so the deployed site works without it and simply shows the old months box |
+| ✅ v24 | the carry-forward expiry becomes a date you pick, not a count of months | **APPLIED — probed 2026-08-31** (`set_carry_expiry` returns `42501`, i.e. exists and correctly revoked) and confirmed on screen: the backfill turned `12 months` into **December / 31**, the same day it always meant. The user first saw the old months box — that was **browser cache**; a hard refresh fixed it. Expect that on every deploy |
+| ⏳ v25 | `carry_expiry_for` → `security definer` | **written, tested (t24.sql §10, mutation-checked), NOT yet run by the user.** Nothing breaks without it — today's only callers are definer functions |
 
 v9 is **optional** — the frontend feature-detects (`db.orgProrate`) and hides
 the pro-rate-cap field until it's applied. Don't assume it; don't chase it
@@ -197,6 +198,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `HANDOVER.md` | this file |
 | `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
+| `supabase/migration_app_v25.sql` | **`carry_expiry_for` → `security definer`.** One function, one property. As an invoker it returned NULL for any caller who could not read `org_settings`, and NULL there means "never expires" — it disabled the expiry rule silently rather than erroring |
 | `supabase/migration_app_v24.sql` | **the carry-forward expiry becomes a date you pick** — `carry_expiry_month`/`_day` (repeating every year), `carry_expiry_for()`, `set_carry_expiry()` (preview + write + restamp + clear), `run_year_start` reading the date. Not yet run by the user |
 | `supabase/migration_app_v1..v15.sql` | incremental history. Applied on the live database: **v1–v15, including v9** (v9 was skipped for a long time and only went in with v14 on 2026-08-19 — see below) |
 | `supabase/bootstrap_owner.sql` | create first Owner (edit name/email inside) |
@@ -288,8 +290,17 @@ only then run the suite. `t16b`/`t16c` reuse the helper functions **`t16` create
 all three share one database and must run in that order; `t20`'s last assertion needs
 `keepalive_ping_v3.sql` installed first. Skip the seed and every suite fails at setup with
 `null value in column "emp_id"` — that is a missing `seed16.sql`, not a broken migration.
-**As of 2026-08-28: 191 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
-`t18` 29, `t18b` 16, `t19` 44, `t20` 22, `t24` 37.
+**As of 2026-08-31: 195 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
+`t18` 29, `t18b` 16, `t19` 44, `t20` 22, `t24` 41.
+
+**The SQL suites run as `postgres`, a SUPERUSER, which bypasses RLS entirely — so by
+default they cannot catch an RLS bug at all.** `t18b.sql:65` has the pattern that fixes
+this (`create role … ; grant …; set session authorization`), and `t24.sql` §10 now uses it.
+Two details that make the difference between a real test and a fake one: the test role
+needs the **table GRANT** (`grant select on org_settings to …`) or it errors on privilege
+before RLS is ever consulted; and it must **not** be a member of `authenticated` if you
+want to exercise the "policy does not apply" path, since every policy here is `to
+authenticated`.
 
 **A SQL suite reports a broken function as a MISSING assertion, not a failing one.** A
 statement that raises never reaches its `chk()`, so the row is simply absent — and
@@ -475,6 +486,27 @@ happily agree with. Two habits keep it honest:
   so the account-type description list would have highlighted whatever was picked before.
   A field only needs a rerender when something else on the form reads it — which is easy
   to miss until you add the thing that reads it.
+- **v25: a function whose failure mode is NULL is a function that fails silently.**
+  `carry_expiry_for` was `language sql stable` — security *invoker* — and it reads
+  `org_settings`, which has RLS (`org_read … to authenticated using (is_staff())`). Any
+  caller who could not read that table got **NULL**, and NULL there means *"carried leave
+  never expires."* It did not error; it quietly turned the rule off. Nothing was broken —
+  both real callers are definer, and `run_year_start` was proven correct under RLS — but
+  nothing stopped a third caller being added. Now `security definer`, revoked from anon.
+  *When a function's "I could not read that" answer is indistinguishable from a valid
+  answer, the answer is the bug.*
+- **Found by probing, not by reading.** The lead was `carry_expiry_for(2027)` returning
+  `null` to an anon probe. That specific null was the probe's own limitation and meant
+  nothing — but chasing why is what surfaced the trap behind it. *Probe results you can
+  explain away are still worth explaining.*
+- **A green suite that runs as superuser proves less than it looks.** See §8 on
+  `set session authorization`. Both v24 and v25 mutations were run before trusting green:
+  revert the change on purpose, confirm the test goes red. v24's leap-day mutation went
+  green the first time — the assertion was being *skipped*, not passed.
+- **`tail -n +N` to fold a migration into `schema.sql` cuts the function header if N is
+  off by a line.** It appended a bare `select …` body and left the `$$` count ODD (101),
+  which is the tell. Derive N from `grep -n "^create or replace function"` rather than
+  eyeballing it, and check the `$$` count after every append.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.

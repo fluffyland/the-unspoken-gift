@@ -460,6 +460,8 @@ Don't call it done until **every** line passes.
 - [ ] `migration_app_v24.sql` ran — Company settings → Leave policy shows **Carry Forward
       AL expiry date** as a Month + Day pair rather than a months box, and
       `select carry_expiry_for(2027);` returns a date
+- [ ] `migration_app_v25.sql` ran — `select prosecdef from pg_proc where proname =
+      'carry_expiry_for';` returns **t**
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

@@ -2149,3 +2149,24 @@ begin
 end $$;
 revoke execute on function run_year_start(int, boolean) from anon, public;
 grant  execute on function run_year_start(int, boolean) to authenticated;
+
+-- =============================================================
+-- v25：carry_expiry_for 改为 security definer
+-- 作为 invoker 时，凡是读不到 org_settings 的调用方都会拿到 NULL，
+-- 而 NULL 在这里的含义是「永不过期」—— 静默地把过期规则关掉。
+-- =============================================================
+create or replace function carry_expiry_for(p_year int)
+returns date language sql stable security definer set search_path = public as $$
+  select case
+           when o.carry_expiry_month is null or o.carry_expiry_day is null then null
+           else make_date(p_year, o.carry_expiry_month,
+                  least(o.carry_expiry_day,
+                        extract(day from (make_date(p_year, o.carry_expiry_month, 1)
+                                          + interval '1 month' - interval '1 day'))::int))
+         end
+  from org_settings o where o.id = 1;
+$$;
+comment on function carry_expiry_for(int) is
+  'The date carried annual leave expires in a given year. SECURITY DEFINER on purpose: as an invoker it returned NULL wherever org_settings was unreadable, and NULL here means "never expires" — a silent failure rather than an error.';
+revoke execute on function carry_expiry_for(int) from anon, public;
+grant  execute on function carry_expiry_for(int) to authenticated;
