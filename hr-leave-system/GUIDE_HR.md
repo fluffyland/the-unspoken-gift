@@ -247,6 +247,17 @@ Those are the figures payroll needs, and there is an **Export CSV** on the Forme
 list for all leavers at once. The entries stay in the **Full ledger** permanently and the
 person's history is kept.
 
+### Once someone has left, their record is frozen
+
+Offboarding settles the balance and that is the end of it. From that moment nothing touches
+their leave again — no expiry, no company-wide credit, no adjustment, no off-in-lieu. The
+record stays exactly as it was on their last working day.
+
+This is enforced in the database itself, not just hidden on the screens, so it holds however
+the change is attempted.
+
+---
+
 ## Off-in-lieu
 
 **HR Console → Employees → Edit → Credit Off-in-Lieu**
@@ -376,6 +387,20 @@ Their records stay for reporting.
 Use **Offboard** for real departures. The other two destroy history you may need.
 
 ---
+
+### One application, one year
+
+Leave cannot run across New Year. December days and January days are two applications,
+because they come out of two different years' leave.
+
+And **a year cannot be booked until you have started it.** In the first days of January,
+before you press *Start a new year*, that year's leave does not exist yet — so applying for
+it would spend last year's carry-forward without saying so. Staff see:
+
+> *2027 leave has not been issued yet. HR starts the new year in the first days of January —
+> you can apply for 2027 leave once they have.*
+
+Press the button and the year opens for everyone.
 
 ## Staff who work Saturdays
 
@@ -696,7 +721,16 @@ Two things, both in **Company settings**, decide what happens:
   year. **— Never expires —** means they never expire.
 
 Also make sure last year's leave is finished: nothing still sitting on **Pending**.
-Approve or reject those first, because pending days are not counted anywhere yet.
+
+**LeaveDesk now enforces this.** If any application dated in the closing year is still
+pending — or waiting on a cancellation — Start a new year **refuses to run** and lists them:
+
+> ⚠ **3 applications are still waiting.** All dated in 2026. Approve, reject or cancel them
+> before starting 2027 — otherwise those days count as unused and the people lose them.
+
+That is not fussiness. Leave still awaiting approval does not come off the balance yet, so
+the year start treats those days as unused and carries or forfeits them — and then deducts
+them a second time when the approver finally says yes. The employee quietly ends up short.
 
 ### What it does to one person, step by step
 
@@ -726,8 +760,11 @@ Two smaller points, so nothing surprises you:
 - Annual leave sits in **one pot**. If Siti had carried 2 days into 2026 and still
   had them, step 2 would count them too — there is no separate bucket. Days that
   had already passed their expiry date were taken out in step 1, so they cannot carry twice.
-- Someone who joined part-way through last year is credited their **pro-rated**
-  number in step 8, exactly as they were when they joined — not a full 14.
+- **Nothing is pro-rated.** Whatever is typed in *Annual Leave Entitled / Yr* is what that
+  person gets, joiner or not. If a new starter should get 6 days for their first part-year,
+  type 6, then type their full figure next January. (An earlier version of this page said
+  joiners were pro-rated automatically. That was wrong — see *Annual leave: the number you
+  type* above, which has always had it right.)
 
 ### The same thing as a picture
 

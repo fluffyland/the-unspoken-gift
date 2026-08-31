@@ -465,6 +465,9 @@ Don't call it done until **every** line passes.
 - [ ] `migration_app_v26.sql` ran — `select count(*) from pg_proc where proname =
       'submit_application';` returns **1** (not 2 or 3), and applying for leave dated in a
       closed year is refused
+- [ ] `migration_app_v27.sql` ran — `select count(*) from pg_proc where proname =
+      'freeze_leaver_carry';` returns **1**, and `select count(*) from pg_proc where proname =
+      'submit_application';` still returns **1**
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min

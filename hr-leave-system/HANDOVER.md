@@ -161,6 +161,7 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ❓ `keepalive_ping_v3` | daily call to `expire_due_carry()` | **Cannot be probed** — `keepalive_ping` exists and answers, but its source is not readable from outside, so whether it is v3 is unknown. It matters less than it looks: `due_unwritten_carry` is subtracted inside the `leave_balances` view, so **expired days are unusable even if no scheduled job ever runs**; the daily call only makes the written record tidy sooner, and `run_year_start` + `set_carry_expiry` both call it too. Check with `select prosrc like '%expire_due_carry%' from pg_proc where proname='keepalive_ping';` in the SQL Editor |
 | ✅ v24 | the carry-forward expiry becomes a date you pick, not a count of months | **APPLIED — probed 2026-08-31** (`set_carry_expiry` returns `42501`, i.e. exists and correctly revoked) and confirmed on screen: the backfill turned `12 months` into **December / 31**, the same day it always meant. The user first saw the old months box — that was **browser cache**; a hard refresh fixed it. Expect that on every deploy |
 | ✅ v25 | `carry_expiry_for` → `security definer` | user ran it 2026-08-31 |
+| ⏳ v27 | the audit fixes | **written, tested (t27.sql 41 assertions, 5 mutants), NOT yet run** |
 | ⏳ v26 | leave dated in a closed year | **written, tested (t25.sql, 44 assertions, 4 of 5 mutants caught + 2 proven equivalent), NOT yet run.** The frontend feature-detects nothing here — without v26 the database simply has no closed-year rule, and the screen falls back to today's behaviour. **Contains a `drop function`: read the overload note in §12 before touching it** |
 
 v9 is **optional** — the frontend feature-detects (`db.orgProrate`) and hides
@@ -199,6 +200,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `HANDOVER.md` | this file |
 | `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
+| `supabase/migration_app_v27.sql` | **the audit fixes.** Pending leave blocks the year start (blockers listed in the preview); leavers frozen — a `leave_ledger` trigger plus `active` filters plus `offboard_employee` closing the carry, with `freeze_leaver_carry()` repairing old data; one-application-one-year and year-not-yet-started rules |
 | `supabase/migration_app_v26.sql` | **leave dated in a year Start a new year has closed.** `year_closed_for`, `reconcile_closed_year` (preview + write, one arithmetic), the closed-year rule inside `submit_application` — and it **drops the two older `submit_application` signatures** |
 | `supabase/migration_app_v25.sql` | **`carry_expiry_for` → `security definer`.** One function, one property. As an invoker it returned NULL for any caller who could not read `org_settings`, and NULL there means "never expires" — it disabled the expiry rule silently rather than erroring |
 | `supabase/migration_app_v24.sql` | **the carry-forward expiry becomes a date you pick** — `carry_expiry_month`/`_day` (repeating every year), `carry_expiry_for()`, `set_carry_expiry()` (preview + write + restamp + clear), `run_year_start` reading the date. Not yet run by the user |
@@ -293,7 +295,8 @@ all three share one database and must run in that order; `t20`'s last assertion 
 `keepalive_ping_v3.sql` installed first. Skip the seed and every suite fails at setup with
 `null value in column "emp_id"` — that is a missing `seed16.sql`, not a broken migration.
 **As of 2026-08-31: 239 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
-`t18` 29, `t18b` 16, `t19` 44, `t20` 22, `t24` 41, `t25` 44. Browser: **19 suites, 741**.
+`t18` 29, `t18b` 16, `t19` 44, `t20` 22, `t24` 41, `t25` 44, `t27` 41 — **280 total**.
+Browser: **20 suites, 763**.
 
 **The SQL suites run as `postgres`, a SUPERUSER, which bypasses RLS entirely — so by
 default they cannot catch an RLS bug at all.** `t18b.sql:65` has the pattern that fixes
@@ -539,6 +542,32 @@ happily agree with. Two habits keep it honest:
   zero earlier changes nothing, because every use is already clamped and a negative leftover
   minus a non-negative cap is negative either way. Proved rather than assumed — check
   whether a surviving mutant is actually reachable before writing a test for it.
+- **v27 came from ACTING like a user, not reading code.** Four fake employees, a year of
+  leave, a year start, then carrying on in January. Two serious bugs fell straight out; no
+  amount of re-reading had found them. *Run the system as somebody would use it, then check
+  every number by hand.*
+- **`run_year_start` read `balance`, which does not subtract PENDING leave.** Leave awaiting
+  approval over New Year was treated as unused → carried or forfeited → then deducted again
+  on approval. Reproduced exactly: 13 instead of 16, three days gone, silent, with
+  `year_start_log` permanently recording "taken 6" against a reality of 12. Now the year
+  start **refuses to run** and names them. Counting pending as *used* was rejected as a fix:
+  a later **rejection** would have to refund into a closed year — the same bug reversed.
+- **Offboarding cleared the balance but left the carry record open**, so the expiry deducted
+  it again → **−5** for every leaver. The user's rule is "freeze everything", and the
+  enforcement is a **trigger on `leave_ledger`** (with the v10 `leavedesk.svc` bypass so the
+  settlement itself still writes) rather than five separate `active` filters — filters hold
+  only until somebody writes a sixth function.
+- **A surviving mutant is not automatically an equivalent mutant.** Removing the `active`
+  filter from the expiry passed everything, because `offboard_employee` now closes the carry
+  record first, so the filter was never exercised. It is the second line of defence for a
+  record left open by an *older* offboarding — the pre-migration state. The test now
+  re-opens the row to recreate that state, and the mutant goes red at **−5**. *Check whether
+  the mutated line is reachable in your fixture before calling it equivalent.*
+- **The year rule was wrong at the root.** Booking was allowed as soon as the *calendar*
+  reached a year, whether or not any leave had been granted for it — so January leave booked
+  before the button was pressed came out of the previous year's carry-forward. Now: one
+  application, one year; and a year opens only when `year_start_log` says it has been
+  started. A first-year company has no rows and is unaffected.
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.

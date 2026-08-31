@@ -100,6 +100,11 @@ read any more, and no schedule that can have stopped.
 
 **HR Console → Company settings → Start a new year** → pick the year → **Start 2027…**
 
+**First, clear the decks.** Anything dated in the closing year that is still *Pending*, or
+waiting on a cancellation, now **stops the year start** — it lists the people so you know who
+to chase. Leave awaiting approval has not come off anyone's balance yet, so the year start
+would treat those days as unused, carry or forfeit them, then deduct them again on approval.
+
 Nothing is written until you have read the preview and pressed **Run start of 2027**.
 It does four things, in the only order that works
 (step by step, with a worked example: [`year-start-flowchart.html`](year-start-flowchart.html)):

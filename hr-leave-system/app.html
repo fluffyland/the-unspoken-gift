@@ -1211,6 +1211,15 @@ function closedYearLines(pv, name, yr, days) {
    run_year_start writes an annual_carry row for every active employee it processes, so a
    row for THIS year means last year was closed. That is inferred from data already loaded;
    no extra query, and it degrades to "nothing is closed" on a database without v16. */
+/* v27 — a year HR has not started yet. The year start writes an annual_carry row for
+   everyone it processes, so a row for year Y means Y was started. If the year BEFORE this
+   one was started but this one was not, this year's days do not exist yet and it cannot be
+   booked. A company in its very first year has no rows at all and is unaffected. */
+function yearNotStarted(empId, yr) {
+  const started = y => (db.allCarry || []).some(c => c.emp_id === empId && Number(c.year) === y)
+    || (empId === me.id && db.annualCarry && Number(db.annualCarry.year) === y);
+  return started(yr - 1) && !started(yr);
+}
 function closedYearFor(empId) {
   const y = new Date().getFullYear();
   const has = (db.allCarry || []).some(c => c.emp_id === empId && Number(c.year) === y)
@@ -1687,6 +1696,22 @@ function ysPreviewBox(gy) {
   const d = p.data || {};
   const rows = d.rows || [];
   const done = p.done;
+  // v27: leave still waiting on somebody's desk is counted as UNUSED by the year start, so
+  // it is carried or forfeited, and then deducted again when it is finally approved — the
+  // employee quietly loses those days. The database refuses; this says who to chase.
+  const blk = d.blockers || [];
+  if (blk.length && !done) return `<div class="callout warn" style="margin:12px 0">
+    <b>⚠ ${blk.length} application${blk.length === 1 ? " is" : "s are"} still waiting</b>
+    <p style="margin:6px 0">All dated in <b>${gy - 1}</b>. Approve, reject or cancel them before
+      starting ${gy} — otherwise those days count as unused and the people lose them.</p>
+    <ul style="margin:0 0 10px;padding-left:18px;font-size:13.5px;line-height:1.7">
+      ${blk.map(b => `<li><b>${esc(b.name)}</b> — ${fmtRange(b.start, b.end)}
+        (${fmtD(Number(b.days) || 0)} day${Number(b.days) === 1 ? "" : "s"}),
+        ${b.status === "cancel_requested" ? "cancellation requested" : "pending"}</li>`).join("")}
+    </ul>
+    <p class="meta" style="margin:0 0 10px">Nothing has been changed. Deal with these in
+      <b>All records</b> or <b>Approvals</b>, then come back.</p>
+    <div class="actions"><button class="btn sec" data-act="yscancel">Close</button></div></div>`;
   return `<div class="callout ${done ? "acc" : "warn"}" style="margin:12px 0">
     <b>${done ? `${gy} has been started.` : `Start of ${gy} — nothing has been changed yet`}</b>
     <div class="tablebox" style="margin:8px 0"><table><tbody>
@@ -1916,6 +1941,16 @@ async function doSubmit() {
   if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("Your MC needs to be a photo or a PDF.");
   const clash = selfOverlap(f, vp.editId);
   if (clash) return toast(`These dates overlap your ${ltName(clash.type)}, ${fmtRange(clash.start, clash.end)}.`);
+  // v27 — one application, one year. Leave straddling New Year has ALL of its days charged
+  // to the year it starts in, so January comes out of December's allowance, invisibly.
+  if (String(f.start).slice(0, 4) !== String(f.end).slice(0, 4))
+    return toast("Leave cannot run across New Year. Please apply for the December days and the January days separately — they come out of different years' leave.");
+  // v27 — and a year cannot be booked until HR has started it and the days actually exist.
+  {
+    const yr = Number(String(f.start).slice(0, 4));
+    if (yearNotStarted(applySubject().id, yr))
+      return toast(`${yr} leave has not been issued yet. HR starts the new year in the first days of January — you can apply for ${yr} leave once they have.`);
+  }
   // v26 — a year Start a new year has already closed off. The carry-forward was worked out
   // from what was left at the end of it, so adding leave to it now has to put that right.
   // Read once: a fresh confirmation is required every time.
@@ -2271,28 +2306,6 @@ function apprOpts(self, sel, excl) {
 }
 /* Annual-leave calculation: joined this year → pro-rated by remaining months;
    otherwise base + 1 day per additional full year of service. */
-function annualCalc(joinDate, base) {
-  const y = new Date().getFullYear();
-  const jy = Number(String(joinDate).slice(0, 4)) || y, jm = Number(String(joinDate).slice(5, 7)) || 1;
-  if (jy >= y) {
-    const monthsLeft = 12 - jm + 1;
-    let days = Math.ceil(base * monthsLeft / 12 * 2) / 2;
-    const cap = db && db.org ? db.org.prorateCap : null;
-    const capped = (cap != null && cap !== "" && days > Number(cap));
-    if (capped) days = Number(cap);
-    return { days, prorated: true, base, note: `pro-rated — ${monthsLeft} month${monthsLeft === 1 ? "" : "s"} of 12${capped ? `, capped at ${fmtD(Number(cap))}` : ""}` };
-  }
-  const extra = Math.max(0, y - jy - 1);
-  // The company maximum applies to the long-service branch, exactly as v14's SQL does
-  // (`least(base + years, annual_cap)`). This mirror left it out, so a long-serving hire
-  // previewed 33 while the database would grant 21 — the same "screen disagrees with the
-  // data" fault as the Apply breakdown. Blank/absent maximum = no ceiling.
-  const maxAL = db && db.org && db.org.annualCap != null && db.org.annualCap !== "" ? Number(db.org.annualCap) : null;
-  const raw = base + extra;
-  const days = (maxAL != null && raw > maxAL) ? maxAL : raw;
-  return { days, base, note: `${base} base + ${extra} for ${y - jy} year${(y - jy) === 1 ? "" : "s"} of service = ${fmtD(raw)} day${raw === 1 ? "" : "s"}`
-    + (days !== raw ? `, capped at the company maximum of ${fmtD(maxAL)}` : "") };
-}
 function empMatches(e, q, deptF) {
   if (deptF && deptF !== "all" && e.dept !== deptF) return false;
   if (!q) return true;
@@ -2375,7 +2388,6 @@ function empModal() {
   const stored = isAdd ? null : emp(m.id);
   const adminLocked = !!stored && stored.role === "admin" && !isOwner;
   const roleOpts = (isOwner || f.role === "admin") ? ["employee", "approver", "hr", "admin"] : ["employee", "approver", "hr"];
-  const calc = annualCalc(f.joinDate, numOr(f.annualBase, 14));
   // Blank until someone fills in Company settings -> Email domain. With no domain there
   // is nothing to lock the address to, so the field falls back to a plain email box
   // rather than silently inventing "@company.com" the way the auto-fill used to.
