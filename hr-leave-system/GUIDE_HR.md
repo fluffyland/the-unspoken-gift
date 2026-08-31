@@ -768,6 +768,43 @@ people it never reached and leaving everyone else alone.
 - **Leave types you have set not to reset yearly.** Those keep their balance.
 - **The past.** Last year's records, applications and approvals are never altered.
 
+### A form for last year turns up after you have closed it
+
+It happens: someone hands you a December form in January. LeaveDesk now handles it
+properly, because the carry-forward was worked out from what was left at the end of that
+year — so adding leave to it has to put the carry-forward right too.
+
+**Staff cannot do this themselves.** If an employee tries to apply for a date in a closed
+year they are refused and told to hand the form to you:
+
+> *2026 has been closed off. Leave dated in 2026 can no longer be applied for here — that
+> year was finalised when the new year was started. Hand your form to HR and they can
+> record it for you.*
+
+**You can.** HR Console → Leave Application, enter it as normal with the real dates. Before
+anything is written, you are shown exactly what it does:
+
+> **Record leave in 2026?**
+> **Siti** — 5 days dated in **2026**, a year that has already been closed off.
+> 2026 taken goes from **6** to **11** days.
+> **3 forfeited days come back** — those days were being thrown away anyway.
+> Carry Forward drops from **5** to **3** days, so the right amount expires later.
+> Past runs keeps what it recorded in January — this is written as a correction beside it.
+
+Both numbers end up right: the days she should never have lost come back, and her
+Carry Forward figure drops to what it should always have been, so the expiry later writes
+off the right amount.
+
+**Two things it will refuse**, because the sums could not be trusted:
+
+- **Anything older than last year.** Unpicking two years of carry-forward is guesswork.
+  Adjust that person's **Annual Leave Entitled / Yr** in Edit employee instead.
+- **A carry-forward that has already expired.** Days written off cannot be un-written.
+  Same advice.
+
+Nothing overwrites **Past runs** — January's record stays exactly as January wrote it, and
+the correction sits beside it in **Amendment records**.
+
 ### 📋 Past runs
 
 The permanent record — one row per employee per year, kept forever and never overwritten.

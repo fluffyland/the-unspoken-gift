@@ -1189,6 +1189,37 @@ function reasonEn(s) {
     .replace(/^(\d{4}) 年假超出结转上限\(([\d.]+)\)作废 \(excess forfeited\)$/, "$1 annual leave above the carry-over cap ($2) — forfeited");
 }
 
+/* The confirmation HR reads before late leave is recorded. Every figure comes from
+   reconcile_closed_year's PREVIEW — the same function that then performs the write, so the
+   numbers shown and the numbers written cannot disagree. */
+function closedYearLines(pv, name, yr, days) {
+  const p = pv || {}, back = Number(p.returning) || 0;
+  const carriedThen = Number(p.carried_then) || 0, newCarry = Number(p.new_carry) || 0;
+  const out = [`<b>${esc(name)}</b> — ${fmtD(days)} day${days === 1 ? "" : "s"} dated in <b>${yr}</b>, a year that has already been closed off.`];
+  out.push(`${yr} taken goes from <b>${fmtD(Number(p.taken_then) || 0)}</b> to <b>${fmtD((Number(p.taken_now) || 0))}</b> day${(Number(p.taken_now) || 0) === 1 ? "" : "s"}.`);
+  if (back > 0) out.push(`<b style="color:var(--good)">${fmtD(back)} forfeited day${back === 1 ? "" : "s"} come back</b> — ${yr === new Date().getFullYear() - 1 ? "those days were being thrown away anyway" : "they were forfeited in error"}.`);
+  else if (back < 0) out.push(`<b style="color:var(--bad)">${fmtD(-back)} day${back === -1 ? "" : "s"} are taken back</b> — too much was returned earlier.`);
+  else out.push("Nothing was forfeited, so there is nothing to give back.");
+  if (newCarry !== carriedThen)
+    out.push(`Carry Forward drops from <b>${fmtD(carriedThen)}</b> to <b>${fmtD(newCarry)}</b> day${newCarry === 1 ? "" : "s"}, so the right amount expires later.`);
+  else out.push(`Carry Forward stays at <b>${fmtD(newCarry)}</b> day${newCarry === 1 ? "" : "s"}.`);
+  out.push("Past runs keeps what it recorded in January — this is written as a correction beside it.");
+  return out;
+}
+
+/* v26 — the year START A NEW YEAR has already closed off, for one person.
+   run_year_start writes an annual_carry row for every active employee it processes, so a
+   row for THIS year means last year was closed. That is inferred from data already loaded;
+   no extra query, and it degrades to "nothing is closed" on a database without v16. */
+function closedYearFor(empId) {
+  const y = new Date().getFullYear();
+  const has = (db.allCarry || []).some(c => c.emp_id === empId && Number(c.year) === y)
+    || (empId === me.id && db.annualCarry && Number(db.annualCarry.year) === y);
+  return has ? y - 1 : null;
+}
+const inClosedYear = (empId, iso) =>
+  !!iso && closedYearFor(empId) != null && Number(String(iso).slice(0, 4)) <= closedYearFor(empId);
+
 async function submitApp(data, editId) {
   const { data: id, error } = await sb.rpc("submit_application", {
     p_type: data.type, p_start: data.start, p_end: data.end,
@@ -1196,7 +1227,9 @@ async function submitApp(data, editId) {
     p_half_days: data.halfDays || [],
     // Only sent when HR is applying for someone else. The database does the same
     // day-counting, balance check and overlap check either way — one function.
-    p_for_emp: data.forEmp || null
+    p_for_emp: data.forEmp || null,
+    // v26: only ever true when HR has read the recompute and agreed to it.
+    p_closed_ok: !!data.closedOk
   });
   if (error) { rpcErr(error); return null; }
   await loadAll();
@@ -1807,6 +1840,9 @@ function vApply() {
   // One quantity, one implementation; the two screens now render the same statement.
   const curYear = todayStr().slice(0, 4);
   const yearEnd = curYear + "-12-31";
+  // Only for staff applying for themselves; HR on behalf is handled by the confirmation.
+  const yearFloor = (!vp.hrApply && closedYearFor(applySubject().id) != null)
+    ? (closedYearFor(applySubject().id) + 1) + "-01-01" : "";
   const nextYearBlocked = (f.start || "").slice(0, 4) > curYear || (f.end || "").slice(0, 4) > curYear;
   // Warn as soon as the dates are chosen, not on submit — being told at the last
   // step, after filling everything in, is the complaint this fixes.
@@ -1830,8 +1866,11 @@ function vApply() {
           : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(t.code, b)}Entitled this year: ${fmtD(b.yGranted)} · Taken: ${fmtD(b.yUsed)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
-        <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"></div>
-        <div class="field"><label>End date<span class="req">*</span></label><input type="date" data-f="end" value="${f.end}" max="${yearEnd}"></div>
+        ${/* v26: the mirror of `max`. A year that has been closed off is not something an
+              employee can book into -- the carry-forward was settled from it. HR keeps the
+              run of the calendar, because a December form arriving in January is normal. */""}
+        <div class="field"><label>Start date<span class="req">*</span></label><input type="date" data-f="start" value="${f.start}" max="${yearEnd}"${yearFloor ? ` min="${yearFloor}"` : ""}></div>
+        <div class="field"><label>End date<span class="req">*</span></label><input type="date" data-f="end" value="${f.end}" max="${yearEnd}"${yearFloor ? ` min="${yearFloor}"` : ""}></div>
       </div>
       ${wdays.length && allowHalf ? `<div class="field"><label>Half days <span style="font-weight:400;color:var(--muted)">— optional</span></label>
         <div class="hint" style="margin:-2px 0 8px">By default, each selected day is counted as a full day. Change any day to Morning or Afternoon if you're taking only half a day.</div>
@@ -1877,6 +1916,29 @@ async function doSubmit() {
   if (t.mc && f.att && !/\.(jpe?g|png|heic|heif|webp|gif|pdf)$/i.test(f.att)) return toast("Your MC needs to be a photo or a PDF.");
   const clash = selfOverlap(f, vp.editId);
   if (clash) return toast(`These dates overlap your ${ltName(clash.type)}, ${fmtRange(clash.start, clash.end)}.`);
+  // v26 — a year Start a new year has already closed off. The carry-forward was worked out
+  // from what was left at the end of it, so adding leave to it now has to put that right.
+  // Read once: a fresh confirmation is required every time.
+  const closedOk = !!vp.closedOk; delete vp.closedOk;
+  {
+    const subjNow = applySubject(), cy = closedYearFor(subjNow.id);
+    if (inClosedYear(subjNow.id, f.start)) {
+      const yr = Number(String(f.start).slice(0, 4));
+      if (yr < cy) return toast(`${yr} is too far back to record here. Adjust ${subjNow.name}'s Annual Leave Entitled / Yr in Edit employee instead.`);
+      if (!vp.hrApply) return toast(`${yr} has been closed off — leave dated in ${yr} can no longer be applied for here. Hand your form to HR and they can record it for you.`);
+      if (!closedOk) {
+        const { data: pv, error } = await sb.rpc("reconcile_closed_year",
+          { p_emp: subjNow.id, p_year: yr, p_extra: days, p_preview: true });
+        if (error) return rpcErr(error);
+        vp.confirmModal = {
+          title: `Record leave in ${yr}?`,
+          lines: closedYearLines(pv, subjNow.name, yr, days),
+          okLabel: "Record it", cancelLabel: "Cancel", act: "submitclosed"
+        };
+        return rerender();
+      }
+    }
+  }
   if (submitting) return;               // a submit is already in flight — ignore the extra click
   submitting = true;
   const btn = document.querySelector('[data-act="submit"]'), label = btn ? btn.textContent : "";
@@ -1895,7 +1957,7 @@ async function doSubmit() {
     // Declared BEFORE the call that reads it — it was below, which is a crash, not a bug
     // you can argue about.
     const subj = applySubject(), onBehalf = !!vp.hrApply;
-    const res = await submitApp({ type: f.type, start: f.start, end: f.end, halfDays, days, reason: f.reason.trim(), att, backdated: f.start < todayStr(), forEmp: onBehalf ? subj.id : null }, editId);
+    const res = await submitApp({ type: f.type, start: f.start, end: f.end, halfDays, days, reason: f.reason.trim(), att, backdated: f.start < todayStr(), forEmp: onBehalf ? subj.id : null, closedOk }, editId);
     // On failure, delete the just-uploaded file so a rejected submit doesn't orphan storage.
     if (!res) { if (uploadedPath) await sb.storage.from("attachments").remove([uploadedPath]); return; }
     const approverName = subj.approver1 ? (emp(subj.approver1) || {}).name || "your approver" : "";
@@ -3407,6 +3469,8 @@ async function runAction(el) {
       break;
     }
     case "submit": doSubmit(); break;
+    // v26: HR has read the recompute and agreed. One flag, consumed on read.
+    case "submitclosed": { vp.closedOk = true; await doSubmit(); break; }
     // ---- generic confirm / result dialogs ----
     case "confirmno": delete vp.confirmModal; rerender(); break;
     case "confirmyes": {

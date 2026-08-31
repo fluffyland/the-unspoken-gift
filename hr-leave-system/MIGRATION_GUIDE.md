@@ -462,6 +462,9 @@ Don't call it done until **every** line passes.
       `select carry_expiry_for(2027);` returns a date
 - [ ] `migration_app_v25.sql` ran — `select prosecdef from pg_proc where proname =
       'carry_expiry_for';` returns **t**
+- [ ] `migration_app_v26.sql` ran — `select count(*) from pg_proc where proname =
+      'submit_application';` returns **1** (not 2 or 3), and applying for leave dated in a
+      closed year is refused
 - [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
 - [ ] Someone with **no approver** can cancel approved leave and the days come straight back
 - [ ] Resend verified, custom SMTP on, OTP expiry ~10 min
