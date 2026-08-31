@@ -388,89 +388,77 @@ add someone. Pass it to the employee and have them change it on first sign-in.
 > cannot email your staff. Custom SMTP is mandatory, not a nicety.
 > ([docs](https://supabase.com/docs/guides/auth/auth-smtp))
 
-**5a. Resend + custom SMTP**
-1. Sign up at https://resend.com, add your company domain, add the **SPF and DKIM
-   DNS records** they give you, wait for "Verified". *This is the slow part — DNS,
-   not code. Start it early.*
-2. Supabase → **Project Settings → Authentication → SMTP Settings** → enable custom
-   SMTP with the Resend credentials. Sender must be on the verified domain.
-3. **Authentication → Rate Limits** → raise the email limit (the 2/hour cap only
-   applies to the built-in sender).
+### Turning on leave-notification emails, step by step
 
-**5b. Password-reset codes**
-4. **Authentication → Providers → Email** → make sure email OTP is on.
-5. Set the **OTP expiry to ~600 seconds (10 minutes)**. The default is up to an hour,
-   and a 6-digit code is only a million guesses — this is the weakest point in the
-   flow if you leave it long.
-6. **Authentication → Email Templates → Magic Link** — ⚠️ **the one that catches
-   everyone:** the stock template sends `{{ .ConfirmationURL }}`, i.e. a *link*.
-   Edit it to include **`{{ .Token }}`** or your staff receive an email with no code
-   in it. Reword it as a password-reset code message.
+*Written out in full because this is where it has gone wrong before: the last Edge Function
+in this project was never deployed and had to be deleted.*
 
-**Test it before you move on:** sign-in page → *Forgot your password?* → the email
-must arrive with a **6-digit number, not a link**. If it has a link, step 6 wasn't
-done.
+**The one thing to understand first.** Two different addresses matter, and only one of them
+needs any setup:
 
-## Part 5c — Optional: approval notification emails
+| | |
+|---|---|
+| **Who the email goes TO** | Any address, any time. Just the employee's email in LeaveDesk. Nothing to configure. |
+| **Who it comes FROM** | This is what needs proving. Until you verify your domain, Resend will **only deliver to your own signup address** — a hard rule, so unverified accounts cannot be used for spam. |
 
-1. Sign up at https://resend.com (free tier ~100 emails/day), verify your sending
-   domain, copy the API key.
-2. Install the Supabase CLI, then from the `hr-leave-system/` directory:
-   ```bash
-   supabase login
-   supabase link --project-ref <project-ref>
-   supabase secrets set RESEND_API_KEY=re_xxx \
-     MAIL_FROM="LeaveDesk <hr@yourcompany.sg>" \
-     APP_URL=https://<your-github-username>.github.io/<repo-name>/
-   supabase functions deploy send-notification --no-verify-jwt
-   ```
-3. **Database → Webhooks → Create**:
-   - Table: `application_events`, Event: **INSERT**
-   - Type: HTTP Request → the `send-notification` function URL
+**So sign up to Resend with the address you want the test emails to land in.** You can then
+test the whole thing with no DNS at all. The domain step is only needed later, when you want
+*staff* to receive them.
 
----
+**1 — Resend account** (5 minutes)
+1. Go to https://resend.com and sign up **with the address you want test emails to arrive at**.
+2. **API Keys → Create API Key**. Name it `leavedesk`. Copy the key (starts `re_`). You only
+   see it once.
 
-## Part 6 — Final verification
+**2 — Tell Supabase the key** (2 minutes)
+Supabase Dashboard → your project → **Edge Functions → Secrets** (called *Manage secrets*),
+and add three:
 
-Don't call it done until **every** line passes.
+| Name | Value |
+|---|---|
+| `RESEND_API_KEY` | the `re_…` key you just copied |
+| `MAIL_FROM` | `LeaveDesk <onboarding@resend.dev>` — change this only after step 5 |
+| `APP_URL` | `https://fluffyland.github.io/hrleavesystem/` |
 
-### Database
-- [ ] `schema.sql` ran with "Success"
-- [ ] `keepalive_ping_v2.sql` ran, last result showed `ping_count = 2`
-- [ ] Owner account created and password changed
-- [ ] Public sign-up is **off**
-- [ ] `attachments` bucket exists and is **Private**
-- [ ] `create-login` deployed (named exactly `create-login`)
-- [ ] `migration_app_v9.sql` ran — `prorate_cap` column exists
-- [ ] `migration_app_v12.sql` ran — working-day authority, Saturday columns, safer cancellation
-- [ ] `migration_app_v13.sql` ran — `public_holidays.updated_at` exists, manual dates survive a sync
-- [ ] `migration_app_v14.sql` ran — `annual_cap` and `accrual_mode` exist in Company settings → Leave policy
-- [ ] `migration_app_v16.sql` ran — Company settings shows **Start a new year** (not
-      "Credit leave of…"), the Employees tab has a **Carry-forward** column, and
-      `select count(*) from year_start_log;` returns a number rather than an error
-- [ ] `keepalive_ping_v3.sql` ran — the daily ping now also expires carried days
-      (`select keepalive_ping();` twice should return N then N+1)
-- [ ] `migration_app_v18.sql` ran — the HR Console shows **Leave Application** and
-      **Amendment records** tabs (not "Balance adjustments"), Edit employee says
-      **Annual Leave Entitled / Yr**, and `select count(*) from hr_amendments;` returns a
-      number rather than an error
-- [ ] `migration_app_v19.sql` ran — `select bump_annual_all(0);` fails with "Enter a number
-      of days" (it exists), and Leave types → Annual Leave → Edit shows a greyed, empty
-      **Days / year** with **Credit to all employees** under it
-- [ ] `migration_app_v24.sql` ran — Company settings → Leave policy shows **Carry Forward
-      AL expiry date** as a Month + Day pair rather than a months box, and
-      `select carry_expiry_for(2027);` returns a date
-- [ ] `migration_app_v25.sql` ran — `select prosecdef from pg_proc where proname =
-      'carry_expiry_for';` returns **t**
-- [ ] `migration_app_v26.sql` ran — `select count(*) from pg_proc where proname =
-      'submit_application';` returns **1** (not 2 or 3), and applying for leave dated in a
-      closed year is refused
-- [ ] `migration_app_v27.sql` ran — `select count(*) from pg_proc where proname =
-      'freeze_leaver_carry';` returns **1**, and `select count(*) from pg_proc where proname =
-      'submit_application';` still returns **1**
-- [ ] `migration_app_v15.sql` ran — last query shows **0** stuck cancellations
-- [ ] Someone with **no approver** can cancel approved leave and the days come straight back
-- [ ] Resend verified, custom SMTP on, OTP expiry ~10 min
+**3 — Deploy the function** (2 minutes)
+Supabase Dashboard → **Edge Functions → Deploy a new function**, name it exactly
+`send-notification`, and paste in the contents of
+`supabase/functions/send-notification/index.ts` **and** `templates.js` (two files, same
+function). Turn **off** "Verify JWT" — the database calls this, not a signed-in user.
+
+**4 — Tell the database to call it** (2 minutes)
+Dashboard → **Database → Webhooks → Create a new hook**:
+- Table: `application_events`  ·  Events: **Insert** only
+- Type: **HTTP Request** → **POST** → the function URL shown on its page
+- Header: `Authorization: Bearer <your anon key>`
+
+**5 — Test it, before any staff member can receive anything**
+1. In LeaveDesk: **HR Console → Company settings → Email notifications**.
+2. Set **Only send notifications for** to one person, and make sure that person's email in
+   *Employees* is the address you signed up to Resend with.
+3. **Save changes**, then press **Send test email**.
+4. The screen tells you it was sent, or shows the exact error. Check the inbox — first one
+   often lands in spam.
+
+While that dropdown names somebody, **only mail addressed to them is ever sent**. Nobody
+else in the company can receive anything by accident. Set it back to **Everyone** when you
+are happy.
+
+**6 — Only when you want staff to get them: verify the domain**
+Resend → **Domains → Add Domain** → `shanghai-uniforms.com`. Resend shows two records (an
+SPF `TXT` and a DKIM `TXT`) to add wherever your domain's DNS is managed. Once it goes green,
+change `MAIL_FROM` to `LeaveDesk <hr@shanghai-uniforms.com>` and set the dropdown to
+**Everyone**.
+
+Skipping this is not optional if staff are to receive anything: Resend will not deliver to
+them, and mail claiming to be from your company but sent by an unproven server is junked by
+Gmail and Outlook anyway.
+
+> **Nothing here can break LeaveDesk.** Email is never a gate — if the key is missing, the
+> function is not deployed, or Resend is down, leave applications and approvals carry on
+> exactly as they do now. The worst case is silence.
+
+
 - [ ] A reset code actually arrives, and it is a **6-digit number, not a link**
 - [ ] `sync-holidays` returns `{"ok":true}` and `holiday_sync_log` has a row
 - [ ] pg_cron jobs scheduled (`select * from cron.job;` lists three)

@@ -331,6 +331,41 @@ number really lives.
 
 ---
 
+## Email notifications
+
+**HR Console → Company settings → Email notifications**
+
+LeaveDesk emails the people involved as leave moves along:
+
+| When | Who hears about it |
+|---|---|
+| Someone applies | their approver, and the employee ("we have received it") |
+| First of two approves | the second approver, and the employee ("one more to go") |
+| Approved | the employee — **including how many days they have left** |
+| Rejected · Returned | the employee |
+| Withdrawn | the approver — nothing left for them to do |
+| Cancellation asked for | the approver |
+| Cancelled | the employee — days returned |
+| You record leave for someone | that employee |
+
+**Email never holds anything up.** If it is not set up, or the mail service is down, leave
+and approvals carry on exactly as normal. The worst case is silence.
+
+### While you are testing: hold everyone else back
+
+**Only send notifications for** names one person. While it does, **only mail addressed to
+them is sent** — nobody else in the company can receive anything by accident. Set it back to
+**Everyone** when you are happy.
+
+**Send test email** sends one sample to that person and tells you on screen whether it worked
+or exactly what failed. It can only ever go to the person named in the dropdown, never to a
+typed-in address.
+
+Setting it up the first time is in
+[`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md) — *Turning on leave-notification emails*.
+
+---
+
 ## Someone forgot their password
 
 **They can now do it themselves** — sign-in page → *Forgot your password?* → a

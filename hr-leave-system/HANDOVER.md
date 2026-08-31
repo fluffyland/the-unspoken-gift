@@ -162,6 +162,7 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ✅ v24 | the carry-forward expiry becomes a date you pick, not a count of months | **APPLIED — probed 2026-08-31** (`set_carry_expiry` returns `42501`, i.e. exists and correctly revoked) and confirmed on screen: the backfill turned `12 months` into **December / 31**, the same day it always meant. The user first saw the old months box — that was **browser cache**; a hard refresh fixed it. Expect that on every deploy |
 | ✅ v25 | `carry_expiry_for` → `security definer` | user ran it 2026-08-31 |
 | ⏳ v27 | the audit fixes | **written, tested (t27.sql 41 assertions, 5 mutants), NOT yet run** |
+| ⏳ v28 | `org_settings.notify_only_emp` for the email test mode | **written, tested, NOT yet run.** Needs the Edge Function deployed and Resend configured — see MIGRATION_GUIDE |
 | ⏳ v26 | leave dated in a closed year | **written, tested (t25.sql, 44 assertions, 4 of 5 mutants caught + 2 proven equivalent), NOT yet run.** The frontend feature-detects nothing here — without v26 the database simply has no closed-year rule, and the screen falls back to today's behaviour. **Contains a `drop function`: read the overload note in §12 before touching it** |
 
 v9 is **optional** — the frontend feature-detects (`db.orgProrate`) and hides
@@ -213,7 +214,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `supabase/seed.sql` | demo data (early phase; superseded by real usage) |
 | `supabase/functions/create-login/index.ts` | login lifecycle Edge Function (see §5) |
 | `supabase/functions/sync-holidays/index.ts` | ⚰️ dead — the removed holiday sync. Kept for history only; see §12 before touching it |
-| `supabase/functions/send-notification/index.ts` | email notifications via Resend (not configured) |
+| `supabase/functions/send-notification/index.ts` | **leave-notification emails, rewritten in English in v28.** The WORDS live in `templates.js` beside it — a plain ESM module with no Deno or Supabase imports, so `t29.mjs` imports the very same file and checks every sentence without sending anything |
 
 ## 7. Frontend internals (what you need to modify it safely)
 
@@ -296,7 +297,7 @@ all three share one database and must run in that order; `t20`'s last assertion 
 `null value in column "emp_id"` — that is a missing `seed16.sql`, not a broken migration.
 **As of 2026-08-31: 239 SQL assertions**, all green — `t16` 22, `t16b` 15, `t16c` 6,
 `t18` 29, `t18b` 16, `t19` 44, `t20` 22, `t24` 41, `t25` 44, `t27` 41 — **280 total**.
-Browser: **20 suites, 763**.
+Browser: **21 suites, 814**.
 
 **The SQL suites run as `postgres`, a SUPERUSER, which bypasses RLS entirely — so by
 default they cannot catch an RLS bug at all.** `t18b.sql:65` has the pattern that fixes
@@ -568,6 +569,21 @@ happily agree with. Two habits keep it honest:
   before the button was pressed came out of the previous year's carry-forward. Now: one
   application, one year; and a year opens only when `year_start_log` says it has been
   started. A first-year company has no rows and is unaffected.
+- **v28: the email wording lives in `templates.js`, not in the Edge Function.** A plain ESM
+  module with no Deno or Supabase imports, so the test suite imports the *same file* the
+  function sends from. Wording that can only be checked by sending real email never gets
+  checked — and this function had sat in the repo **written entirely in Chinese** since v11
+  translated everything else, precisely because nothing ever ran it.
+- **Test mode filters by RECIPIENT, not by whose application it is.** `notify_only_emp` names
+  one employee and only mail addressed to them goes out. The literal reading of the user's
+  request, and the safe one: no real member of staff can receive anything by accident.
+- **The test send takes no recipient.** It resolves the address from `notify_only_emp`
+  server-side, so holding the public anon key does not let anyone mail an arbitrary address.
+  Asserted in `t29.mjs`: the invoke body carries `test:true` and no `to`.
+- **`sb.functions` is a GETTER — `sb.functions = {...}` silently does nothing.** Cost time
+  again in `t29.mjs`; the stub was never installed and the assertion failed on an empty
+  array. Use `Object.defineProperty(sb, 'functions', { configurable: true, value: … })`.
+  (This is already noted further up. It bit twice.)
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.

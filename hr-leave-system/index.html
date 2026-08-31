@@ -532,7 +532,8 @@ async function loadAll() {
     carryExpiryMonths: (o.carry_expiry_months == null ? null : Number(o.carry_expiry_months)),
     // v24: the expiry is a day + month that repeats every year. Both null = never expires.
     carryExpiryMonth: (o.carry_expiry_month == null ? null : Number(o.carry_expiry_month)),
-    carryExpiryDay:   (o.carry_expiry_day   == null ? null : Number(o.carry_expiry_day)) };
+    carryExpiryDay:   (o.carry_expiry_day   == null ? null : Number(o.carry_expiry_day)),
+    notifyOnlyEmp: o.notify_only_emp || "" };
 
   const [appR, ledR] = await Promise.all([
     sb.from("applications").select("*").order("created_at", { ascending: false }),
@@ -587,6 +588,7 @@ async function loadAll() {
   // v16: per-employee carry cap, configurable expiry, yearly resets, the year-start log.
   db.orgV16     = !!(orgR.data && ("carry_expiry_months" in orgR.data));
   db.orgV24     = !!(orgR.data && ("carry_expiry_day" in orgR.data));
+  db.orgV28     = !!(orgR.data && ("notify_only_emp" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -920,7 +922,7 @@ function baseAboveCap(v) {
   return `Annual Leave Entitled / Yr can't be more than the company maximum of ${fmtD(cap)} days.`;
 }
 
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : k === "carryMon" ? (o.carryExpiryMonth ?? "") : k === "carryDay" ? (o.carryExpiryDay ?? "") : (o.defaultAnnualBase ?? 14); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : k === "carryMon" ? (o.carryExpiryMonth ?? "") : k === "carryDay" ? (o.carryExpiryDay ?? "") : k === "notifyOnly" ? (o.notifyOnlyEmp ?? "") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -939,6 +941,7 @@ function draftSummary() {
     if ("base" in d.org) p.push(`default AL base → ${fmtD(numOr(d.org.base, 14))}`);
     if ("carryCap" in d.org) p.push(`default carry-forward → ${fmtD(numOr(d.org.carryCap, 0))} days`);
     if ("carryMonths" in d.org) p.push(`carry-forward expiry → ${d.org.carryMonths === "" ? "never" : numOr(d.org.carryMonths, 12) + " months"}`);
+    if ("notifyOnly" in d.org) p.push(`email notifications → ${d.org.notifyOnly ? ("only " + ((emp(d.org.notifyOnly) || {}).name || "one person")) : "everyone"}`);
     if ("carryMon" in d.org || "carryDay" in d.org) { const e = expiryPick();
       p.push(`carry-forward expiry → ${e.mon ? e.day + " " + MONFULL[e.mon - 1] : "never"}`); }
     out.push(`Company settings: ${p.join(", ")}`); }
@@ -1042,6 +1045,8 @@ async function saveDraft() {
       const cc = ("carryCap" in d.org) ? d.org.carryCap : db.org.defaultCarryCap;
       patch.default_carry_cap = Math.max(0, numOr(cc, 0));
       // Blank means "never expires" — a real answer, not a missing one.
+      if (db.orgV28 && ("notifyOnly" in d.org))
+        patch.notify_only_emp = d.org.notifyOnly || null;
       if (!db.orgV24) {
         const cm = ("carryMonths" in d.org) ? d.org.carryMonths : db.org.carryExpiryMonths;
         patch.carry_expiry_months = (cm === "" || cm == null) ? null : Math.max(1, Math.round(numOr(cm, 12)));
@@ -2603,6 +2608,38 @@ function carryExpiryField() {
       } How many days each person may carry is set per employee, on the Employees tab.</span></div>`;
 }
 
+/* Email notifications. Everything about sending lives in the Edge Function; the only
+   thing the app decides is WHO may receive anything while you are still testing. */
+function notifyCard() {
+  const only = oPick("notifyOnly");
+  const who = only ? (emp(only) || {}) : null;
+  const r = vp.mailTest;
+  return `<div class="card"><h3>Email notifications</h3>
+    <p class="meta" style="margin:4px 0 12px">LeaveDesk emails the people involved when leave is applied for,
+      approved, rejected, cancelled or withdrawn. Email never holds anything up — if it is not set up yet,
+      or the mail service is down, leave and approvals carry on exactly as normal.</p>
+    <div class="frow">
+      <div class="field" style="max-width:340px"><label>Only send notifications for</label>
+        <select data-f="org.notifyOnly">
+          <option value="">Everyone — normal operation</option>
+          ${activeEmps().map(e => `<option value="${e.id}" ${only === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}
+        </select>
+        <span class="hint">${who
+          ? `<b>Testing.</b> Only mail addressed to <b>${esc(who.name)}</b> is sent — nobody else in the company can receive anything by accident. Set this back to <b>Everyone</b> when you are happy.`
+          : `Everyone involved is notified. Pick one person to hold all other mail back while you test.`}</span></div>
+      <div class="field" style="max-width:300px"><label>Check it works</label>
+        <button class="btn sec" data-act="mailtest" ${who ? "" : "disabled"}>Send test email</button>
+        <span class="hint">${who
+          ? `Sends one sample to <b>${esc(who.email || who.name)}</b>. It can only go to the person named on the left, never to a typed-in address.`
+          : `Pick somebody on the left first — the test email goes to them.`}</span>
+        ${r ? `<div class="callout ${r.ok ? "acc" : "warn"}" style="margin:8px 0 0">${
+          r.busy ? "Sending…" : r.ok ? `Sent to <b>${esc(r.to || "")}</b>. Check that inbox — it may take a minute, and look in spam the first time.`
+                 : `Not sent. <b>${esc(r.error || "Unknown error")}</b>`}</div>` : ""}</div>
+    </div>
+    <p class="hint" style="margin:10px 0 0">The dropdown is part of <b>Save changes</b>. The test button sends straight away.</p>
+  </div>`;
+}
+
 function hrSettings() {
   const o = db.org || {};
   const y = new Date().getFullYear();
@@ -2662,6 +2699,7 @@ function hrSettings() {
     </div>` : `<p class="meta">Run <code>migration_app_v14.sql</code> to enable the annual maximum and monthly accrual.</p>`}
     <p class="hint" style="margin:10px 0 0">Edit any field above, then click <b>Save changes</b> at the top of the page.</p>
   </div>
+  ${db.orgV28 ? notifyCard() : ""}
   <div class="card"><h3 style="display:flex;align-items:center;gap:8px">
       <button class="btn ghost" style="padding:2px 9px" data-act="phyear" data-y="${phPrev}" ${phPrev ? "" : "disabled"} title="${phPrev || "No earlier year"}">◀</button>
       <span>Public holidays — ${phRows.length} date${phRows.length === 1 ? "" : "s"} in ${phY}</span>
@@ -3128,6 +3166,21 @@ async function runAction(el) {
       break;
     }
     case "hrsaveok": { vp.typeOk = true; await runAction({ dataset: { act: "hrsave" } }); break; }
+    case "mailtest": {
+      // Deliberately sends NOTHING from here: the function decides the recipient from the
+      // employee named in the setting, so this cannot be used to mail an arbitrary address.
+      vp.mailTest = { busy: true }; rerender();
+      try {
+        const { data, error } = await sb.functions.invoke("send-notification", { body: { test: true } });
+        vp.mailTest = error
+          ? { ok: false, error: rpcMsg(error) + " — is the send-notification function deployed?" }
+          : (data && data.ok ? { ok: true, to: data.to }
+                             : { ok: false, error: (data && data.error) || "The function ran but sent nothing." });
+      } catch (e) {
+        vp.mailTest = { ok: false, error: (e && e.message) || "Could not reach the function." };
+      }
+      rerender(); break;
+    }
     case "hrdiscard": delete vp.draft; render(); break;
     case "hrkeep": delete vp.leaveTo; rerender(); break;
     case "hrdiscardleave": { const to = vp.leaveTo; delete vp.draft; delete vp.leaveTo; if (to && to.kind === "nav") view = to.v; else if (to) hrTab = to.t; vp = {}; render(); break; }

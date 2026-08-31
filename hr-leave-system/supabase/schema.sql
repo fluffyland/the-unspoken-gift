@@ -2989,3 +2989,11 @@ begin
 end $$;
 revoke execute on function submit_application(text,date,date,text,text,uuid,jsonb,boolean,boolean,uuid,boolean) from anon, public;
 grant  execute on function submit_application(text,date,date,text,text,uuid,jsonb,boolean,boolean,uuid,boolean) to authenticated;
+
+-- =============================================================
+-- v28：邮件通知 —— 测试期间只发给指定的那一个人
+-- =============================================================
+alter table org_settings add column if not exists notify_only_emp uuid references employees (id);
+
+comment on column org_settings.notify_only_emp is
+  'Test mode for notification emails: while this names an employee, only mail addressed to THEM is sent and nobody else in the company receives anything. NULL = notify everyone normally. Also the destination for the Send test email button.';
