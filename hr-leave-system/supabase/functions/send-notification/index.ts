@@ -11,8 +11,10 @@
 //
 // Deploy:  paste DEPLOY-single-file.ts into the dashboard editor (Edge Functions → Deploy a
 //          new function → name it send-notification → replace the sample index.ts contents).
-//          "Verify JWT" can be left at its default: the webhook sends the anon key and the
-//          test button sends the signed-in user's token, so both pass verification.
+//          Leave "Verify JWT with legacy secret" ON. Supabase's own label recommends OFF
+//          *with custom auth logic in your function code* -- this function has none on
+//          purpose, so verification is what protects it. The anon key the webhook sends,
+//          and the session token the test button sends, both satisfy it.
 // Secrets: supabase secrets set RESEND_API_KEY=re_xxx \
 //            MAIL_FROM="LeaveDesk <onboarding@resend.dev>" \
 //            APP_URL=https://fluffyland.github.io/hrleavesystem/

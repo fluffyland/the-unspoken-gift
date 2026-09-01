@@ -433,11 +433,19 @@ paste box.
    **`supabase/functions/send-notification/DEPLOY-single-file.ts`** in its place.
 4. **Deploy.**
 
-> **You do not need to touch "Verify JWT".** Leave it at whatever it defaults to. That
-> setting only matters when a caller sends no authorisation, and both callers here send one:
-> the webhook sends `Authorization: Bearer <anon key>` (step 4 below), and the Send test
-> email button sends the signed-in user's own token. Both pass. An earlier version of this
-> guide said to switch it off; that was unnecessary, and the toggle is not always visible.
+> **Leave "Verify JWT with legacy secret" ON.** You will find it on the function's page
+> after deploying. Supabase labels it *"Recommended: OFF with JWT and custom auth logic in
+> your function code"* — read the condition: that advice is for functions that check the
+> caller themselves. **This one deliberately does not**, so verification is what protects it.
+>
+> Its own help text says *"The anon key satisfies this"* — which is precisely what the
+> webhook sends (step 4 below), and the Send test email button sends the signed-in user's
+> token. Both pass, so ON costs nothing.
+>
+> Switched OFF, anyone who found the function's URL could POST to it. The test send is
+> bounded — it resolves its recipient from Company settings, so it cannot be aimed at an
+> arbitrary address — but a guessed application id could trigger a real notification about
+> real leave. **ON.**
 
 > **Paste `DEPLOY-single-file.ts`, not `index.ts`.** The repo keeps the function split in two
 > (`index.ts` + `templates.js`) so the test suite can import the very file the emails are
