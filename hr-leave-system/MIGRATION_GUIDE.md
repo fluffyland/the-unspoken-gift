@@ -420,11 +420,23 @@ and add three:
 | `MAIL_FROM` | `LeaveDesk <onboarding@resend.dev>` — change this only after step 5 |
 | `APP_URL` | `https://fluffyland.github.io/hrleavesystem/` |
 
-**3 — Deploy the function** (2 minutes)
-Supabase Dashboard → **Edge Functions → Deploy a new function**, name it exactly
-`send-notification`, and paste in the contents of
-`supabase/functions/send-notification/index.ts` **and** `templates.js` (two files, same
-function). Turn **off** "Verify JWT" — the database calls this, not a signed-in user.
+**3 — Deploy the function** (2 minutes) — **use the dashboard, not the CLI**
+
+The CLI means installing Node tooling and Docker, logging in and linking the project; each
+of those can fail for reasons that have nothing to do with your function. The dashboard is a
+paste box.
+
+1. Supabase Dashboard → **Edge Functions → Deploy a new function**.
+2. Name it exactly **`send-notification`** — the app and the webhook both look for that name.
+3. Delete whatever sample code is in the box and paste the whole of
+   **`supabase/functions/send-notification/DEPLOY-single-file.ts`**.
+4. Turn **off "Verify JWT"** — the database calls this, not a signed-in person.
+5. **Deploy**.
+
+> **Paste `DEPLOY-single-file.ts`, not `index.ts`.** The repo keeps the function split in two
+> (`index.ts` + `templates.js`) so the test suite can import the very file the emails are
+> built from. The editor is one box, so the single file is generated from those two —
+> `node build-single.mjs` regenerates it, and the tests assert the two never drift apart.
 
 **4 — Tell the database to call it** (2 minutes)
 Dashboard → **Database → Webhooks → Create a new hook**:
