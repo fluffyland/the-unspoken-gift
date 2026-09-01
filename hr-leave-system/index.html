@@ -3173,7 +3173,12 @@ async function runAction(el) {
       // employee named in the setting, so this cannot be used to mail an arbitrary address.
       vp.mailTest = { busy: true }; rerender();
       try {
-        const { data, error } = await sb.functions.invoke("send-notification", { body: { test: true } });
+        // A function that never answers used to leave this button on "Sending…" for ever,
+        // which tells you less than any error would. Give up after 30s and say so.
+        const ac = new AbortController();
+        const bail = setTimeout(() => ac.abort(), 30000);
+        const { data, error } = await sb.functions.invoke("send-notification",
+          { body: { test: true }, signal: ac.signal }).finally(() => clearTimeout(bail));
         // Say what actually happened. The first version blamed deployment for every
         // failure, so a working-but-rejected function sent the user hunting through the
         // dashboard for a function that was already there. supabase-js gives two very
@@ -3193,7 +3198,11 @@ async function runAction(el) {
             : { ok: false, error: (data && data.error) || "The function ran but sent nothing." };
         }
       } catch (e) {
-        vp.mailTest = { ok: false, error: (e && e.message) || "Could not reach the function." };
+        const aborted = e && (e.name === "AbortError" || /abort/i.test(e.message || ""));
+        vp.mailTest = aborted
+          ? { ok: false, error: "The function did not answer within 30 seconds.",
+              hint: "It is deployed but hanging. Check Edge Functions → Logs for the last run." }
+          : { ok: false, error: (e && e.message) || "Could not reach the function." };
       }
       rerender(); break;
     }

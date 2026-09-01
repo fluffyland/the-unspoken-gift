@@ -14,12 +14,13 @@ const body = tpl
   .replace(/^\/\/[^\n]*\n(?:\/\/[^\n]*\n)*\n/, '')           // drop the module's own header
   .replace(/^export /gm, '');                                 // no exports inside one file
 
-const out = idx
-  .replace('import { buildMails, applyTestMode } from "./templates.js";\n', '')
-  .replace('import { createClient } from "npm:@supabase/supabase-js@2";',
-`import { createClient } from "npm:@supabase/supabase-js@2";
-
-/* ============================================================================
+const IMPORT = 'import { buildMails, applyTestMode } from "./templates.js";';
+if (!idx.includes(IMPORT)) {
+  console.error('index.ts no longer imports templates.js the way this builder expects.');
+  process.exit(1);
+}
+const out = idx.replace(IMPORT,
+`/* ============================================================================
    GENERATED FILE — do not edit here.
    Paste this whole thing into the Supabase dashboard: Edge Functions →
    Deploy a new function → name it exactly  send-notification  → then replace the
@@ -33,7 +34,15 @@ const out = idx
 
 // ---- the words, from templates.js -------------------------------------------
 ${body.trim()}
-// ---- end of templates.js ----------------------------------------------------
-`);
+// ---- end of templates.js ----------------------------------------------------`);
+
+// The whole point of this file is that it still contains the templates. An anchor that
+// silently stops matching produces a file that looks fine and is missing half of itself --
+// which is exactly what happened when the import line above was edited.
+for (const needed of ['function buildMails', 'function applyTestMode', 'Deno.serve']) {
+  if (!out.includes(needed)) { console.error('BUILD FAILED — generated file is missing:', needed); process.exit(1); }
+}
+if (out.includes('from "./templates.js"')) { console.error('BUILD FAILED — the import is still there'); process.exit(1); }
+
 fs.writeFileSync(dir + 'DEPLOY-single-file.ts', out);
 console.log('wrote DEPLOY-single-file.ts —', out.split('\n').length, 'lines');
