@@ -428,10 +428,16 @@ paste box.
 
 1. Supabase Dashboard → **Edge Functions → Deploy a new function**.
 2. Name it exactly **`send-notification`** — the app and the webhook both look for that name.
-3. Delete whatever sample code is in the box and paste the whole of
-   **`supabase/functions/send-notification/DEPLOY-single-file.ts`**.
-4. Turn **off "Verify JWT"** — the database calls this, not a signed-in person.
-5. **Deploy**.
+3. It opens with a file called **`index.ts`** holding sample code. **Keep the file** — it is
+   the entry point. Select everything inside it, delete it, and paste the whole of
+   **`supabase/functions/send-notification/DEPLOY-single-file.ts`** in its place.
+4. **Deploy.**
+
+> **You do not need to touch "Verify JWT".** Leave it at whatever it defaults to. That
+> setting only matters when a caller sends no authorisation, and both callers here send one:
+> the webhook sends `Authorization: Bearer <anon key>` (step 4 below), and the Send test
+> email button sends the signed-in user's own token. Both pass. An earlier version of this
+> guide said to switch it off; that was unnecessary, and the toggle is not always visible.
 
 > **Paste `DEPLOY-single-file.ts`, not `index.ts`.** The repo keeps the function split in two
 > (`index.ts` + `templates.js`) so the test suite can import the very file the emails are

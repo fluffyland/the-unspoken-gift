@@ -9,7 +9,10 @@
 // sending anything. Wording that can only be checked by sending real email never gets
 // checked.
 //
-// Deploy:  supabase functions deploy send-notification --no-verify-jwt
+// Deploy:  paste DEPLOY-single-file.ts into the dashboard editor (Edge Functions → Deploy a
+//          new function → name it send-notification → replace the sample index.ts contents).
+//          "Verify JWT" can be left at its default: the webhook sends the anon key and the
+//          test button sends the signed-in user's token, so both pass verification.
 // Secrets: supabase secrets set RESEND_API_KEY=re_xxx \
 //            MAIL_FROM="LeaveDesk <onboarding@resend.dev>" \
 //            APP_URL=https://fluffyland.github.io/hrleavesystem/
@@ -24,7 +27,10 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 /* ============================================================================
    GENERATED FILE — do not edit here.
    Paste this whole thing into the Supabase dashboard: Edge Functions →
-   Deploy a new function → name it exactly  send-notification  → Verify JWT OFF.
+   Deploy a new function → name it exactly  send-notification  → then replace the
+   WHOLE CONTENTS of the sample index.ts with this. Keep the file, replace what is
+   inside it. "Verify JWT" can be left at its default: the webhook sends the anon
+   key and the test button sends the signed-in user's token, so both pass.
    The editable source is index.ts + templates.js in the repo; regenerate with
    `node build-single.mjs`.
    ============================================================================ */

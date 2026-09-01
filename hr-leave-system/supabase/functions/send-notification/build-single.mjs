@@ -22,7 +22,10 @@ const out = idx
 /* ============================================================================
    GENERATED FILE — do not edit here.
    Paste this whole thing into the Supabase dashboard: Edge Functions →
-   Deploy a new function → name it exactly  send-notification  → Verify JWT OFF.
+   Deploy a new function → name it exactly  send-notification  → then replace the
+   WHOLE CONTENTS of the sample index.ts with this. Keep the file, replace what is
+   inside it. "Verify JWT" can be left at its default: the webhook sends the anon
+   key and the test button sends the signed-in user's token, so both pass.
    The editable source is index.ts + templates.js in the repo; regenerate with
    \`node build-single.mjs\`.
    ============================================================================ */
