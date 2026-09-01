@@ -432,6 +432,11 @@ Dashboard → **Database → Webhooks → Create a new hook**:
 - Type: **HTTP Request** → **POST** → the function URL shown on its page
 - Header: `Authorization: Bearer <your anon key>`
 
+> **If the test says "Failed to send a request to the Edge Function"** it means the browser
+> could not reach it at all. Two causes produce that identical wording: the function is not
+> deployed (check it appears in the Edge Functions list), or it was deployed without the CORS
+> headers (make sure you pasted the current `index.ts`, which handles `OPTIONS`).
+
 **5 — Test it, before any staff member can receive anything**
 1. In LeaveDesk: **HR Console → Company settings → Email notifications**.
 2. Set **Only send notifications for** to one person, and make sure that person's email in

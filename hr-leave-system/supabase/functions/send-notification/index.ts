@@ -30,6 +30,18 @@ const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = Deno.env.get("MAIL_FROM") ?? "LeaveDesk <onboarding@resend.dev>";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
 
+// The Send test email button calls this from the browser, which means a CORS preflight.
+// Without these the browser blocks the response and supabase-js reports the unhelpful
+// "Failed to send a request to the Edge Function" -- indistinguishable from not deployed.
+// Copied from create-login, the function in this project that is already proven in a browser.
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+
 async function sendMail(to: string, subject: string, text: string) {
   if (!RESEND_KEY) { console.error("RESEND_API_KEY is not set — nothing sent"); return false; }
   const res = await fetch("https://api.resend.com/emails", {
@@ -55,6 +67,7 @@ async function settings() {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   let payload: any = {};
   try { payload = await req.json(); } catch { /* empty body = test ping */ }
   const cfg = await settings();
@@ -63,9 +76,8 @@ Deno.serve(async (req) => {
   // ---- "Only send notifications for", and nowhere else. So this cannot be used to mail
   // ---- an arbitrary address even by someone holding the public key.
   if (payload?.test) {
-    if (!cfg.only) return Response.json(
-      { ok: false, error: "Set 'Only send notifications for' to an employee first — the test email goes to them." },
-      { status: 200 });
+    if (!cfg.only) return json(
+      { ok: false, error: "Set 'Only send notifications for' to an employee first — the test email goes to them." });
     const [mail] = buildMails({
       event: "submitted", app: { start_date: "2026-12-15", end_date: "2026-12-17", days: 3,
         reason: "This is a test — no real leave has been applied for" },
@@ -75,17 +87,17 @@ Deno.serve(async (req) => {
       appUrl: APP_URL, company: cfg.company,
     });
     const ok = await sendMail(cfg.only, "LeaveDesk test — " + mail.subject, mail.text);
-    return Response.json({ ok, sent: ok ? 1 : 0, to: cfg.only,
-      error: ok ? null : "Resend refused it. Check RESEND_API_KEY and MAIL_FROM." }, { status: 200 });
+    return json({ ok, sent: ok ? 1 : 0, to: cfg.only,
+      error: ok ? null : "Resend refused it. Check RESEND_API_KEY and MAIL_FROM." });
   }
 
   const ev = payload?.record;
-  if (!ev?.application_id) return new Response("ignored", { status: 200 });
+  if (!ev?.application_id) return json({ ignored: true });
 
   const { data: app } = await supabase.from("applications")
     .select("*, employee:employees!applications_emp_id_fkey(id,name,email), type:leave_types!applications_leave_type_fkey(name_en)")
     .eq("id", ev.application_id).maybeSingle();
-  if (!app?.employee) return new Response("no application", { status: 200 });
+  if (!app?.employee) return json({ ignored: "no application" });
 
   const { data: steps } = await supabase.from("approval_steps")
     .select("step_order,status,approver:employees!approval_steps_approver_id_fkey(name,email)")
@@ -114,6 +126,5 @@ Deno.serve(async (req) => {
   const toSend = applyTestMode(mails, cfg.only);
   let sent = 0;
   for (const m of toSend) if (await sendMail(m.to, m.subject, m.text)) sent++;
-  return Response.json({ built: mails.length, sent, held_back: mails.length - toSend.length },
-    { status: 200 });
+  return json({ built: mails.length, sent, held_back: mails.length - toSend.length });
 });

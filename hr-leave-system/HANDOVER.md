@@ -584,6 +584,14 @@ happily agree with. Two habits keep it honest:
   again in `t29.mjs`; the stub was never installed and the assertion failed on an empty
   array. Use `Object.defineProperty(sb, 'functions', { configurable: true, value: … })`.
   (This is already noted further up. It bit twice.)
+- **AN EDGE FUNCTION CALLED FROM THE BROWSER NEEDS CORS, AND ITS ABSENCE IS INVISIBLE.**
+  Shipped `send-notification` with none. supabase-js reports a blocked preflight as
+  *"Failed to send a request to the Edge Function"* — the **same words** you get when the
+  function is not deployed at all, so the user chases deployment while the real fault is
+  four missing headers. `create-login` had the right pattern all along (a `cors` object, an
+  `OPTIONS` branch, and every reply through one `json()` helper); copy it. `t29.mjs` §5b now
+  reads the source and asserts all of it, including that **no reply bypasses the helper**.
+  *When two very different failures produce identical text, test for the one you cannot see.*
 - **The user is the integration test.** Say so plainly when handing work over, and name
   the two or three things only they can click. Do not describe seeded assertions in a way
   that sounds like the live system was checked.
