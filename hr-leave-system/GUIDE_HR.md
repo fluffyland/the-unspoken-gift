@@ -361,6 +361,12 @@ them is sent** — nobody else in the company can receive anything by accident. 
 or exactly what failed. It can only ever go to the person named in the dropdown, never to a
 typed-in address.
 
+If it says **"it did not start"**, the emailing function was uploaded but never ran — there is
+almost certainly a second file left in Supabase's editor, and only `index.ts` is deployed.
+Whoever set it up will know what that means; it is written out in the migration guide. Nothing
+about leave is affected: **email never blocks anything**, so applications and approvals carry
+on exactly as normal while it is being sorted out.
+
 Setting it up the first time is in
 [`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md) — *Turning on leave-notification emails*.
 

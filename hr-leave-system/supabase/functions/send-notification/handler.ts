@@ -9,8 +9,19 @@
 // sending anything. Wording that can only be checked by sending real email never gets
 // checked.
 //
-// Deploy:  paste DEPLOY-single-file.ts into the dashboard editor (Edge Functions → Deploy a
-//          new function → name it send-notification → replace the sample index.ts contents).
+// THIS FILE IS THE EDITABLE SOURCE. It is not what gets deployed. `node build-single.mjs`
+// inlines templates.js into it and writes ./index.ts, and index.ts is what you paste.
+//
+// Why: the Supabase dashboard deploys ONE entry-point file, index.ts. A second file added
+// in the editor is not part of the bundle -- so an entry point that imports "./templates.js"
+// cannot resolve it, the module never starts, and every request hangs with no error at all
+// while the dashboard still reports "successfully deployed". That happened three times on
+// this project. Hence: one deployable file, named exactly what the editor already calls it,
+// so there is no second name to reach for.
+//
+// Deploy:  Edge Functions → send-notification → delete any file that is not index.ts →
+//          open index.ts, select all, replace with the repo's generated index.ts → Deploy.
+//          Then prove it started: ./check-deploy.sh (OPTIONS only, sends nothing).
 //          Leave "Verify JWT with legacy secret" ON. Supabase's own label recommends OFF
 //          *with custom auth logic in your function code* -- this function has none on
 //          purpose, so verification is what protects it. The anon key the webhook sends,
@@ -24,196 +35,7 @@
 // Email never gates anything. If this function is not deployed, or Resend is down, leave
 // applications and approvals carry on exactly as before -- nobody is blocked by a mail server.
 
-/* ============================================================================
-   GENERATED FILE — do not edit here.
-   Paste this whole thing into the Supabase dashboard: Edge Functions →
-   Deploy a new function → name it exactly  send-notification  → then replace the
-   WHOLE CONTENTS of the sample index.ts with this. Keep the file, replace what is
-   inside it. Leave "Verify JWT with legacy secret" ON -- this function has no auth
-   logic of its own by design, so that setting is what protects it, and the anon key
-   the webhook sends already satisfies it.
-   The editable source is index.ts + templates.js in the repo; regenerate with
-   `node build-single.mjs`.
-   ============================================================================ */
-
-// ---- the words, from templates.js -------------------------------------------
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function fmtDay(iso) {
-  const [y, m, d] = String(iso).split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return `${DOW[dt.getUTCDay()]} ${d} ${MON[m - 1]} ${y}`;
-}
-// One day reads as one day. "Mon 15 Dec 2026 to Mon 15 Dec 2026" is how software talks.
-function fmtRange(start, end) {
-  return start === end ? fmtDay(start) : `${fmtDay(start)} to ${fmtDay(end)}`;
-}
-function fmtDays(n) {
-  const v = Number(n) || 0;
-  return Number.isInteger(v) ? String(v) : String(v);          // 0.5 stays 0.5
-}
-const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "there";
-
-// The details block every email shares. Aligned so it reads on a phone.
-function block(rows) {
-  const w = Math.max(...rows.map(([k]) => k.length));
-  // A spacer row is a blank line, not a line of padding -- trailing spaces render as
-  // stray whitespace in some mail clients and look like a bug.
-  return rows.map(([k, v]) => (k === "" && v === "") ? "" : `  ${k.padEnd(w + 4)}${v}`).join("\n");
-}
-
-function body(greetName, lead, rows, tail, ctx) {
-  return `Hi ${firstName(greetName)},\n\n${lead}\n\n${block(rows)}\n\n${tail}\n\n— LeaveDesk, ${ctx.company}`;
-}
-
-/* Every email this system can send, built from one application record.
-   Returns [{ to, subject, text }]. An event nobody needs to hear about returns []. */
-function buildMails(ctx) {
-  const { event, app, employee, actor, leaveType, nextApprover, firstApprover,
-          balanceAfter, appUrl, company } = ctx;
-  const c = { company: company || "LeaveDesk" };
-  const range = fmtRange(app.start_date, app.end_date);
-  const days = fmtDays(app.days);
-  const dayWord = Number(app.days) === 1 ? "day" : "days";
-  const link = appUrl ? `\n${appUrl}` : "";
-  const base = [["Leave type", leaveType], ["Dates", range], ["Working days", days]];
-  const withReason = app.reason ? base.concat([["Reason", app.reason]]) : base;
-  const out = [];
-  const bal = () => balanceAfter == null ? [] : [["", ""], [`${leaveType} left`, `${fmtDays(balanceAfter)} days`]];
-
-  switch (event) {
-    case "submitted":
-    case "resubmitted":
-      if (nextApprover) out.push({
-        to: nextApprover.email,
-        subject: `${employee.name} has applied for leave — your approval is needed`,
-        text: body(nextApprover.name,
-          `${employee.name} has applied for leave and it is waiting for you.`,
-          withReason, `Approve or reject it here:${link}`, c) });
-      out.push({
-        to: employee.email,
-        subject: `We have received your leave request`,
-        text: body(employee.name,
-          nextApprover ? `We have received your leave request. It is now with ${nextApprover.name} for approval.`
-                       : `We have received your leave request.`,
-          withReason,
-          `We will email you as soon as there is a decision.${link}`, c) });
-      break;
-
-    case "step_approved":
-      if (nextApprover) out.push({
-        to: nextApprover.email,
-        subject: `${employee.name} has applied for leave — your final approval is needed`,
-        text: body(nextApprover.name,
-          `${actor.name} has already approved this. It needs your final approval.`,
-          withReason, `Approve or reject it here:${link}`, c) });
-      out.push({
-        to: employee.email,
-        subject: `${actor.name} has approved your leave — one more to go`,
-        text: body(employee.name,
-          `${actor.name} has approved your leave. It now needs${nextApprover ? ` ${nextApprover.name}'s` : " one more"} final approval.`,
-          base, `We will email you when it is decided.${link}`, c) });
-      break;
-
-    case "approved":
-      out.push({
-        to: employee.email,
-        subject: `Your leave has been approved`,
-        text: body(employee.name,
-          `Good news — ${actor.name} has approved your leave.`,
-          base.concat(bal()), `Enjoy your time off.`, c) });
-      break;
-
-    case "auto_approved":
-      out.push({
-        to: employee.email,
-        subject: `Your leave has been recorded and approved`,
-        text: body(employee.name,
-          `Your leave has been recorded and approved. Nobody else needed to approve it.`,
-          base.concat(bal()), `Enjoy your time off.`, c) });
-      break;
-
-    case "rejected":
-      out.push({
-        to: employee.email,
-        subject: `Your leave request was not approved`,
-        text: body(employee.name,
-          `${actor.name} has not approved your leave request.`,
-          withReason.concat(app.comment ? [["", ""], ["They said", app.comment]] : []),
-          `Your days have not been deducted. Speak to ${actor.name} if you would like to discuss it.${link}`, c) });
-      break;
-
-    case "returned":
-      out.push({
-        to: employee.email,
-        subject: `Your leave request needs a bit more information`,
-        text: body(employee.name,
-          `${actor.name} has sent your leave request back to you.`,
-          base.concat(app.comment ? [["", ""], ["They asked for", app.comment]] : []),
-          `Open LeaveDesk, make the change and send it again.${link}`, c) });
-      break;
-
-    case "withdrawn":
-      if (nextApprover) out.push({
-        to: nextApprover.email,
-        subject: `${employee.name} has withdrawn their leave request`,
-        text: body(nextApprover.name,
-          `${employee.name} has withdrawn the leave request that was waiting for you. There is nothing for you to do.`,
-          base, `No days have been deducted.`, c) });
-      break;
-
-    case "cancel_requested":
-      if (firstApprover) out.push({
-        to: firstApprover.email,
-        subject: `${employee.name} wants to cancel approved leave`,
-        text: body(firstApprover.name,
-          `${employee.name} is asking to cancel leave that was already approved.`,
-          base, `Confirm it in LeaveDesk and the days go back to them.${link}`, c) });
-      break;
-
-    case "cancelled":
-      out.push({
-        to: employee.email,
-        subject: `Your leave has been cancelled and the days returned`,
-        text: body(employee.name,
-          `Your leave has been cancelled, and the days are back in your balance.`,
-          [["Leave type", leaveType], ["Dates", range], ["Days returned", days]].concat(bal()),
-          `Nothing else to do.`, c) });
-      break;
-
-    case "cancel_denied":
-      out.push({
-        to: employee.email,
-        subject: `Your leave has not been cancelled`,
-        text: body(employee.name,
-          `${actor.name} has not agreed to cancel this leave, so it still stands.`,
-          base.concat(app.comment ? [["", ""], ["They said", app.comment]] : []),
-          `The ${days} ${dayWord} remain deducted.${link}`, c) });
-      break;
-
-    case "hr_on_behalf":
-      out.push({
-        to: employee.email,
-        subject: `HR has recorded leave for you`,
-        text: body(employee.name,
-          `${actor.name} has recorded this leave for you and approved it.`,
-          base.concat(bal()),
-          `If anything looks wrong, tell HR.${link}`, c) });
-      break;
-  }
-  return out;
-}
-
-/* Test mode. While an employee is named, only mail addressed to THEM goes out — nobody
-   else in the company can receive anything by accident. Blank = everyone, which is how it
-   is left once you are happy. */
-function applyTestMode(mails, onlyEmail) {
-  if (!onlyEmail) return mails;
-  const t = String(onlyEmail).trim().toLowerCase();
-  return mails.filter(m => String(m.to || "").trim().toLowerCase() === t);
-}
-// ---- end of templates.js ----------------------------------------------------
+import { buildMails, applyTestMode } from "./templates.js";
 
 /* No npm import, and every outbound call is timeboxed.
    The first version used npm:@supabase/supabase-js and SUPABASE_SERVICE_ROLE_KEY. On this

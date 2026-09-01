@@ -27,7 +27,9 @@
 | `app.html` | **生产版应用**（部署在 https://fluffyland.github.io/hrleavesystem/ ）。真实登录 + Supabase 数据库,持续维护更新。 |
 | `index.html` | 演示版（单文件、免安装,数据存浏览器）。**已冻结**,新功能只进 app.html。 |
 | `supabase/schema.sql` | 正式版数据库底座：7 张表、余额视图、状态机存储过程、RLS 权限、年度入账函数。在 Supabase SQL Editor 执行一次即可。 |
-| `supabase/functions/send-notification/index.ts` | 邮件 Edge Function：监听状态转移事件，用 Resend 发真实邮件。 |
+| `supabase/functions/send-notification/index.ts` | 邮件 Edge Function（**自动生成，勿手改**）：监听状态转移事件，用 Resend 发真实邮件。Supabase 只部署 `index.ts` 这一个入口文件，所以它必须自成一体、不 import 任何同级文件。 |
+| `supabase/functions/send-notification/handler.ts` + `templates.js` | 上面那个文件的源码：逻辑与文案分开，`node build-single.mjs` 合成 `index.ts`，`--check` 验证没走样。 |
+| `supabase/functions/send-notification/check-deploy.sh` | 部署后确认「它真的启动了」——只发 OPTIONS，不会发出任何邮件。 |
 | `SETUP.md` | 正式版部署指南（一步步照做）。 |
 | `DESIGN.md` | 第一性原则设计文档（账本 / 状态机 / 通知 / 权限四大支柱）。 |
 

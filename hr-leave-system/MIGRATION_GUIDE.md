@@ -137,7 +137,8 @@ themselves an account. HR creates all logins from inside the app instead.
 
 **Edge Functions → Create a new function** in the dashboard. For each one:
 create it with the exact name below, paste the whole contents of the matching
-`index.ts`, and click **Deploy**.
+`index.ts`, and click **Deploy**. One file per function — the dashboard deploys `index.ts`
+and nothing else.
 
 | Function | Name it exactly | Needed for | Skip it? |
 |---|---|---|---|
@@ -426,12 +427,45 @@ The CLI means installing Node tooling and Docker, logging in and linking the pro
 of those can fail for reasons that have nothing to do with your function. The dashboard is a
 paste box.
 
+> ### 🚩 The one rule: there must be exactly ONE file, and it is `index.ts`
+>
+> The dashboard deploys the entry point, `index.ts`, and nothing else. **Any other file you
+> add there is not part of what gets deployed** — it simply is not there when the function
+> runs, and it disappears from the editor next time you open it.
+>
+> That is why an earlier version of this guide cost three failed deploys. It said "paste
+> `DEPLOY-single-file.ts`", which reads like *make a file called that* — so the code went
+> into a file the deploy ignored, `index.ts` kept an import of a file that was not there, and
+> the function **never started**. It could not answer anything, so the button sat on
+> "Sending…" for ever, and the dashboard still said *successfully deployed* every time.
+>
+> **Deploying uploads the file. It does not run it.** "Successfully deployed" is not proof
+> that anything works. Step 3.5 below is the proof.
+
 1. Supabase Dashboard → **Edge Functions → Deploy a new function**.
 2. Name it exactly **`send-notification`** — the app and the webhook both look for that name.
-3. It opens with a file called **`index.ts`** holding sample code. **Keep the file** — it is
-   the entry point. Select everything inside it, delete it, and paste the whole of
-   **`supabase/functions/send-notification/DEPLOY-single-file.ts`** in its place.
+3. It opens with a file called **`index.ts`** holding sample code.
+   - **If you see any file other than `index.ts`, delete it.**
+   - Click into `index.ts`, select everything, delete it, and paste the whole of
+     **`supabase/functions/send-notification/index.ts`** from the repo in its place.
+     Same name in both places, on purpose — there is nothing else to reach for.
 4. **Deploy.**
+
+**3.5 — Prove it actually started** (10 seconds)
+
+```
+cd supabase/functions/send-notification && ./check-deploy.sh
+```
+
+It sends only a preflight, so it cannot email anybody. You want:
+
+```
+send-notification        HTTP 200 in 0.7s
+==> send-notification is UP. It booted and is answering.
+```
+
+`HTTP 000` means it is deployed but **did not start** — go back to the rule above and make
+sure `index.ts` is the only file. The function's **Logs** tab then shows the error verbatim.
 
 > **Leave "Verify JWT with legacy secret" ON.** You will find it on the function's page
 > after deploying. Supabase labels it *"Recommended: OFF with JWT and custom auth logic in
@@ -447,10 +481,12 @@ paste box.
 > arbitrary address — but a guessed application id could trigger a real notification about
 > real leave. **ON.**
 
-> **Paste `DEPLOY-single-file.ts`, not `index.ts`.** The repo keeps the function split in two
-> (`index.ts` + `templates.js`) so the test suite can import the very file the emails are
-> built from. The editor is one box, so the single file is generated from those two —
-> `node build-single.mjs` regenerates it, and the tests assert the two never drift apart.
+> **Why the repo has three files but you paste one.** `handler.ts` is the logic and
+> `templates.js` is the wording; keeping the words in a file with no Deno imports is what lets
+> the test suite check every sentence without sending an email. `node build-single.mjs`
+> combines them into the self-contained **`index.ts`** you paste, refuses to write a file that
+> still imports a sibling, and `node build-single.mjs --check` proves the three have not
+> drifted apart. **Never edit `index.ts` by hand** — it is generated.
 
 **4 — Tell the database to call it** (2 minutes)
 Dashboard → **Database → Webhooks → Create a new hook**:
@@ -458,10 +494,20 @@ Dashboard → **Database → Webhooks → Create a new hook**:
 - Type: **HTTP Request** → **POST** → the function URL shown on its page
 - Header: `Authorization: Bearer <your anon key>`
 
-> **If the test says "Failed to send a request to the Edge Function"** it means the browser
-> could not reach it at all. Two causes produce that identical wording: the function is not
-> deployed (check it appears in the Edge Functions list), or it was deployed without the CORS
-> headers (make sure you pasted the current `index.ts`, which handles `OPTIONS`).
+**When the test email does not work**
+
+| What you see | What it means | What to do |
+|---|---|---|
+| Spins on "Sending…", then **"it did not start"** | Deployed, but the code never ran. Almost always a second file left in the editor. | `index.ts` must be the only file. Re-paste, Deploy, then `./check-deploy.sh`. The **Logs** tab shows the module error. |
+| **"Failed to send a request to the Edge Function"** | The browser could not reach it at all: not deployed, or deployed without the CORS headers. | Check the name appears in the Edge Functions list, and that you pasted the current generated `index.ts`, which answers `OPTIONS`. |
+| **"Edge Function returned a non-2xx status code"** | It is deployed *and running* — it ran and refused. | The exact reason is printed underneath. Usually a missing secret. |
+| **"RESEND_API_KEY is not set"** | The function is fine; the secret is missing. | Edge Functions → Secrets. |
+| Says **sent**, nothing arrives | Resend accepted it. | Check spam. Before the domain is verified, Resend only delivers to your own signup address. |
+
+> Your project's anon key (the long `eyJhbG…` one) **is accepted** by the Edge Functions
+> gateway — verified by probe, alongside the newer `sb_publishable_…` key, which behaves
+> identically. If a failure is ever really about the key, the response body says
+> `INVALID_API_KEY` in as many words. Do not go changing keys on a guess.
 
 **5 — Test it, before any staff member can receive anything**
 1. In LeaveDesk: **HR Console → Company settings → Email notifications**.
