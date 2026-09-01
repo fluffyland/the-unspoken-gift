@@ -2634,7 +2634,9 @@ function notifyCard() {
           : `Pick somebody on the left first — the test email goes to them.`}</span>
         ${r ? `<div class="callout ${r.ok ? "acc" : "warn"}" style="margin:8px 0 0">${
           r.busy ? "Sending…" : r.ok ? `Sent to <b>${esc(r.to || "")}</b>. Check that inbox — it may take a minute, and look in spam the first time.`
-                 : `Not sent. <b>${esc(r.error || "Unknown error")}</b>`}</div>` : ""}</div>
+                 : `Not sent. <b>${esc(r.error || "Unknown error")}</b>${
+                     r.hint ? `<div style="margin-top:6px">${esc(r.hint)}</div>` : ""}${
+                     r.detail ? `<div class="meta" style="margin-top:6px;word-break:break-word">${esc(r.detail)}</div>` : ""}`}</div>` : ""}</div>
     </div>
     <p class="hint" style="margin:10px 0 0">The dropdown is part of <b>Save changes</b>. The test button sends straight away.</p>
   </div>`;
@@ -3172,10 +3174,24 @@ async function runAction(el) {
       vp.mailTest = { busy: true }; rerender();
       try {
         const { data, error } = await sb.functions.invoke("send-notification", { body: { test: true } });
-        vp.mailTest = error
-          ? { ok: false, error: rpcMsg(error) + " — is the send-notification function deployed?" }
-          : (data && data.ok ? { ok: true, to: data.to }
-                             : { ok: false, error: (data && data.error) || "The function ran but sent nothing." });
+        // Say what actually happened. The first version blamed deployment for every
+        // failure, so a working-but-rejected function sent the user hunting through the
+        // dashboard for a function that was already there. supabase-js gives two very
+        // different errors the same shape, and the body carries the real reason.
+        if (error) {
+          const m = rpcMsg(error) || "";
+          let detail = "";
+          try { if (error.context && typeof error.context.text === "function") detail = await error.context.text(); } catch (e) {}
+          const api = /INVALID_API_KEY|publishable|sb_publishable/i.test(detail);
+          vp.mailTest = { ok: false, error: m, detail: detail.slice(0, 400),
+            hint: api ? "The project now wants the newer sb_publishable_… key for Edge Functions. Project Settings → API Keys."
+                : /Failed to send a request/i.test(m) ? "The browser could not reach it: either it is not deployed, or it was deployed without the CORS headers."
+                : /non-2xx/i.test(m) ? "It is deployed and it ran — the reason it refused is below."
+                : "" };
+        } else {
+          vp.mailTest = (data && data.ok) ? { ok: true, to: data.to }
+            : { ok: false, error: (data && data.error) || "The function ran but sent nothing." };
+        }
       } catch (e) {
         vp.mailTest = { ok: false, error: (e && e.message) || "Could not reach the function." };
       }
