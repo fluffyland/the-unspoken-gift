@@ -1462,48 +1462,16 @@ function loginPage() {
       If you've just joined, ask HR to add you using this email, then sign in again.
       If you've left the company, your access has ended.
       <div class="actions" style="justify-content:center"><button class="btn sec" data-act="logout">Sign out</button></div></div>` : `
-    ${vp.reset ? resetPane() : `
     <form id="loginform" autocomplete="on">
       <div class="field"><label>Work email<span class="req">*</span></label><input type="email" id="li-email" placeholder="you@company.com" autocomplete="username" required></div>
       <div class="field"><label>Password<span class="req">*</span></label><input type="password" id="li-pass" autocomplete="current-password" required></div>
       <button class="btn" type="submit" data-act="dologin" style="width:100%;margin-top:6px">Sign in</button>
-      <p style="text-align:center;margin:10px 0 0"><button type="button" class="btn ghost" data-act="resetopen">Forgot your password?</button></p>
-    </form>`}`}
-    ${vp.reset ? "" : `<p class="footnote" style="text-align:center">Each person signs in with their own work email. Still stuck? Ask HR.</p>`}
+      <p class="footnote" style="text-align:center;margin:12px 0 0">Forgotten your password? <b>Ask HR to reset it</b> — they can set it back to the default in one click.</p>
+    </form>`}
+    <p class="footnote" style="text-align:center">Each person signs in with their own work email.</p>
   </div></div>`;
 }
 
-/* Self-service password reset, all on the sign-in page — no links, no redirects.
-   Deliberately three steps in one place: a reset LINK can be consumed by corporate
-   mail scanners before the employee clicks it, and this app has no URL routing. */
-function resetPane() {
-  const r = vp.reset || {};
-  const back = `<p style="text-align:center;margin:12px 0 0"><button type="button" class="btn ghost" data-act="resetback">← Back to sign in</button></p>`;
-
-  if (r.step === "code") {
-    return `<div class="callout acc" style="margin-bottom:14px">If <b>${esc(r.email)}</b> is registered, a 6-digit code is on its way. It expires shortly, so use it soon.</div>
-      <div class="field"><label>6-digit code<span class="req">*</span></label>
-        <input type="text" id="rs-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="letter-spacing:4px;font-size:18px"></div>
-      <button class="btn" data-act="resetverify" style="width:100%">Verify</button>
-      <p class="footnote" style="text-align:center;margin-top:10px">
-        Didn't get it? Check spam, then
-        <button type="button" class="btn ghost" data-act="resetresend" ${r.cooldown ? "disabled" : ""}>${r.cooldown ? `resend in ${r.cooldown}s` : "send another"}</button>
-      </p>${back}`;
-  }
-
-  if (r.step === "newpw") {
-    return `<div class="callout acc" style="margin-bottom:14px">Code accepted. Choose a new password.</div>
-      <div class="field"><label>New password<span class="req">*</span></label><input type="password" id="rs-p1" autocomplete="new-password">
-        <span class="hint">At least 8 characters. A mix of letters and numbers is stronger.</span></div>
-      <div class="field"><label>Repeat new password<span class="req">*</span></label><input type="password" id="rs-p2" autocomplete="new-password"></div>
-      <button class="btn" data-act="resetsave" style="width:100%">Set password</button>`;
-  }
-
-  return `<p class="tag" style="margin-top:-6px">Enter your work email and we'll send you a 6-digit code.</p>
-    <div class="field"><label>Work email<span class="req">*</span></label>
-      <input type="email" id="rs-email" placeholder="you@company.com" autocomplete="username" value="${esc(r.email || "")}"></div>
-    <button class="btn" data-act="resetsend" style="width:100%">Send code</button>${back}`;
-}
 
 function shell() {
   const ib = inbox(me);
@@ -3046,65 +3014,7 @@ async function doLogin() {
   if (error) return toast(error.message || "We couldn't sign you in. Please check your email and password.");
   await afterAuth();
 }
-let resetTimer = null;
-function startResetCooldown() {
-  clearInterval(resetTimer);
-  resetTimer = setInterval(() => {
-    if (!vp.reset || vp.reset.step !== "code") { clearInterval(resetTimer); return; }
-    vp.reset.cooldown = Math.max(0, (vp.reset.cooldown || 0) - 1);
-    // Update the button in place. A full render() here would blow away the code the
-    // employee is halfway through typing, once every second.
-    const btn = document.querySelector('[data-act="resetresend"]');
-    if (btn) {
-      btn.disabled = vp.reset.cooldown > 0;
-      btn.textContent = vp.reset.cooldown > 0 ? `resend in ${vp.reset.cooldown}s` : "send another";
-    }
-    if (vp.reset.cooldown === 0) clearInterval(resetTimer);
-  }, 1000);
-}
 
-/* ---- Self-service password reset (email OTP) ----
-   Always answer identically whether or not the address exists: revealing that is
-   free reconnaissance for anyone probing the sign-in page. */
-const RESET_SENT_MSG = "If that email is registered, we've sent a 6-digit code.";
-
-async function sendResetCode(email) {
-  // shouldCreateUser:false is NOT optional — the default is true, which would let
-  // anyone type any address and mint themselves an account on the HR system.
-  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
-  if (error && /rate|limit|seconds/i.test(error.message || "")) {
-    toast("Please wait a moment before asking for another code");
-    return false;
-  }
-  // Any other error (including "user not found") is swallowed on purpose.
-  toast(RESET_SENT_MSG);
-  return true;
-}
-
-async function verifyResetCode(email, token) {
-  const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
-  if (error) { toast("That code isn't right, or it has expired. Try again or send a new one."); return false; }
-  return true;
-}
-
-async function setNewPassword(p1, p2) {
-  if (p1.length < 8) { toast("Please use at least 8 characters"); return false; }
-  if (p1 !== p2) { toast("The two passwords don't match"); return false; }
-  const { error } = await sb.auth.updateUser({ password: p1 });
-  if (error) { toast(error.message || "Could not set the password"); return false; }
-  notifyPasswordChanged();   // fire-and-forget; must never block the change
-  return true;
-}
-
-/* Tell the account holder their password changed. Supabase sends nothing itself, so
-   without this an unauthorised reset would be completely silent to the real person. */
-function notifyPasswordChanged() {
-  try {
-    sb.functions.invoke("send-notification", {
-      body: { kind: "password_changed", at: new Date().toISOString() }
-    }).catch(() => {});
-  } catch (e) { /* never let a notification failure strand someone mid-reset */ }
-}
 
 async function afterAuth() {
   const linked = await loadMe();
@@ -3640,39 +3550,6 @@ async function runAction(el) {
     // Cancelling refunds the whole application, so anyone who had already taken part
     // of it must re-book those days. Pre-fill the form rather than compute a partial
     // refund: the system does no clever arithmetic, the human states the real dates.
-    case "resetopen": vp.reset = { step: "email", email: "" }; render(); break;
-    case "resetback": delete vp.reset; render(); break;
-
-    case "resetsend": case "resetresend": {
-      const email = (document.getElementById("rs-email")?.value || vp.reset?.email || "").trim().toLowerCase();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast("Please enter a valid work email");
-      if (!(await sendResetCode(email))) return;
-      vp.reset = { step: "code", email, cooldown: 60 };
-      render();
-      startResetCooldown();
-      break;
-    }
-
-    case "resetverify": {
-      const code = (document.getElementById("rs-code")?.value || "").trim();
-      if (!/^\d{6}$/.test(code)) return toast("Enter the 6-digit code from the email");
-      if (!(await verifyResetCode(vp.reset.email, code))) return;
-      // Verifying signs them in — the same trust model as any reset link. Setting a
-      // password is the next step, not a gate (see the plan: no forced sign-out).
-      vp.reset = { step: "newpw", email: vp.reset.email };
-      render();
-      break;
-    }
-
-    case "resetsave": {
-      const p1 = document.getElementById("rs-p1")?.value || "";
-      const p2 = document.getElementById("rs-p2")?.value || "";
-      if (!(await setNewPassword(p1, p2))) return;
-      delete vp.reset;
-      toast("Password updated — you're signed in");
-      await afterAuth();
-      break;
-    }
 
     case "cancelreq": {
       const a = db.applications.find(x => x.id === id); if (!a) break;

@@ -45,7 +45,7 @@ inside the database (RLS), not by hiding the key.
 ## 0b. Every outside service this depends on
 
 Somebody asked "is it really just Supabase, GitHub and Resend?" and the answer was **no** —
-it is five accounts, and the three that were missed are the ones that keep the system awake.
+it is five accounts (four, now that the holiday sync is gone), and the three that were missed are the ones that keep the system awake.
 This table is the whole list. Each row names the file or setting that proves it, so it can be
 checked rather than remembered.
 
@@ -62,7 +62,6 @@ No account, no key, nothing to set up:
 
 | | |
 |---|---|
-| **data.gov.sg** | The Singapore public-holiday list, published by MOM. Read by `sync-holidays` |
 | **mom.gov.sg** | Just a link on the Public holidays screen for HR to click |
 | **jsDelivr** | Where `supabase.min.js` was downloaded from **once**. It is committed to the repo and served from your own site — nothing is fetched from a CDN when the page loads |
 
@@ -97,11 +96,20 @@ that removes the most of them — and removes the failure that has already bitte
    - **anon public** key — the long string under *Project API keys*
      (NOT the `service_role` one — never copy that anywhere).
 
-### Step 3 — Build the database (≈3 min)
+### Step 3 — Build the database (≈3 min, **one paste**)
 1. Left sidebar → **SQL Editor** → **New query**.
-2. Open `supabase/schema.sql`, select **all** of it (Ctrl+A), copy, paste
+2. Open **`supabase/install.sql`**, select **all** of it (Ctrl+A), copy, paste
    into the editor.
 3. Click **Run** (bottom-right).
+
+> **This is one file on purpose.** It contains the base schema and every update
+> ever made, already in the right order. You do **not** run the
+> `migration_app_vNN.sql` files one by one — those are only for upgrading a
+> database that already exists. Pasting them individually is how one gets missed,
+> and a missed one leaves the system subtly wrong in a single place.
+>
+> ⚠️ **New, empty project only.** If the database already has data, do not run
+> this; use the individual migration files instead.
 4. ✅ Expected: **"Success. No rows returned."**
    ❌ If you get a red error instead, stop — copy the red text and get it
    checked (don't run it again blindly).

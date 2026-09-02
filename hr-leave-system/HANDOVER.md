@@ -605,6 +605,18 @@ happily agree with. Two habits keep it honest:
   so a two-file function does not fit: hence the generated single file from
   `build-single.mjs`. *Keep the split that makes the code testable; generate the shape the
   person deploying can actually handle.*
+- **A setup procedure with nineteen ordered pastes is not a procedure.** The install guide
+  listed thirteen of them for months and nobody noticed, because nothing checks a document.
+  `install.sql` is now generated from the file list by `build-install.mjs`, and `t31.mjs`
+  asserts every migration in the repo is inside it — so adding v32 and forgetting to rebuild
+  fails a test instead of shipping. *If a list must stay in step with the filesystem, have the
+  filesystem write it.*
+- **`schema.sql` only worked because the test chain ran it TWICE.** `annual_entitlement_for`
+  is `language sql`, so its body is parsed at creation, and it reads `org_settings` — a table
+  defined 270 lines further down. On a genuinely fresh database the first pass errored and the
+  second succeeded, and `|| true` in the chain script hid it for months. One paste has no
+  second pass, so the table moved to §8b, above the function. *A retry loop in a test harness
+  is a place a bug can live.*
 - **THE DASHBOARD DEPLOYS `index.ts` AND NOTHING ELSE.** A second file added in the editor is
   not in the bundle — it is gone when you reopen the function. So an entry point that imports
   a sibling **never boots**: it cannot answer any request, not even an `OPTIONS` preflight

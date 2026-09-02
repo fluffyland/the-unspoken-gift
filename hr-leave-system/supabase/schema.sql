@@ -171,6 +171,25 @@ group by l.emp_id, l.leave_type;
 alter view leave_balances set (security_invoker = true);
 revoke select on leave_balances from anon;
 
+-- ---------- 8b. 公司设置：系统可被任何小公司复用，公司信息是数据不是代码 ----------
+-- 位置很重要：第 13 节的 annual_entitlement_for 是 `language sql`，函数体在**创建时**
+-- 就会解析，所以它引用的 org_settings 必须已经存在。这张表原本定义在文件末尾（第 19 节），
+-- 于是在一个全新的库上跑 schema.sql 会报
+--   ERROR: relation "org_settings" does not exist
+-- ——测试脚本一直跑两遍 schema.sql，第二遍才成功，正好把这个问题盖住了。
+-- 一次粘贴的 install.sql 没有第二遍，所以这里必须真的修好。
+create table if not exists org_settings (
+  id           int primary key default 1 check (id = 1),  -- 单行表
+  company_name text not null default 'My Company',
+  email_domain text,
+  country      text not null default 'Singapore',
+  default_annual_base numeric(5,1) not null default 14,   -- Add employee 表单的年假基数默认值
+  annual_cap          numeric(5,1)                         -- 全公司年假上限（null=不封顶）
+);
+insert into org_settings (id, company_name, email_domain)
+values (1, 'Shanghai Uniforms', 'shanghai-uniforms.com')
+on conflict (id) do nothing;
+
 -- ---------- 9. 身份辅助函数 ----------
 -- 信任锚点:调用者作为【在职】员工的身份(加 active → 离职即服务器层登出)
 create or replace function current_emp_id() returns uuid
@@ -810,17 +829,7 @@ create policy dept_write on departments for all    to authenticated
   using (is_hr()) with check (is_hr());
 
 -- ---------- 19. 公司设置：系统可被任何小公司复用，公司信息是数据不是代码 ----------
-create table if not exists org_settings (
-  id           int primary key default 1 check (id = 1),  -- 单行表
-  company_name text not null default 'My Company',
-  email_domain text,
-  country      text not null default 'Singapore',
-  default_annual_base numeric(5,1) not null default 14,   -- Add employee 表单的年假基数默认值
-  annual_cap          numeric(5,1)                         -- 全公司年假上限（null=不封顶）
-);
-insert into org_settings (id, company_name, email_domain)
-values (1, 'Shanghai Uniforms', 'shanghai-uniforms.com')
-on conflict (id) do nothing;
+-- （表体已上移到第 8b 节：第 13 节的 annual_entitlement_for 要用它。）
 
 alter table org_settings enable row level security;
 drop policy if exists org_read  on org_settings;

@@ -16,7 +16,7 @@
 | 交接给下一个开发者 / AI | [`HANDOVER.md`](HANDOVER.md) |
 | 换公司 / 全量重置 SOP | [`NEW_COMPANY_SETUP.md`](NEW_COMPANY_SETUP.md) |
 
-## 依赖的外部服务（共 5 个账号）
+## 依赖的外部服务（共 4 个账号）
 
 | 服务 | 作用 | 停了会怎样 |
 |---|---|---|
@@ -27,7 +27,7 @@
 | **cron-job.org** | 每天叫醒数据库 | ⚠️ 2026-07 就是这里出事，停摆两周 |
 | **UptimeRobot** | 每 5 分钟探活并发邮件告警 | 出事没人知道 |
 
-无需注册：`data.gov.sg`（公共假期）、`mom.gov.sg`（界面上的一个链接）、
+无需注册：`mom.gov.sg`（界面上的一个链接；公共假期每年 1 月由人手录入，没有同步服务）、
 jsDelivr（`supabase.min.js` 当初的下载来源，已随仓库分发，运行时不加载 CDN）。
 
 > **其中 3 个只是为了绕开 Supabase 免费版「7 天不用就暂停、90 天后删除」。**
@@ -45,7 +45,8 @@ jsDelivr（`supabase.min.js` 当初的下载来源，已随仓库分发，运行
 | `YEARLY_CHECKLIST.md` | 每年例行检查。重点是**不要盲信自动化**：公共假期同步、年度入账、防休眠、报警通道，逐项验证「结果」而不是「有没有排程」。 |
 | `app.html` | **生产版应用**（部署在 https://fluffyland.github.io/hrleavesystem/ ）。真实登录 + Supabase 数据库,持续维护更新。 |
 | `index.html` | 演示版（单文件、免安装,数据存浏览器）。**已冻结**,新功能只进 app.html。 |
-| `supabase/schema.sql` | 正式版数据库底座：7 张表、余额视图、状态机存储过程、RLS 权限、年度入账函数。在 Supabase SQL Editor 执行一次即可。 |
+| `supabase/install.sql` | **新项目建库：一次粘贴搞定。** 自动生成（`node build-install.mjs`），内含 schema.sql + 全部 migration + 心跳，顺序已排好。只用于全新空项目。 |
+| `supabase/schema.sql` | 数据库底座本体（被 install.sql 收录）。已有数据库请用单个 `migration_app_vNN.sql` 升级，不要跑 install.sql。 |
 | `supabase/functions/send-notification/index.ts` | 邮件 Edge Function（**自动生成，勿手改**）：监听状态转移事件，用 Resend 发真实邮件。Supabase 只部署 `index.ts` 这一个入口文件，所以它必须自成一体、不 import 任何同级文件。 |
 | `supabase/functions/send-notification/handler.ts` + `templates.js` | 上面那个文件的源码：逻辑与文案分开，`node build-single.mjs` 合成 `index.ts`，`--check` 验证没走样。 |
 | `supabase/functions/send-notification/check-deploy.sh` | 部署后确认「它真的启动了」——只发 OPTIONS，不会发出任何邮件。 |
