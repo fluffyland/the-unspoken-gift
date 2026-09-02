@@ -12,7 +12,7 @@ _Last updated: 15 Jul 2026. Time needed: about 30–40 minutes for a complete ne
 
 ## 0. How the system is put together (read this first)
 
-LeaveDesk is two independent pieces:
+LeaveDesk is two independent pieces — plus a handful of outside services listed in **0b** below:
 
 | Piece | What it is | Where it lives | Cost |
 |---|---|---|---|
@@ -39,6 +39,43 @@ inside the database (RLS), not by hiding the key.
 | `supabase/bootstrap_owner.sql` | creates the very first Owner account |
 | `supabase/functions/create-login/index.ts` | one-click staff logins |
 | `supabase/reset_all_data.sql` | full data wipe (SOP-2, Option B) |
+
+---
+
+## 0b. Every outside service this depends on
+
+Somebody asked "is it really just Supabase, GitHub and Resend?" and the answer was **no** —
+it is five accounts, and the three that were missed are the ones that keep the system awake.
+This table is the whole list. Each row names the file or setting that proves it, so it can be
+checked rather than remembered.
+
+| Service | What it does for you | If it stops | Proof |
+|---|---|---|---|
+| **Supabase** | Database, staff logins, MC attachments, the Edge Functions | **Everything stops** | `app.html` `SUPABASE_URL` |
+| **GitHub Pages** — `fluffyland/hrleavesystem` (**public**) | Serves the website | Site goes offline; data is safe | `HANDOVER.md` DEPLOY REPO |
+| **GitHub Actions** — `fluffyland/leavedesk-keepalive` (**private**) | Second daily wake-up ping, 12 h offset from the first | One of two keepers is gone; the other still pokes | `HANDOVER.md` KEEPER 2 |
+| **Resend** | Sends the leave-notification emails | Emails stop. **Leave applications and approvals carry on** — email never blocks anything | `RESEND_API_KEY` secret |
+| **cron-job.org** (`cron-job.org`) | Daily wake-up ping so the free Supabase project is not paused | ⚠️ **This is what failed in July 2026 — the system was down for two weeks** | `supabase/keepalive_ping_v3.sql` |
+| **UptimeRobot** (`uptimerobot.com`) | Checks every 5 minutes, emails you when it is down | An outage happens and nobody is told | `HANDOVER.md` WATCHER |
+
+No account, no key, nothing to set up:
+
+| | |
+|---|---|
+| **data.gov.sg** | The Singapore public-holiday list, published by MOM. Read by `sync-holidays` |
+| **mom.gov.sg** | Just a link on the Public holidays screen for HR to click |
+| **jsDelivr** | Where `supabase.min.js` was downloaded from **once**. It is committed to the repo and served from your own site — nothing is fetched from a CDN when the page loads |
+
+### 💡 Three of the five exist only because Supabase is on the free plan
+
+The free plan **pauses a project after 7 idle days and deletes it 90 days after that**. The two
+keepers and the watcher are all scaffolding around that one limitation — and it still cost a
+**two-week outage** in July 2026.
+
+**On a paid Supabase plan, `cron-job.org` and the private keepalive repo become unnecessary,**
+and the watcher becomes a nice-to-have rather than a load-bearing part. If you want the fewest
+possible moving parts for a real company system, paying for the database is the single change
+that removes the most of them — and removes the failure that has already bitten once.
 
 ---
 
@@ -130,12 +167,29 @@ same two lines in the current repo's `index.html` and push.
    assign approval routes.
 6. Tell everyone: log in with work email + `Ssu123@`, then change password.
 
-### Step 7b — Stop the free project from pausing (**REQUIRED**, ≈2 min)
+### Step 7b — Stop the free project from pausing (**REQUIRED on the free plan**, ≈2 min)
+
+> **⚠️ Read this before you build the plumbing — you may not need it at all.**
+>
+> Everything in this step exists for **one reason**: a free Supabase project **goes to sleep
+> after 7 days with no activity**, and is **deleted 90 days after that**. While it is asleep,
+> nobody can open the HR system.
+>
+> This is not theoretical. In **July 2026 it happened**: the wake-up ping was quietly doing
+> nothing useful, and the HR system was **down for two weeks**.
+>
+> **On a paid Supabase plan, projects do not sleep.** So paying for the database lets you skip
+> this step, delete two of your five outside services (`cron-job.org` and the private
+> keepalive repo), and remove the single failure that has already bitten. For a real company
+> running payroll-adjacent records, that is usually the right trade.
+>
+> **Staying on free?** Then do every part of this step, and treat it as load-bearing.
+> See **§0b** for the full picture.
 
 免费版 Supabase **7 天没有活动就会自动暂停**，暂停后 HR 系统直接打不开，
 而且 **暂停满 90 天项目会被永久删除**。
 
-1. SQL Editor → New query → 粘贴 **`supabase/keepalive_ping_v2.sql`** → **Run**。
+1. SQL Editor → New query → 粘贴 **`supabase/keepalive_ping_v3.sql`** → **Run**。
    最后一格应显示 **`ping_count = 2`**。
    （SQL Editor 一次跑多条语句时只显示最后一条的结果，前面两行的返回值看不到，
    这是正常的。计数器能到 2，就证明两次调用都真的写进了磁盘 —— 只读的旧版永远是 0。）
@@ -196,7 +250,7 @@ same two lines in the current repo's `index.html` and push.
 - [ ] Owner logs in and changed their password
 - [ ] create-login deployed (name exactly `create-login`)
 - [ ] Site live with the new URL + anon key
-- [ ] `keepalive_ping_v2.sql` ran and the last result shows **`ping_count = 2`**
+- [ ] `keepalive_ping_v3.sql` ran and the last result shows **`ping_count = 2`**
 - [ ] Two cron services created (POST, apikey in URL), 12h apart, `ping_count` went up
 - [ ] UptimeRobot watching the **database** URL, phone push notifications ON
 - [ ] Company settings + teams + employees entered

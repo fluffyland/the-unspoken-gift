@@ -71,28 +71,45 @@ website in their browser, they cannot see or change data they aren't entitled to
 **SQL Editor → New query**, then run these **in order**, one at a time.
 Wait for "Success" before starting the next.
 
-| Order | File (from `hr-leave-system/supabase/`) | What it does |
-|---|---|---|
-| 1 | `schema.sql` | every table, view, function and security rule |
-| 2 | `keepalive_ping_v2.sql` | the anti-sleep heartbeat |
-| 3 | `bootstrap_owner.sql` | creates your first Owner account |
-| 4 | `migration_app_v9.sql` | adds `org_settings.prorate_cap`, which v14 needs |
-| 5 | `migration_app_v12.sql` | one working-day authority, Saturday support, cancellation safeguards |
-| 6 | `migration_app_v13.sql` | holiday sync stops taking over manually added dates |
-| 7 | `migration_app_v14.sql` | annual-leave maximum, and monthly accrual as an option |
-| 8 | `migration_app_v15.sql` | cancelling leave that has no approver confirms immediately |
-| 9 | `migration_app_v16.sql` | carry-forward per employee, configurable expiry, **the yearly reset**, and the one-button "Start a new year" with its permanent log |
-| 10 | `migration_app_v18.sql` | **the Leave types page finally does something** — changing Days / year credits the difference to everyone; annual leave becomes one number you type; HR can apply leave for an employee; every manual change is recorded |
-| 11 | `migration_app_v19.sql` | **the typed figure IS the year's entitlement** — saving it reconciles this year to that number instead of guessing from a reason string (v18 wrote nothing at all for anyone added through the app); plus one-click "+N days to every employee" |
+> **What is a "migration"?** The system was built in stages. `schema.sql` builds the basic
+> database, and each `migration_app_vNN.sql` file adds one round of improvements on top.
+> They are like software updates: you run them **in order**, oldest first, and each one
+> assumes the ones before it have already been run.
+>
+> **You cannot skip any.** If you miss one, the app will look fine and then behave oddly in
+> one specific place — which is very hard to work out later.
 
-⚠️ **v9 is easy to skip and it bites later.** It is the only place
-`org_settings.prorate_cap` is created, and v14 rewrites a function that reads that
-column — so a database missing v9 fails v14 with
-`ERROR: 42703: column "prorate_cap" does not exist`. v14 now adds the column
-defensively, so either order works, but running v9 keeps the history honest.
-The column has **no control in the app** — a first year is already base × months ÷ 12,
-which is below the base, so capping it could only ever reduce a new joiner further.
-It exists, it is `null`, and the SQL still reads it.
+| Order | File (from `hr-leave-system/supabase/`) | What it gives you, in plain words |
+|---|---|---|
+| 1 | `schema.sql` | The database itself — staff, leave types, applications, the leave ledger, and all the security rules |
+| 2 | `keepalive_ping_v3.sql` | The heartbeat that stops a free Supabase project going to sleep |
+| 3 | `bootstrap_owner.sql` | Creates your very first Owner login, so you can get in |
+| 4 | `migration_app_v9.sql` | Groundwork the later updates expect |
+| 5 | `migration_app_v10.sql` | Groundwork the later updates expect |
+| 6 | `migration_app_v11.sql` | Puts the system into English |
+| 7 | `migration_app_v12.sql` | Working days, Saturdays, and safer leave cancellation |
+| 8 | `migration_app_v13.sql` | Holiday sync stops overwriting dates you added by hand |
+| 9 | `migration_app_v14.sql` | A company-wide maximum for annual leave |
+| 10 | `migration_app_v15.sql` | Cancelling leave that needs no approver takes effect at once |
+| 11 | `migration_app_v16.sql` | **Carry-forward, the yearly reset, and the "Start a new year" button** with its permanent record |
+| 12 | `migration_app_v18.sql` | Changing a leave type's days credits the difference to everyone; HR can apply leave on someone's behalf; every manual change is recorded |
+| 13 | `migration_app_v19.sql` | The number you type **is** that person's entitlement for the year, and a one-click "+N days to everybody" |
+| 14 | `migration_app_v24.sql` | Carry-forward expires on **a date you choose** (e.g. 31 December) instead of "after N months" |
+| 15 | `migration_app_v25.sql` | Closes a hole where an expiry could silently be read as "never expires" |
+| 16 | `migration_app_v26.sql` | Handles leave dated in a year that has already been closed off |
+| 17 | `migration_app_v27.sql` | **Start a new year refuses to run while leave is still awaiting approval** (it used to cost people days); staff who have left are frozen; one application cannot span two years |
+| 18 | `migration_app_v28.sql` | The setting that limits notification emails to one person while you test |
+| 19 | `migration_app_v31.sql` | **Annual leave never grows by itself** — no extra day per year of service, no first-year pro-rating. HR types the number. Also makes the Edit-employee box show the same figure as the Balances tab |
+
+> **⚠️ Do not stop at v19.** An earlier version of this guide listed only up to there. A
+> database built from that list is missing carry-forward expiry dates, the closed-year rules,
+> the protection for leave still awaiting approval at year end, and the rule that annual leave
+> never grows on its own. Run all nineteen.
+
+**How to know it worked:** each file prints a message at the end (Supabase shows it under
+*Results* or *Messages*). `v31` finishes with
+`v31 installed: no automatic yearly day, no first-year pro-rate...`. If a file raises a red
+error, stop and fix that one before running the next — do not carry on.
 
 > **v16 matters even if you skip the rest.** Without it, every leave type keeps
 > accumulating: 14 sick days credited in 2026 plus 14 in 2027 is 28, because nothing has
@@ -110,7 +127,7 @@ again rather than guessing.
 **Before running `bootstrap_owner.sql`**, open it and edit the name and email
 near the top to your own. That account becomes the Owner / Super Admin.
 
-**Check `keepalive_ping_v2.sql` worked:** the last result should show
+**Check `keepalive_ping_v3.sql` worked:** the last result should show
 `ping_count = 2`. (The editor only displays the *last* statement's result when
 you run several at once — the two lines above it produce output you won't see.
 That's normal.)
@@ -521,19 +538,82 @@ While that dropdown names somebody, **only mail addressed to them is ever sent**
 else in the company can receive anything by accident. Set it back to **Everyone** when you
 are happy.
 
-**6 — Only when you want staff to get them: verify the domain**
-Resend → **Domains → Add Domain** → `shanghai-uniforms.com`. Resend shows two records (an
-SPF `TXT` and a DKIM `TXT`) to add wherever your domain's DNS is managed. Once it goes green,
-change `MAIL_FROM` to `LeaveDesk <hr@shanghai-uniforms.com>` and set the dropdown to
-**Everyone**.
+**6 — Letting real staff receive emails: prove the domain is yours**
 
-Skipping this is not optional if staff are to receive anything: Resend will not deliver to
-them, and mail claiming to be from your company but sent by an unproven server is junked by
-Gmail and Outlook anyway.
+**Read this part even if the rest looks technical — it is the step that decides whether your
+staff ever get an email.**
+
+**Why it is needed.** Anyone can write any name on an envelope. Email is the same: without
+proof, a message saying *"from hr@shanghai-uniforms.com"* could have been sent by anybody. So
+two things are true until you do this step:
+
+1. **Resend will only deliver to one address** — the one you signed up with. Everyone else is
+   refused. This is not a setting you can switch off; it is how they stop spammers.
+2. Even if it did send, **Gmail and Outlook would put it in Junk**, because nothing proves the
+   mail really came from your company.
+
+Proving it means adding **two short lines of text to your domain's settings**. You are not
+changing your website or your email — you are adding a note that says *"Resend is allowed to
+send on our behalf."*
+
+**Who does it.** Whoever looks after `shanghai-uniforms.com` — your IT person, or whoever set
+up the website. It takes them about five minutes. You do not need to understand the records;
+you only need to pass them on.
+
+**Step by step**
+
+1. **Resend → Domains → Add Domain** → type `shanghai-uniforms.com` → **Add**.
+2. Resend shows you a small table with **two rows**. Each row has a *Type* (`TXT`), a *Name*,
+   and a *Value*. **Copy that whole table** — a screenshot is fine.
+3. Send it to whoever manages your domain with this message:
+
+   > *Please add these two TXT records to the DNS for shanghai-uniforms.com. They authorise
+   > our HR system to send email from our domain (SPF and DKIM). They do not change our
+   > website or our existing mailboxes.*
+
+4. Wait. It is usually minutes, but it can take a few hours. Resend shows **Verified** in
+   green when it is done. **Nothing to do meanwhile** — the system keeps working, it just
+   keeps emailing only your own address.
+5. Once it is green, two changes:
+   - Supabase → **Edge Functions → Secrets** → change `MAIL_FROM` to
+     `LeaveDesk <hr@shanghai-uniforms.com>`
+   - In LeaveDesk → **HR Console → Company settings → Only send notifications for** →
+     **Everyone**
+6. Apply for a test leave and check that **someone other than you** receives it. That is the
+   only test that proves this worked.
+
+> **One thing to get right early:** create the **Resend account itself on a company address**
+> (`hr@shanghai-uniforms.com`), not a personal Gmail. That account ends up owning your sending
+> domain — you do not want it tied to one person's private mailbox.
 
 > **Nothing here can break LeaveDesk.** Email is never a gate — if the key is missing, the
 > function is not deployed, or Resend is down, leave applications and approvals carry on
 > exactly as they do now. The worst case is silence.
+
+**7 — The other email: "I forgot my password"**
+
+There are **two** kinds of email in this system, and step 6 only fixed one of them.
+
+| | Sent by | Fixed by |
+|---|---|---|
+| Leave notifications — applied, approved, cancelled | Resend, through the `send-notification` function | Steps 1–6 above |
+| **"Here is your sign-in code"** when somebody resets a password | **Supabase's own built-in sender** | This step |
+
+Left alone, password emails come from a **Supabase address, not yours**, and the free plan
+allows only **a few per hour**. With twenty staff, a Monday morning where several people have
+forgotten their passwords will simply stop sending — and nobody is told why.
+
+**The fix, once your domain is verified (about 5 minutes):**
+
+1. **Resend → Settings → SMTP** — it shows a host, a port, a username and a password. Copy them.
+2. **Supabase → Authentication → SMTP Settings** (some dashboards: *Project Settings → Auth*).
+3. Turn on **Enable Custom SMTP** and paste in what Resend gave you.
+4. **Sender email**: `hr@shanghai-uniforms.com` · **Sender name**: `LeaveDesk`
+5. **Save**, then use **Forgot password** on a real account and confirm the code arrives from
+   your company address.
+
+After this, both kinds of email come from `hr@shanghai-uniforms.com` through one service, and
+the hourly limit is gone.
 
 
 - [ ] A reset code actually arrives, and it is a **6-digit number, not a link**
@@ -566,7 +646,7 @@ Gmail and Outlook anyway.
 | Site loads, nobody can log in | Lines 258–259 still point at the old project |
 | `No API key found in request` | Key is in a header a cron service dropped — put it in the URL |
 | `405 cannot execute UPDATE in a read-only transaction` | You used GET on the keep-alive; it must be POST |
-| Keep-alive returns a timestamp, not a number | Old read-only function still installed — re-run `keepalive_ping_v2.sql` |
+| Keep-alive returns a timestamp, not a number | Old read-only function still installed — re-run `keepalive_ping_v3.sql` |
 | Website up but nothing works | Database paused. Supabase dashboard → **Restore** |
 | Employee can't submit sick leave | `attachments` bucket or its policies missing |
 | "Add employee" doesn't create a login | `create-login` not deployed, or misnamed |

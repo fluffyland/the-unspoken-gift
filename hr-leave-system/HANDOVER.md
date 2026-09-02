@@ -56,6 +56,10 @@ DEPLOY REPO   github.com/fluffyland/hrleavesystem   (branch: main)
   (no .github/workflows — the keep-alive is NOT a GitHub Action, see below)
 
 KEEP-ALIVE / MONITORING  (three external services, none of them in this repo)
+  → The COMPLETE list of every outside service, with the evidence for each, is
+    NEW_COMPANY_SETUP.md §0b. Read that first. This section is the operational
+    detail behind three of its rows. Answering "what does this depend on" from a
+    grep of URLs missed all three of them once already.
 
   Free Supabase pauses after 7 idle days and is DELETED 90 days after pausing.
   Two independent "keepers" poke it; one "watcher" reports when it dies anyway.
@@ -109,7 +113,7 @@ KEEP-ALIVE / MONITORING  (three external services, none of them in this repo)
   Deliberately NOT a GitHub Action: GitHub disables cron in repos with no commit
   for 60 days, and a workflow that stops running raises no failure — silence is
   indistinguishable from success. That is the same trap as the read-only ping.
-  The function it calls must be installed first: supabase/keepalive_ping_v2.sql
+  The function it calls must be installed first: supabase/keepalive_ping_v3.sql
 
 BACKEND       Supabase project ref: aypyolzkdupkpefpxius
   URL:  https://aypyolzkdupkpefpxius.supabase.co
@@ -199,7 +203,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `SETUP.md` | original backend setup guide + optional extras (email, cron, holiday sync) |
 | `NEW_COMPANY_SETUP.md` | **SOP manual**: stand up a new company / full reset / yearly routine / troubleshooting |
 | `HANDOVER.md` | this file |
-| `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
+| `supabase/keepalive_ping_v3.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
 | `supabase/migration_app_v31.sql` | **no automatic yearly day, and one number for annual leave.** `annual_entitlement_for` reduced to `least(annual_base, annual_cap)`; `org_settings.prorate_cap` dropped; and a one-off repair setting `annual_base` to what each employee was actually granted this year — **it writes no ledger rows, so nobody gains or loses a day**. Idempotent, with a self-check that refuses to pass if `join_date` reappears in the rule |
 | `supabase/migration_app_v27.sql` | **the audit fixes.** Pending leave blocks the year start (blockers listed in the preview); leavers frozen — a `leave_ledger` trigger plus `active` filters plus `offboard_employee` closing the carry, with `freeze_leaver_carry()` repairing old data; one-application-one-year and year-not-yet-started rules |

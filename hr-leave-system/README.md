@@ -16,6 +16,25 @@
 | 交接给下一个开发者 / AI | [`HANDOVER.md`](HANDOVER.md) |
 | 换公司 / 全量重置 SOP | [`NEW_COMPANY_SETUP.md`](NEW_COMPANY_SETUP.md) |
 
+## 依赖的外部服务（共 5 个账号）
+
+| 服务 | 作用 | 停了会怎样 |
+|---|---|---|
+| **Supabase** | 数据库 / 登录 / 附件 / Edge Functions | 全停 |
+| **GitHub Pages** `hrleavesystem`（公开） | 托管网站 | 网站打不开，数据无恙 |
+| **GitHub Actions** `leavedesk-keepalive`（私有） | 第二个防休眠心跳 | 少一道保险 |
+| **Resend** | 发通知邮件 | 只是不发邮件，请假审批照常 |
+| **cron-job.org** | 每天叫醒数据库 | ⚠️ 2026-07 就是这里出事，停摆两周 |
+| **UptimeRobot** | 每 5 分钟探活并发邮件告警 | 出事没人知道 |
+
+无需注册：`data.gov.sg`（公共假期）、`mom.gov.sg`（界面上的一个链接）、
+jsDelivr（`supabase.min.js` 当初的下载来源，已随仓库分发，运行时不加载 CDN）。
+
+> **其中 3 个只是为了绕开 Supabase 免费版「7 天不用就暂停、90 天后删除」。**
+> 升级付费版之后，`cron-job.org` 和私有心跳仓库都可以取消。
+> 完整表格（含每一条的证据出处）见
+> [`NEW_COMPANY_SETUP.md` §0b](NEW_COMPANY_SETUP.md)。
+
 ## 文件说明
 
 | 文件 | 用途 |
@@ -84,7 +103,7 @@
 - 离职员工：`current_emp_id()` 要求 `active` → 服务器层自动登出；前端同步提示
 - 防休眠：**cron-job.org**（外部定时服务）每天 POST 一次
   `/rest/v1/rpc/keepalive_ping`，真正**写入**一行心跳
-  （函数见 `supabase/keepalive_ping_v2.sql`，需在 SQL Editor 手动跑一次）。
+  （函数见 `supabase/keepalive_ping_v3.sql`，需在 SQL Editor 手动跑一次）。
   - ⚠️ 2026-07 事故：旧版只做「读」，每次都 HTTP 200，项目照样被暂停，
     HR 系统停摆两周。**纯读不算活动，必须写。**
   - ⚠️ 已**弃用 GitHub Actions** 做这件事：仓库 60 天无提交，GitHub 会自动停用
