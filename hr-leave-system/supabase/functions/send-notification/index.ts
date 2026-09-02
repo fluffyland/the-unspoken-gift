@@ -283,25 +283,52 @@ async function fetchT(url: string, init: RequestInit = {}, ms = 8000) {
 }
 
 // One row (or none) from PostgREST, read with the service key so RLS does not apply.
+const notes: string[] = [];   // everything that went wrong but did not stop the run
 async function q(path: string): Promise<any> {
-  if (!SUPABASE_URL || !DB_KEY) return null;
-  const res = await fetchT(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: { apikey: DB_KEY, Authorization: `Bearer ${DB_KEY}`, Accept: "application/json" },
-  });
-  if (!res.ok) { console.error("PostgREST", path, res.status, await res.text()); return null; }
-  return await res.json();
+  if (!SUPABASE_URL || !DB_KEY) { notes.push("no database key"); return null; }
+  try {
+    const res = await fetchT(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: { apikey: DB_KEY, Authorization: `Bearer ${DB_KEY}`, Accept: "application/json" },
+    });
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 200);
+      console.error("PostgREST", path, res.status, body);
+      notes.push(`${path.split("?")[0]} -> ${res.status} ${body}`);
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    // fetchT throws on an abort or a network fault. Left unhandled this ended the whole
+    // request as a blank 500 with nothing to read.
+    console.error("PostgREST threw", path, e);
+    notes.push(`${path.split("?")[0]} -> threw: ${(e as Error).message}`);
+    return null;
+  }
 }
 const one = async (path: string) => (await q(path))?.[0] ?? null;
 
-async function sendMail(to: string, subject: string, text: string) {
-  if (!RESEND_KEY) { console.error("RESEND_API_KEY is not set — nothing sent"); return false; }
-  const res = await fetchT("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM, to: [to], subject, text }),
-  }, 10000);
-  if (!res.ok) { console.error("Resend", res.status, await res.text()); return false; }
-  return true;
+// Returns null when it went, or a sentence saying why it did not. Resend's own wording is
+// passed straight through -- "you can only send to your own address" is the single most
+// likely thing to see before a domain is verified, and paraphrasing it would hide it.
+async function sendMail(to: string, subject: string, text: string): Promise<string | null> {
+  if (!RESEND_KEY) return "RESEND_API_KEY is not set in Edge Functions -> Secrets";
+  if (!to) return "that person has no email address in Employees";
+  try {
+    const res = await fetchT("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: FROM, to: [to], subject, text }),
+    }, 10000);
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      console.error("Resend", res.status, body);
+      return `Resend refused it (${res.status}): ${body}`;
+    }
+    return null;
+  } catch (e) {
+    console.error("Resend threw", e);
+    return `could not reach Resend: ${(e as Error).message}`;
+  }
 }
 
 // The one employee notifications are limited to while testing, and the company name.
@@ -315,7 +342,7 @@ async function settings() {
   return { company: o?.company_name || "LeaveDesk", only };
 }
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   let payload: any = {};
   try { payload = await req.json(); } catch { /* empty body = test ping */ }
@@ -339,9 +366,8 @@ Deno.serve(async (req) => {
       nextApprover: { name: "there", email: cfg.only },
       appUrl: APP_URL, company: cfg.company,
     });
-    const ok = await sendMail(cfg.only, "LeaveDesk test — " + mail.subject, mail.text);
-    return json({ ok, sent: ok ? 1 : 0, to: cfg.only,
-      error: ok ? null : "Resend refused it. Check RESEND_API_KEY and MAIL_FROM." });
+    const why = await sendMail(cfg.only, "LeaveDesk test — " + mail.subject, mail.text);
+    return json({ ok: !why, sent: why ? 0 : 1, to: cfg.only, error: why });
   }
 
   const ev = payload?.record;
@@ -372,6 +398,34 @@ Deno.serve(async (req) => {
 
   const toSend = applyTestMode(mails, cfg.only);
   let sent = 0;
-  for (const m of toSend) if (await sendMail(m.to, m.subject, m.text)) sent++;
-  return json({ built: mails.length, sent, held_back: mails.length - toSend.length });
+  const failed: string[] = [];
+  for (const m of toSend) {
+    const why = await sendMail(m.to, m.subject, m.text);
+    if (why) failed.push(`${m.to || "(no address)"}: ${why}`); else sent++;
+  }
+  return json({ built: mails.length, sent, held_back: mails.length - toSend.length,
+    ...(failed.length ? { failed } : {}), ...(notes.length ? { notes } : {}) });
+}
+
+/* Nothing below may ever answer with a bare 500 again.
+
+   It did, twice, on a real leave application, and "Internal Server Error" is all the webhook
+   could record -- so a whole round trip bought no information at all. A handler with no
+   top-level catch turns every distinct bug into the same blank page.
+
+   The reply is 200 even when it failed, on purpose: a Supabase webhook stores the BODY of a
+   200 but only the words "Internal Server Error" for a 500. At 200 the reason lands in
+   net._http_response.content, readable with plain SQL. Nothing downstream reads this status
+   -- email never gates a leave application -- so the status code costs nothing and the body
+   is worth everything. */
+Deno.serve(async (req: Request) => {
+  try {
+    return await handle(req);
+  } catch (e) {
+    const err = e as Error;
+    console.error("UNCAUGHT", err?.stack || err);
+    return json({ ok: false, error: String(err?.message || err),
+                  stack: String(err?.stack || "").split("\n").slice(0, 4).join(" | "),
+                  ...(notes.length ? { notes } : {}) });
+  }
 });
