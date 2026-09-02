@@ -45,10 +45,40 @@ import { buildMails, applyTestMode } from "./templates.js";
    Supabase has moved to sb_publishable_/sb_secret_ keys. Plain fetch needs no build step,
    and a function that always answers can always be diagnosed. */
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const FROM = Deno.env.get("MAIL_FROM") ?? "LeaveDesk <onboarding@resend.dev>";
-const APP_URL = Deno.env.get("APP_URL") ?? "";
+// Every secret is trimmed. A value pasted into the dashboard routinely arrives with a
+// trailing newline or a byte-order mark attached, and it looks identical on screen.
+const env = (k: string, dflt = "") => (Deno.env.get(k) ?? dflt).trim();
+
+const SUPABASE_URL = env("SUPABASE_URL");
+const RESEND_KEY = env("RESEND_API_KEY");
+const FROM = env("MAIL_FROM", "LeaveDesk <onboarding@resend.dev>");
+const APP_URL = env("APP_URL");
+
+/* An API key goes into an HTTP header, and a header may hold nothing but plain ASCII. A key
+   copied from a web page or a chat can carry an invisible passenger -- a zero-width space, a
+   byte-order mark, a smart quote -- and the only symptom is fetch throwing
+
+       Failed to construct 'Request': 'headers' of 'RequestInit' is not a valid ByteString
+
+   which names neither the secret nor the character. That cost a full round trip here. So the
+   key is checked before it is used, and the complaint says which character and where. */
+function keyProblem(): string | null {
+  if (!RESEND_KEY) return "RESEND_API_KEY is not set. Add it under Edge Functions → Secrets.";
+  for (let i = 0; i < RESEND_KEY.length; i++) {
+    const c = RESEND_KEY.charCodeAt(i);
+    if (c < 0x21 || c > 0x7e) {
+      const hex = "U+" + c.toString(16).toUpperCase().padStart(4, "0");
+      return `RESEND_API_KEY has an invisible character (${hex}) at position ${i + 1} of ${RESEND_KEY.length}. ` +
+why()      + ` Delete the secret under Edge Functions → Secrets and type or re-paste it, taking only the key itself.`;
+    }
+  }
+  if (!RESEND_KEY.startsWith("re_"))
+    return `RESEND_API_KEY does not look like a Resend key — they begin "re_". Check you pasted the key and not something else.`;
+  return null;
+  function why() {
+    return "A header may hold plain ASCII only, so the request cannot even be built.";
+  }
+}
 
 // A key that can read past RLS, under whichever name this project provides it. Newer
 // projects expose SUPABASE_SECRET_KEYS; older ones SUPABASE_SERVICE_ROLE_KEY.
@@ -115,7 +145,8 @@ const one = async (path: string) => (await q(path))?.[0] ?? null;
 // passed straight through -- "you can only send to your own address" is the single most
 // likely thing to see before a domain is verified, and paraphrasing it would hide it.
 async function sendMail(to: string, subject: string, text: string): Promise<string | null> {
-  if (!RESEND_KEY) return "RESEND_API_KEY is not set in Edge Functions -> Secrets";
+  const bad = keyProblem();
+  if (bad) return bad;
   if (!to) return "that person has no email address in Employees";
   try {
     const res = await fetchT("https://api.resend.com/emails", {
