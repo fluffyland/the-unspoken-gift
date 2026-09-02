@@ -527,6 +527,7 @@ async function loadAll() {
     defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
     annualCap:  (o.annual_cap  == null ? null : Number(o.annual_cap)),
     accrualMode: o.accrual_mode || "annual",
+    notifyUrl: o.notify_url || "", notifyKey: o.notify_key || "",
     defaultCarryCap: (o.default_carry_cap == null ? null : Number(o.default_carry_cap)),
     carryExpiryMonths: (o.carry_expiry_months == null ? null : Number(o.carry_expiry_months)),
     // v24: the expiry is a day + month that repeats every year. Both null = never expires.
@@ -587,6 +588,11 @@ async function loadAll() {
   db.orgV16     = !!(orgR.data && ("carry_expiry_months" in orgR.data));
   db.orgV24     = !!(orgR.data && ("carry_expiry_day" in orgR.data));
   db.orgV28     = !!(orgR.data && ("notify_only_emp" in orgR.data));
+  // v32: the database keeps the address notifications are POSTed to. It is filled in
+  // BY THIS APP, not by hand -- the project URL and key already live at the top of this
+  // file, and asking somebody to copy them into the SQL as well is how two places end
+  // up disagreeing. See tellDbWhereWeAre() below.
+  db.orgV32     = !!(orgR.data && ("notify_url" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -3016,10 +3022,27 @@ async function doLogin() {
 }
 
 
+/* Tell the database which project it is running under, so leave notifications can be
+   POSTed to this project's Edge Function. Runs once, quietly, when an HR/Owner signs in.
+
+   Why it lives here: SUPABASE_URL and SUPABASE_ANON_KEY are already at the top of this
+   file, because the app cannot work without them. Anything that needs the same two values
+   should read them from here rather than ask a person to type them a second time.
+
+   Never blocks anything: if it fails, notifications simply stay off. */
+async function tellDbWhereWeAre() {
+  if (!db.orgV32 || !me || !(me.role === "hr" || me.role === "admin")) return;
+  const url = SUPABASE_URL.replace(/\/+$/, "") + "/functions/v1/send-notification";
+  if ((db.org || {}).notifyUrl === url && (db.org || {}).notifyKey === SUPABASE_ANON_KEY) return;
+  try { await sb.rpc("set_notify_endpoint", { p_url: url, p_key: SUPABASE_ANON_KEY }); }
+  catch (e) { /* notifications off is survivable; a broken sign-in is not */ }
+}
+
 async function afterAuth() {
   const linked = await loadMe();
   if (!linked) { render(); return; } // unlinked account message
   await loadAll();
+  await tellDbWhereWeAre();
   view = "dashboard"; vp = {}; render();
 }
 document.addEventListener("submit", ev => {

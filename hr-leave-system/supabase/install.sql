@@ -7,7 +7,7 @@
 -- Then run ONE more file: bootstrap_owner.sql — kept separate because you have to
 -- type your own email and password into it.
 --
--- This replaces the old procedure of pasting 26 files one at a time in the
+-- This replaces the old procedure of pasting 27 files one at a time in the
 -- right order. Missing one left the system subtly wrong in a single place, which is
 -- very hard to work out later.
 --
@@ -40,7 +40,8 @@
 --   23. migration_app_v27.sql
 --   24. migration_app_v28.sql
 --   25. migration_app_v31.sql
---   26. keepalive_ping_v3.sql
+--   26. migration_app_v32.sql
+--   27. keepalive_ping_v3.sql
 --
 -- Regenerate with:  node build-install.mjs
 -- ============================================================================
@@ -48,9 +49,12 @@
 -- ============================================================================
 --  ✏️  FILL THIS IN — the only part of this file you edit
 -- ============================================================================
---  Change the values between the quotes, then run the whole file.
---  Leave project_ref / anon_key blank if you are not setting up email yet;
---  you can run just the last section again later to add it.
+--  Change the values between the quotes, then run the whole file. Six values.
+--
+--  You are NOT asked for the project address or the API key. Those already go
+--  into app.html (the two lines near the top of the website file), and typing
+--  the same thing twice is how two places end up disagreeing. The app reports
+--  its own address to the database the first time an HR/Owner signs in.
 -- ----------------------------------------------------------------------------
 drop table if exists _leavedesk_setup;
 create table _leavedesk_setup (
@@ -59,9 +63,7 @@ create table _leavedesk_setup (
   default_annual_leave numeric,  -- days a new employee starts on
   default_carry_cap    numeric,  -- most days anyone may carry into next year
   owner_name           text,     -- YOU — the first HR/Owner account
-  owner_email          text,     -- must match the login you created in Authentication
-  project_ref          text,     -- from your project URL: https://XXXX.supabase.co
-  anon_key             text      -- Settings -> API -> anon public key
+  owner_email          text      -- must match the login you created in Authentication
 );
 insert into _leavedesk_setup values (
   'My Company',
@@ -69,9 +71,7 @@ insert into _leavedesk_setup values (
   14,
   5,
   'Owner Name',
-  'owner@company.com',
-  '',
-  ''
+  'owner@company.com'
 );
 -- ============================================================================
 --  Nothing below here needs editing.
@@ -8143,6 +8143,94 @@ end $$;
 
 
 -- ===========================================================================
+-- migration_app_v32.sql
+-- ===========================================================================
+
+-- ============================================================================
+-- migration_app_v32.sql — 邮件通知的地址由**应用自己填**，不再让人手抄一遍
+--
+-- 用户原话：
+--   「if for a new company i should be editing the project thing inside the website
+--     instead of supabase, why you still ask me to paste the project refernce???」
+--
+-- 他说得对。项目地址和 anon key 本来就必须写进 app.html（网站那两行），
+-- 再让人往 SQL 里抄一遍，就是同一份东西输两次 —— 而输两次，迟早会不一致。
+--
+-- 改法：数据库里留两个空格子；HR/Owner 一登录，应用就把自己正在用的地址和 key
+-- 写进去（不一样才写）。人一个字都不用抄。
+--
+-- 触发器在此之前就存在，只是**静默**：地址是空的就直接放行，什么都不做。
+-- 请假永远不会因为邮件而失败。
+-- ============================================================================
+
+alter table org_settings add column if not exists notify_url text;
+alter table org_settings add column if not exists notify_key text;
+
+comment on column org_settings.notify_url is
+  'Where leave-notification events are POSTed. Written by the app itself when an HR/Owner signs in — never typed by hand. Empty = notifications off, and nothing fails.';
+comment on column org_settings.notify_key is
+  'The project anon key, so the Edge Function gateway accepts the call. Public by design.';
+
+-- ---------- 触发器：读格子，不写死 ----------
+-- v33 之前是用 execute format() 把地址烤进函数体，所以换项目就得重建函数。
+-- 现在函数体是固定的，地址是数据 —— 换项目只要改那一行数据。
+create or replace function leavedesk_notify() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare u text; k text;
+begin
+  select notify_url, notify_key into u, k from org_settings where id = 1;
+  if coalesce(u, '') = '' then
+    return new;                      -- 还没接上邮件：静悄悄放行
+  end if;
+  -- 邮件**绝不能**挡住请假。这里出任何事都吞掉：假条已经记下了，邮件只是礼貌。
+  begin
+    perform net.http_post(
+      url     := u,
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || coalesce(k, '')),
+      body    := jsonb_build_object('type', 'INSERT', 'table', 'application_events',
+                                    'schema', 'public', 'record', to_jsonb(new)),
+      timeout_milliseconds := 15000);   -- 面板默认 1000ms，比函数实际耗时还短
+  exception when others then
+    null;
+  end;
+  return new;
+end $$;
+
+drop trigger if exists trg_leavedesk_notify on application_events;
+create trigger trg_leavedesk_notify after insert on application_events
+  for each row execute function leavedesk_notify();
+
+-- ---------- 应用用来自报地址的入口 ----------
+-- 只有 HR/Owner 能调；值相同就什么都不做（避免每次登录都写一次）。
+create or replace function set_notify_endpoint(p_url text, p_key text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare changed boolean := false;
+begin
+  if not is_hr() and session_user <> 'postgres' then
+    raise exception 'Only HR can change the notification endpoint';
+  end if;
+  update org_settings
+     set notify_url = p_url, notify_key = p_key
+   where id = 1
+     and (coalesce(notify_url, '') is distinct from coalesce(p_url, '')
+       or coalesce(notify_key, '') is distinct from coalesce(p_key, ''));
+  changed := found;
+  return changed;
+end $$;
+revoke execute on function set_notify_endpoint(text, text) from anon, public;
+grant  execute on function set_notify_endpoint(text, text) to authenticated;
+
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'trg_leavedesk_notify') then
+    raise exception 'v32 FAILED: the notification trigger was not created';
+  end if;
+  raise notice 'v32 installed: the app now reports its own address — nothing to copy by hand.';
+end $$;
+
+
+-- ===========================================================================
 -- keepalive_ping_v3.sql
 -- ===========================================================================
 
@@ -8316,41 +8404,11 @@ begin
   end if;
 
   -- ---- 3. email notifications ---------------------------------------------
-  -- Replaces the Database Webhook you would otherwise create by hand, including
-  -- its timeout box, which defaults to 1000 ms and is shorter than the function
-  -- takes -- notifications then fail intermittently with nothing on screen.
-  if coalesce(nullif(trim(c.project_ref), ''), '') = '' then
-    raise notice 'Email not switched on (project_ref blank). Fill it in and re-run this last section when you are ready.';
-  else
-    fn_url := 'https://' || trim(c.project_ref) || '.supabase.co/functions/v1/send-notification';
-    begin
-      create extension if not exists pg_net;
-    exception when others then
-      raise warning 'pg_net could not be enabled (%). Email will not send.', sqlerrm;
-    end;
-    execute format($f$
-      create or replace function leavedesk_notify() returns trigger
-      language plpgsql security definer set search_path = public as $body$
-      begin
-        -- Email must NEVER block a leave application. If anything here fails,
-        -- swallow it: the leave is already recorded, the email is a courtesy.
-        begin
-          perform net.http_post(
-            url := %L,
-            headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || %L),
-            body := jsonb_build_object('type','INSERT','table','application_events',
-                                       'schema','public','record', to_jsonb(new)),
-            timeout_milliseconds := 15000);
-        exception when others then null;
-        end;
-        return new;
-      end $body$;$f$, fn_url, trim(c.anon_key));
-
-    drop trigger if exists trg_leavedesk_notify on application_events;
-    create trigger trg_leavedesk_notify after insert on application_events
-      for each row execute function leavedesk_notify();
-    raise notice 'Email notifications wired to %', fn_url;
-  end if;
+  -- Nothing to do here on purpose. The trigger already exists (v32) and stays
+  -- quiet until it has an address. The app writes that address itself the first
+  -- time an HR/Owner signs in, from the values already in app.html -- so there
+  -- is nothing for anybody to copy across.
+  raise notice 'Email notifications will switch on by themselves when you first sign in as HR.';
 end $$;
 
 drop table if exists _leavedesk_setup;

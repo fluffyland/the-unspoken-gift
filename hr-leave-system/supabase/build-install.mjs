@@ -50,9 +50,12 @@ ${parts.map((f, i) => `--   ${String(i + 1).padStart(2)}. ${f}`).join('\n')}
 const CONFIG = `-- ============================================================================
 --  ✏️  FILL THIS IN — the only part of this file you edit
 -- ============================================================================
---  Change the values between the quotes, then run the whole file.
---  Leave project_ref / anon_key blank if you are not setting up email yet;
---  you can run just the last section again later to add it.
+--  Change the values between the quotes, then run the whole file. Six values.
+--
+--  You are NOT asked for the project address or the API key. Those already go
+--  into app.html (the two lines near the top of the website file), and typing
+--  the same thing twice is how two places end up disagreeing. The app reports
+--  its own address to the database the first time an HR/Owner signs in.
 -- ----------------------------------------------------------------------------
 drop table if exists _leavedesk_setup;
 create table _leavedesk_setup (
@@ -61,9 +64,7 @@ create table _leavedesk_setup (
   default_annual_leave numeric,  -- days a new employee starts on
   default_carry_cap    numeric,  -- most days anyone may carry into next year
   owner_name           text,     -- YOU — the first HR/Owner account
-  owner_email          text,     -- must match the login you created in Authentication
-  project_ref          text,     -- from your project URL: https://XXXX.supabase.co
-  anon_key             text      -- Settings -> API -> anon public key
+  owner_email          text      -- must match the login you created in Authentication
 );
 insert into _leavedesk_setup values (
   'My Company',
@@ -71,9 +72,7 @@ insert into _leavedesk_setup values (
   14,
   5,
   'Owner Name',
-  'owner@company.com',
-  '',
-  ''
+  'owner@company.com'
 );
 -- ============================================================================
 --  Nothing below here needs editing.
@@ -120,41 +119,11 @@ begin
   end if;
 
   -- ---- 3. email notifications ---------------------------------------------
-  -- Replaces the Database Webhook you would otherwise create by hand, including
-  -- its timeout box, which defaults to 1000 ms and is shorter than the function
-  -- takes -- notifications then fail intermittently with nothing on screen.
-  if coalesce(nullif(trim(c.project_ref), ''), '') = '' then
-    raise notice 'Email not switched on (project_ref blank). Fill it in and re-run this last section when you are ready.';
-  else
-    fn_url := 'https://' || trim(c.project_ref) || '.supabase.co/functions/v1/send-notification';
-    begin
-      create extension if not exists pg_net;
-    exception when others then
-      raise warning 'pg_net could not be enabled (%). Email will not send.', sqlerrm;
-    end;
-    execute format($f$
-      create or replace function leavedesk_notify() returns trigger
-      language plpgsql security definer set search_path = public as $body$
-      begin
-        -- Email must NEVER block a leave application. If anything here fails,
-        -- swallow it: the leave is already recorded, the email is a courtesy.
-        begin
-          perform net.http_post(
-            url := %L,
-            headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || %L),
-            body := jsonb_build_object('type','INSERT','table','application_events',
-                                       'schema','public','record', to_jsonb(new)),
-            timeout_milliseconds := 15000);
-        exception when others then null;
-        end;
-        return new;
-      end $body$;$f$, fn_url, trim(c.anon_key));
-
-    drop trigger if exists trg_leavedesk_notify on application_events;
-    create trigger trg_leavedesk_notify after insert on application_events
-      for each row execute function leavedesk_notify();
-    raise notice 'Email notifications wired to %', fn_url;
-  end if;
+  -- Nothing to do here on purpose. The trigger already exists (v32) and stays
+  -- quiet until it has an address. The app writes that address itself the first
+  -- time an HR/Owner signs in, from the values already in app.html -- so there
+  -- is nothing for anybody to copy across.
+  raise notice 'Email notifications will switch on by themselves when you first sign in as HR.';
 end $$;
 
 drop table if exists _leavedesk_setup;

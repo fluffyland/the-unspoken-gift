@@ -120,14 +120,14 @@ insert into _leavedesk_setup values (
   14,                              -- days of annual leave a new employee starts on
   5,                               -- most days anyone may carry into next year
   'Lee Jian Wei',                  -- your name
-  'you@shanghai-uniforms.com',     -- the SAME email as Step 3
-  'abcdefgh',                      -- from your URL: https://abcdefgh.supabase.co
-  'eyJhbGciOi...'                  -- Settings → API → anon public key
+  'you@shanghai-uniforms.com'      -- the SAME email as Step 3
 );
 ```
 
-   Leave the last two blank if you are not doing email yet — you can fill them in
-   and re-run just the last section later.
+   **Six values, and none of them is the project address or the API key.** Those
+   already go into `app.html` at Step 6, and typing the same thing in two places
+   is how the two end up disagreeing. The app tells the database its own address
+   the first time you sign in as HR — you never copy it anywhere.
 
 2. Select **all** of the file (Ctrl+A), copy, paste into **SQL Editor → New query**.
 3. **Run**.
@@ -151,10 +151,14 @@ LeaveDesk installed. Next: deploy the two Edge Functions...
    ❌ **"NO LOGIN FOUND"** means Step 3 was skipped or the email does not match.
    Do Step 3, then run just the last section of the file again.
 
-> This also creates the email trigger, replacing the Database Webhook you would
-> otherwise fill in by hand — including its timeout box, which defaults to
-> 1000 ms, is shorter than the function actually takes, and fails intermittently
-> with nothing on screen. This sets it to 15000 ms.
+> This also sets up email notifications, replacing the Database Webhook you would
+> otherwise fill in by hand — including its timeout box, which defaults to 1000 ms,
+> is shorter than the function actually takes, and fails intermittently with
+> nothing on screen. This uses 15000 ms.
+>
+> It stays **switched off and silent** until you first sign in as HR, at which
+> point the app fills in its own address. Nothing to configure, and nothing
+> breaks in the meantime.
 >
 > **Email can never block leave.** If the mail server is down, unreachable, or
 > misconfigured, the application is still recorded — tested by making the mail
