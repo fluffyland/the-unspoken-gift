@@ -574,11 +574,12 @@ jobs in one box:
 | **Defaults for new employees** | a **pre-fill** for the Add employee form. Changing it moves nobody who already exists |
 | **Leave policy** | **rules that apply to everyone**, at the next yearly grant |
 
-**Maximum annual leave is a total, not an addition.** It is the most anyone can
-reach, including long-service increases — **not** "base plus this much". Annual leave
-rises by 1 day per year of service, and left blank it rises **for ever**: 20 years on
-a base of 14 reaches 33 days. Set it to 21 and someone gets there after 7 years and
-stays at 21.
+**Maximum annual leave is a ceiling on the number you type.** Set it to 21 and no
+employee's Annual Leave Entitled / Yr can be saved above 21 — by you in Edit employee,
+or by the Leave types tab raising everybody at once. Leave it blank for no ceiling.
+
+Nothing grows on its own. Annual leave does **not** rise with length of service, and a
+new joiner's first year is **not** pro-rated — whatever you type is what they get.
 
 **Nobody goes above the company maximum**, whatever their individual base. So the two
 settings must not contradict each other, and the system refuses to let them:

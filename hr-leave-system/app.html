@@ -525,7 +525,6 @@ async function loadAll() {
   const o = orgR.data || {};
   const org = { company: o.company_name || "", emailDomain: o.email_domain || "", country: o.country || "",
     defaultAnnualBase: Number.isFinite(Number(o.default_annual_base)) ? Number(o.default_annual_base) : 14,
-    prorateCap: (o.prorate_cap == null ? null : Number(o.prorate_cap)),
     annualCap:  (o.annual_cap  == null ? null : Number(o.annual_cap)),
     accrualMode: o.accrual_mode || "annual",
     defaultCarryCap: (o.default_carry_cap == null ? null : Number(o.default_carry_cap)),
@@ -582,7 +581,6 @@ async function loadAll() {
   // v13 adds public_holidays.updated_at. Sending it before the migration has run would
   // fail every manual holiday add/edit, so gate the writes on it being present.
   db.hasPhWhen  = !!(phR.data && phR.data[0] && ("updated_at" in phR.data[0]));
-  db.orgProrate = !!(orgR.data && ("prorate_cap" in orgR.data));
   // v14: cap on long-service growth, and monthly vs one-shot crediting
   db.orgV14     = !!(orgR.data && ("accrual_mode" in orgR.data));
   // v16: per-employee carry cap, configurable expiry, yearly resets, the year-start log.
@@ -864,6 +862,18 @@ function capBelowBase() {
    as the second number. The screen that exists to fix a mismatch has to be able to SEE
    the mismatch, so both the preview and the save read this, not just employees.annual_base. */
 function entNow(empId) { return bal(empId, "annual").yGranted; }
+/* What the Edit employee box shows. It used to show employees.annual_base, a stored column,
+   while the Balances tab showed the ledger -- so Barry read 17.5 in one place and 20.5 in the
+   other, and saving pulled his real 20.5 down to the stale figure. They now come from ONE
+   source: the ledger. The column is only consulted for somebody with nothing credited this
+   year, where the ledger has no opinion yet. */
+function entBoxValue(e) {
+  if (!e) return 14;
+  const y = new Date().getFullYear();
+  const credited = (db.ledger || []).some(l => l.empId === e.id && l.type === "annual" &&
+    !l.refApp && new Date(l.ts).getFullYear() === y);
+  return credited ? entNow(e.id) : (e.annualBase ?? 14);
+}
 /* What saving this number will actually do. It used to say "this year's balance moves from
    19 to 20" — where 19 was the WHOLE ledger history, not this year, and where the database
    then wrote nothing at all for anyone added through this form, because it matched on the
@@ -871,12 +881,12 @@ function entNow(empId) { return bal(empId, "annual").yGranted; }
    entitlement, and what is shown here is the arithmetic that follows from it. */
 function entChange(empId, typed) {
   const e = emp(empId); if (!e) return "";
-  const before = Number(e.annualBase);
+  const before = entBoxValue(e);   // the real figure, the same one the box shows
   const after = numOr(typed, before);
   if (!Number.isFinite(after)) return "";
-  // Compare against what the LEDGER holds as well as the stored number. Someone added
-  // before v20 can carry a stored 14 while this year only ever credited 6 (a pro-rated
-  // joiner); the two agreeing is not the same as there being nothing to do.
+  // Both sides of this comparison are the ledger's figure now, not employees.annual_base.
+  // While the box showed the column and this compared against the column, a person whose
+  // two numbers had drifted looked like "no change" — and saving quietly moved their balance.
   if (after === before && after === entNow(empId)) return "";
   const y = new Date().getFullYear();
   const anyThisYear = db.ledger.some(l => l.empId === empId && l.type === "annual" &&
@@ -2309,8 +2319,6 @@ function apprOpts(self, sel, excl) {
   return `<option value="">(auto-approve)</option>` + activeEmps().filter(x => x.id !== self && x.id !== excl)
     .map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
 }
-/* Annual-leave calculation: joined this year → pro-rated by remaining months;
-   otherwise base + 1 day per additional full year of service. */
 function empMatches(e, q, deptF) {
   if (deptF && deptF !== "all" && e.dept !== deptF) return false;
   if (!q) return true;
@@ -2735,7 +2743,7 @@ function hrSettings() {
       <li>Expire any carried days that have passed their date</li>
       <li>Carry forward what's left of last year's annual leave, up to <b>each person's own maximum</b></li>
       <li>Reset every other leave type to zero — sick, hospitalisation, childcare and the rest</li>
-      <li>Credit the new year's allowances (annual leave from each person's base plus years of service; new joiners pro-rated)</li>
+      <li>Credit each person's annual leave — the figure in their <b>Annual Leave Entitled / Yr</b>. Nothing is added for length of service, and nothing is pro-rated for new joiners</li>
     </ol>
     <p class="meta" style="margin:0 0 12px">Off-in-lieu is never touched — those days were earned by working. <b>Safe to press twice:</b> anyone already done for that year is skipped.</p>
     <div class="field" style="max-width:150px"><label>Target year</label>
@@ -2743,7 +2751,7 @@ function hrSettings() {
     ${vp.ysPreview ? ysPreviewBox(gy) : `<div class="actions"><button class="btn sec" data-act="yspreview">Start ${gy}…</button>
       <button class="btn ghost" data-act="yslogopen">📋 Past runs</button></div>`}
     ${vp.ysLog ? ysLogBox() : ""}`
-    : `<p class="meta" style="margin:4px 0 10px">Run this once a year to give everyone their leave for the year (annual leave is based on each person's base plus years of service; new joiners are pro-rated automatically). It's safe to run again — anyone already set up for that year is skipped.</p>
+    : `<p class="meta" style="margin:4px 0 10px">Run this once a year to give everyone their leave for the year. Annual leave is exactly the figure in each person's <b>Annual Leave Entitled / Yr</b> — nothing is added for length of service and nothing is pro-rated. It's safe to run again — anyone already set up for that year is skipped.</p>
     <div class="callout warn" style="margin:0 0 12px">⚠️ <b>Carry-forward and the yearly resets are not installed yet.</b> Run <code>migration_app_v16.sql</code> in Supabase → SQL Editor and this becomes the one-button "Start a new year". Until then this button only credits the allowances — it does <b>not</b> carry annual leave forward and does <b>not</b> reset sick, hospitalisation or childcare, so those keep accumulating.</div>
     <div class="field" style="max-width:150px"><label>Target year</label>
       <select data-act="grantyear">${Array.from({ length: PH_MAX - (y - 1) + 1 }, (_, i) => y - 1 + i).map(yy => `<option value="${yy}" ${yy === gy ? "selected" : ""}>${yy}</option>`).join("")}</select></div>
@@ -3296,7 +3304,7 @@ async function runAction(el) {
       break;
     }
     case "empadd": vp.empModal = { mode: "add", id: null, emailTouched: false, form: { name: "", email: "", emailPrefix: "", dept: "", newDept: "", title: "", empNo: "", alias: "", mobile: "", hasLogin: true, gender: "", role: "", joinDate: todayStr(), approver1: "", twoLevel: false, approver2: null, annualBase: db.org?.defaultAnnualBase ?? 14, carryCap: db.org?.defaultCarryCap ?? 0, worksSat: undefined } }; snapEmp(); rerender(); break;
-    case "empedit": { const e = emp(id); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || APPR_NONE, twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: e.annualBase ?? 14, carryCap: e.carryCap ?? 0, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined } }; snapEmp(); rerender(); break; }
+    case "empedit": { delete vp.entCutOk; const e = emp(id); const entOpen = entBoxValue(e); vp.empModal = { mode: "edit", id, form: { name: e.name, email: e.email, dept: e.dept, newDept: "", title: e.title || "", empNo: e.empNo || "", alias: e.alias || "", mobile: e.mobile || "", hasLogin: e.hasLogin !== false, gender: e.gender, role: e.role, joinDate: e.joinDate, approver1: e.approver1 || APPR_NONE, twoLevel: e.twoLevel, approver2: e.approver2 || "", annualBase: entOpen, carryCap: e.carryCap ?? 0, worksSat: (e.worksSat === true || e.worksSat === false) ? e.worksSat : undefined }, entOpen }; snapEmp(); rerender(); break; }
     case "deptadd": {
       const inp = document.getElementById("newteam"), name = (inp?.value || "").trim();
       if (!name) return toast("Please type the team name first");
@@ -3345,6 +3353,25 @@ async function runAction(el) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) return toast("Please enter a valid email");
       if (db.employees.some(x => x.email === f.email.trim() && x.id !== m.id)) return toast("This email is already in use");
       if (f.approver1 && f.approver2 && f.approver2 === f.approver1) return toast("The 2nd level approver must be different from the 1st.");
+      /* Taking leave away is not a typo-tolerant action. There is a preview under the field,
+         and it was missed -- somebody saved 14 over a real 20.5 and lost 6.5 days without
+         noticing. A reduction now has to be agreed to in as many words. Raising it, or
+         leaving it alone, still saves in one click. */
+      if (db.orgV18 && m.mode === "edit" && !vp.entCutOk) {
+        const e0 = emp(m.id), now = e0 ? entBoxValue(e0) : null, want = numOr(f.annualBase, now);
+        if (now != null && Number.isFinite(want) && want < now) {
+          const lost = now - want;
+          vp.confirmModal = {
+            title: "This takes annual leave away",
+            lines: [`<b>${esc(f.name.trim() || (e0 && e0.name) || "This employee")}</b> has <b>${fmtD(now)} days</b> of annual leave entitled this year.`,
+              `Saving sets it to <b>${fmtD(want)}</b> — they lose <b>${fmtD(lost)} day${lost === 1 ? "" : "s"}</b>.`,
+              "Days already taken are not affected. This is recorded as an amendment."],
+            warn: "If you did not mean to change this number, go back — the rest of the form is saved either way.",
+            okLabel: "Yes, reduce it", cancelLabel: "Go back", act: "empsaveok"
+          };
+          rerender(); break;
+        }
+      }
       // Complain in the order the fields appear on the form, so the message points at the
       // first thing the eye lands on. (The post-resolution `if (!dept)` below stays as the
       // guard for "＋ New team…" with an empty name.)
@@ -3425,7 +3452,11 @@ async function runAction(el) {
         // The entitlement is not a plain column write: changing it moves THIS year's
         // balance and writes an amendment record. One function does both, so the number
         // and the balance can never end up telling different stories.
-        if (db.orgV18 && prev && (Number(prev.annualBase) !== base || entNow(m.id) !== base)) {
+        /* Only when the number was EDITED. It used to fire whenever the stored column
+           disagreed with the ledger — so merely opening a profile and pressing Save, to
+           change a phone number, rewrote that person's entitlement. The box now opens on
+           the real figure (m.entOpen), so "unchanged" is something we can actually know. */
+        if (db.orgV18 && prev && m.entOpen != null && base !== Number(m.entOpen)) {
           const { error: ee } = await sb.rpc("set_annual_entitlement", { p_emp: m.id, p_days: base });
           if (ee) return rpcErr(ee);
         } else if (!db.orgV18) {
@@ -3436,10 +3467,14 @@ async function runAction(el) {
           const { error: oe } = await sb.rpc("credit_oil", { p_emp: m.id, p_days: numOr(f.oilDays, 0), p_reason: (f.oilReason || "").trim() });
           if (oe) return rpcErr(oe);
         }
-        delete vp.empModal; await reload(); toast("Saved " + f.name.trim() + "'s profile");
+        delete vp.empModal; delete vp.entCutOk; await reload(); toast("Saved " + f.name.trim() + "'s profile");
       }
       break;
     }
+    // The modal can be gone by the time this arrives (a stray click, a second dispatch).
+    // Re-entering empsave without it threw; a confirmation must never be able to crash.
+    case "empsaveok": { delete vp.confirmModal; if (!vp.empModal) { rerender(); break; }
+      vp.entCutOk = true; await runAction({ dataset: { act: "empsave" } }); break; }
     case "empdiscard": delete vp.confirmModal; delete vp.empModal; rerender(); break;
     case "albumpstep": { albumpSet(albumpDays() + Number(el.dataset.d || 0)); rerender(); break; }
     case "ltsaveok": { vp.ltDaysOk = true; vp.ltBumpOk = true; await runAction({ dataset: { act: "ltsave" } }); break; }
@@ -4003,7 +4038,7 @@ document.addEventListener("change", async ev => {
   }
   if (f.startsWith("em.") && vp.empModal) {
     const k = f.slice(3);
-    if (k === "joinDMY") {   // free-typed hire date → parse to ISO on blur, then reformat + refresh pro-rate
+    if (k === "joinDMY") {   // free-typed hire date → parse to ISO on blur, then reformat
       const iso = dmyToIso(el.value);
       if (iso) { vp.empModal.form.joinDate = iso; vp.empModal.form.joinDMY = fmtDMY(iso); rerender(); }
       else if (el.value.trim()) toast("Please type the hire date as day/month/year, e.g. 15/07/2026");
@@ -4017,7 +4052,7 @@ document.addEventListener("change", async ev => {
     if (k === "approver1" && !appr1Id(el.value)) { vp.empModal.form.twoLevel = false; vp.empModal.form.approver2 = ""; } // auto-approve ⇒ no 2-level
     // v24: `role` joins this list because the description list under the picker has to
     // follow it — without a redraw the highlight stays on whatever was chosen before.
-    if (["joinDate", "twoLevel", "approver1", "approver2", "dept", "role"].includes(k)) rerender(); // refresh pro-rate preview / dependent selects / new-team field / account-type description
+    if (["joinDate", "twoLevel", "approver1", "approver2", "dept", "role"].includes(k)) rerender(); // refresh dependent selects / new-team field / account-type description
     return;
   }
   if (f.startsWith("off.") && vp.offModal) { vp.offModal[f.slice(4)] = el.value; return; }

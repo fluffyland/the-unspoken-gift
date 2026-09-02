@@ -201,6 +201,7 @@ Roles: `employee` / `approver` (Manager) / `hr` (HR Admin) / `admin`
 | `HANDOVER.md` | this file |
 | `supabase/keepalive_ping_v2.sql` | **run this once in the SQL Editor.** Write-based heartbeat, called daily by cron-job.org. v1 was read-only and did NOT prevent the 2026-07 pause (2-week outage) |
 | `supabase/schema.sql` | **complete backend, one-shot, kept in sync with every migration** — the source of truth for a fresh install |
+| `supabase/migration_app_v31.sql` | **no automatic yearly day, and one number for annual leave.** `annual_entitlement_for` reduced to `least(annual_base, annual_cap)`; `org_settings.prorate_cap` dropped; and a one-off repair setting `annual_base` to what each employee was actually granted this year — **it writes no ledger rows, so nobody gains or loses a day**. Idempotent, with a self-check that refuses to pass if `join_date` reappears in the rule |
 | `supabase/migration_app_v27.sql` | **the audit fixes.** Pending leave blocks the year start (blockers listed in the preview); leavers frozen — a `leave_ledger` trigger plus `active` filters plus `offboard_employee` closing the carry, with `freeze_leaver_carry()` repairing old data; one-application-one-year and year-not-yet-started rules |
 | `supabase/migration_app_v26.sql` | **leave dated in a year Start a new year has closed.** `year_closed_for`, `reconcile_closed_year` (preview + write, one arithmetic), the closed-year rule inside `submit_application` — and it **drops the two older `submit_application` signatures** |
 | `supabase/migration_app_v25.sql` | **`carry_expiry_for` → `security definer`.** One function, one property. As an invoker it returned NULL for any caller who could not read `org_settings`, and NULL there means "never expires" — it disabled the expiry rule silently rather than erroring |
@@ -814,6 +815,23 @@ SOP manual + bootstrap/reset scripts.
   granted off-in-lieu to everybody. The test caught it (OIL went 1.5 → 4.5) — that is a
   silent gift of leave to the whole company, so the yearly grant now excludes `oil`
   explicitly as well. **Two defences, because one failure mode is invisible.**
+- **Two numbers for one thing is a bug waiting for a Save.** The Edit employee box read
+  `employees.annual_base` while the Balances tab read the ledger. They drifted — the 2026
+  allowance had been granted under the old "base + a day per year of service" rule, so the
+  extra days were in the ledger and never in the column. Barry showed **17.5** in one place
+  and **20.5** in the other, and saving reconciled the ledger DOWN to the box: 6.5 days gone,
+  silently, from a form the user had opened for another reason. *A screen that can disagree
+  with the truth will eventually be used to overwrite it.* Both now read `entNow()`.
+- **"It only fires when something disagrees" is not the same as "it only fires when you
+  changed it."** The entitlement call was conditioned on the column disagreeing with the
+  ledger — which, once the box showed the ledger, meant merely opening a profile and pressing
+  Save rewrote that person's entitlement. It now compares against the figure the box was
+  *opened* with. *Guard on the edit, not on the discrepancy.*
+- **The rule was gone from the database and alive everywhere else.** v18 deleted it, but it
+  survived in `schema.sql` (so a fresh install would restore it), in two lines of the
+  Start-a-new-year screen, in the flow chart, and in `GUIDE_HR.md:579` — which contradicted
+  line 623 of the same file. *Deleting behaviour is not finished until the screens and the
+  install script agree with the code.*
 - **The "1 day per year of service" rule was real, and invisible.**
   `annual_base + (year − joinYear − 1)` — someone showing 14 was getting 20, and no screen
   connected them. Removed in v18 along with first-year pro-rating: `annual_entitlement_for`

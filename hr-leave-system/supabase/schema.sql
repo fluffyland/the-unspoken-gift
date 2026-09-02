@@ -530,17 +530,21 @@ create policy steps_read  on approval_steps      for select to authenticated usi
 create policy events_read on application_events  for select to authenticated using (can_view_application(application_id));
 
 -- ---------- 13. 年度入账（HR 每年 1 月 1 日执行一次；也可做成 pg_cron 定时） ----------
--- 年假 = 员工 annual_base + 每多一年服务 +1；入职当年按剩余月份 pro-rate（向上取 0.5）
--- 允许在 SQL Editor（postgres，无登录态）或 HR 账号下执行
+-- 年假 = 员工 annual_base，就这一个数。不按年资加，也不按入职月份折算。
+--
+-- 这里曾经是「annual_base + 每多一年服务 +1，入职当年 pro-rate」。v18 在正式库里去掉了，
+-- 但这个建库脚本没跟着改 —— 于是新装一套系统就会把两条自动规则原样带回来。这就是
+-- Barry 的账本里 7 月发了 17 天、而 employees.annual_base 只有 14 的原因：那 3 天是
+-- 年资加出来的，进了账本却没进那一列，之后在 Edit employee 里按 Save 就把它抹掉了。
+--
+-- 用户原话：「remove all automation of crediting one annualleave every year」
+--           「first year HR will calculate by themself and will credit them via edit employee」
+-- 新人第一年该给几天，HR 自己算，填进 Edit employee → Annual Leave Entitled / Yr。
+-- 系统不从入职日期推算任何东西。
 create or replace function annual_entitlement_for(p_emp uuid, p_year int)
 returns numeric language sql stable as $$
-  select case
-    when extract(year from e.join_date) >= p_year
-      then least(
-             ceil(e.annual_base * (12 - extract(month from e.join_date) + 1) / 12 * 2) / 2,
-             coalesce((select prorate_cap from org_settings where id = 1), 1e9))
-    else e.annual_base + greatest(0, p_year - extract(year from e.join_date) - 1)
-  end
+  select least(e.annual_base,
+               coalesce((select annual_cap from org_settings where id = 1), 1e9))
   from employees e where e.id = p_emp;
 $$;
 
@@ -812,7 +816,7 @@ create table if not exists org_settings (
   email_domain text,
   country      text not null default 'Singapore',
   default_annual_base numeric(5,1) not null default 14,   -- Add employee 表单的年假基数默认值
-  prorate_cap         numeric(5,1)                         -- 首年 pro-rate 封顶（null=不封顶）
+  annual_cap          numeric(5,1)                         -- 全公司年假上限（null=不封顶）
 );
 insert into org_settings (id, company_name, email_domain)
 values (1, 'Shanghai Uniforms', 'shanghai-uniforms.com')

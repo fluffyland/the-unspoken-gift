@@ -133,7 +133,8 @@ LeaveDesk forfeits the days, it does not pay them out.
 - **HR Console → Balances** — every active person has a non-zero **entitled this year** figure
 - **Sick leave reads 14, not 28.** If it reads 28, the reset did not run — you are on a
   build without `migration_app_v16.sql`
-- **Everyone's annual leave is the figure you typed**, not that plus years of service —
+- **Everyone's annual leave is the figure in their Annual Leave Entitled / Yr** — nothing is
+  added for length of service and a new joiner's first year is not pro-rated. You type it —
   the service increment was removed in v18
 - **📋 Past runs** — the permanent record. Pick any past year and it is all still there,
   years later, with its own CSV export. This is the answer to "what happened at the end of
