@@ -480,11 +480,22 @@ sure `index.ts` is the only file. The function's **Logs** tab then shows the err
 > still imports a sibling, and `node build-single.mjs --check` proves the three have not
 > drifted apart. **Never edit `index.ts` by hand** — it is generated.
 
-**4 — Tell the database to call it** (2 minutes)
-Dashboard → **Database → Webhooks → Create a new hook**:
-- Table: `application_events`  ·  Events: **Insert** only
-- Type: **HTTP Request** → **POST** → the function URL shown on its page
-- Header: `Authorization: Bearer <your anon key>`
+**4 — Tell the database to call it** — *already done, if you used `install.sql`*
+
+`install.sql` creates this for you from the `project_ref` and `anon_key` you typed at the
+top of it. Nothing to fill in by hand.
+
+**If you left those blank**, or you are on a database built before this existed, open
+`install.sql`, fill in those two values, and run **just the final section** (from
+`-- Apply your settings` to the end). It prints
+`Email notifications wired to https://…` when it has done it.
+
+> **Why not the dashboard's Webhooks screen?** Its **timeout** box defaults to **1000 ms**,
+> and the function takes 1,100–2,750 ms — measured. At the default, notifications fail now
+> and then with nothing on screen to explain it. The SQL version sets 15000 ms.
+>
+> Either way, **email can never block a leave application**: if the mail call fails, the
+> failure is swallowed and the leave is still recorded. Tested by making it throw on purpose.
 
 **When the test email does not work**
 

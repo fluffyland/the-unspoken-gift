@@ -96,45 +96,69 @@ that removes the most of them — and removes the failure that has already bitte
    - **anon public** key — the long string under *Project API keys*
      (NOT the `service_role` one — never copy that anywhere).
 
-### Step 3 — Build the database (≈3 min, **one paste**)
-1. Left sidebar → **SQL Editor** → **New query**.
-2. Open **`supabase/install.sql`**, select **all** of it (Ctrl+A), copy, paste
-   into the editor.
-3. Click **Run** (bottom-right).
+### Step 3 — Create your own login (≈2 min) — **do this BEFORE the SQL**
+Every other account gets created inside the app with one click. The *first* one
+cannot: the app's "create login" checks that whoever is asking is already HR,
+and on day zero nobody is. So this one is made by hand.
 
-> **This is one file on purpose.** It contains the base schema and every update
-> ever made, already in the right order. You do **not** run the
-> `migration_app_vNN.sql` files one by one — those are only for upgrading a
-> database that already exists. Pasting them individually is how one gets missed,
-> and a missed one leaves the system subtly wrong in a single place.
->
-> ⚠️ **New, empty project only.** If the database already has data, do not run
-> this; use the individual migration files instead.
-4. ✅ Expected: **"Success. No rows returned."**
-   ❌ If you get a red error instead, stop — copy the red text and get it
-   checked (don't run it again blindly).
-
-This single run creates: all tables, the balance ledger, the approval state
-machine, row-level security, the `attachments` storage bucket, Singapore's
-statutory leave types, and the public-holiday calendar. All messages English.
-
-### Step 4 — Create the first Owner / Super Admin (≈4 min)
-Every other account can be created inside the app — but the *first* person
-must be made by hand (the app's "create login" checks that the caller is
-already HR, and on day zero nobody is).
-
-**4a. Make the login:**
-1. Left sidebar → **Authentication** → **Users** → **Add user** →
-   *Create new user*.
-2. Email: the owner's real email. Password: `Ssu123@`.
+1. Left sidebar → **Authentication** → **Users** → **Add user** → *Create new user*.
+2. **Email**: your real work email. **Password**: `Ssu123@` (change it after you sign in).
 3. Tick **Auto Confirm User** → **Create user**.
 
-**4b. Make them an employee with Owner rights:**
-1. Open `supabase/bootstrap_owner.sql` and edit the two marked lines
-   (real name + the same email as 4a).
-2. SQL Editor → New query → paste → **Run**.
-3. ✅ The query at the bottom should return one row with `role = admin`
-   and a non-empty `auth_user_id`.
+> Order matters. The next step looks for this login and links it to your Owner
+> record. Run the SQL first and it will simply warn you that no login was found.
+
+### Step 4 — Build the database (≈3 min, **one paste**)
+
+1. Open **`supabase/install.sql`**. At the very top is a short block marked
+   **✏️ FILL THIS IN** — the only part you edit:
+
+```sql
+insert into _leavedesk_setup values (
+  'Shanghai School Uniforms',      -- company name, shown on screen and in emails
+  'shanghai-uniforms.com',         -- your staff email domain
+  14,                              -- days of annual leave a new employee starts on
+  5,                               -- most days anyone may carry into next year
+  'Lee Jian Wei',                  -- your name
+  'you@shanghai-uniforms.com',     -- the SAME email as Step 3
+  'abcdefgh',                      -- from your URL: https://abcdefgh.supabase.co
+  'eyJhbGciOi...'                  -- Settings → API → anon public key
+);
+```
+
+   Leave the last two blank if you are not doing email yet — you can fill them in
+   and re-run just the last section later.
+
+2. Select **all** of the file (Ctrl+A), copy, paste into **SQL Editor → New query**.
+3. **Run**.
+
+> **One file on purpose.** It contains the base database and every update ever
+> made, already in the right order, plus your settings, your Owner account, and
+> the email trigger. You do **not** run the `migration_app_vNN.sql` files one by
+> one — those only upgrade a database that already exists.
+>
+> ⚠️ **New, empty project only.** Never run it on a database that has real data.
+
+4. ✅ At the end you should see, in the messages:
+
+```
+Company set to: Shanghai School Uniforms
+Owner created and linked: you@shanghai-uniforms.com
+Email notifications wired to https://abcdefgh.supabase.co/functions/v1/send-notification
+LeaveDesk installed. Next: deploy the two Edge Functions...
+```
+
+   ❌ **"NO LOGIN FOUND"** means Step 3 was skipped or the email does not match.
+   Do Step 3, then run just the last section of the file again.
+
+> This also creates the email trigger, replacing the Database Webhook you would
+> otherwise fill in by hand — including its timeout box, which defaults to
+> 1000 ms, is shorter than the function actually takes, and fails intermittently
+> with nothing on screen. This sets it to 15000 ms.
+>
+> **Email can never block leave.** If the mail server is down, unreachable, or
+> misconfigured, the application is still recorded — tested by making the mail
+> call throw on purpose and confirming the leave event still saved.
 
 ### Step 5 — Deploy the create-login function (≈3 min)
 This lets the Owner/HR create every future staff login with one click.
