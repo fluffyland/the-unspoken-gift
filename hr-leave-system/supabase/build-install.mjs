@@ -67,6 +67,12 @@ create table _leavedesk_setup (
   owner_name           text,     -- YOU — the first HR/Owner account
   owner_email          text      -- must match the login you created in Authentication
 );
+-- Nobody but this SQL Editor session ever needs to read this, and the last thing
+-- this file does is drop it. Row Level Security with no policy = no anon or
+-- signed-in client can see it. Without this line the Supabase dashboard stops and
+-- asks you to approve an exception -- and being asked to approve something you
+-- cannot judge, in the middle of setting up a new company, is not a setup step.
+alter table _leavedesk_setup enable row level security;
 insert into _leavedesk_setup values (
   'My Company',
   'company.com',

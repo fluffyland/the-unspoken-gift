@@ -94,6 +94,7 @@ Wait for "Success" before starting the next.
 | 11 | `migration_app_v31.sql` | **Annual leave never grows by itself** — no day per year of service, no first-year pro-rating |
 | 12 | `migration_app_v32.sql` | Where notification emails are sent from — filled in by the website itself, not typed twice |
 | 13 | `migration_app_v35.sql` | **Every leave record now says which year it belongs to.** Carry-forward is worked out from last year's actual entries instead of being guessed, and Start a new year refuses a year whose allowances have already been credited |
+| | | *Supabase will warn that this file "includes destructive operations". Expected: it drops a trigger and two constraints and recreates each on the very next line. No `delete`, no `truncate`, and no statement anywhere in the file writes a day count — the file checks that for itself at the end and refuses to finish if any figure moved.* |
 | 14 | `keepalive_ping_v3.sql` | The heartbeat that stops a free project sleeping, and expires due carry-over daily |
 | 15 | `undo_year_start.sql` | Puts one "Start a new year" run back exactly as it was. Shows you what it would do before it does anything |
 

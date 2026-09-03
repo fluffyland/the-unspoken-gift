@@ -759,8 +759,26 @@ so and naming the two screens that *do* change a running year's figures.
   zero: somebody who overspent last year must start the new year owing those days.
   Clamping forgives them silently. There is a test for exactly this (`B16`).
 
-Tests: `hr-leave-system/tests/` — `./run.sh` runs both halves (51 SQL + 18 browser
-assertions), and 7 mutants were checked one at a time.
+*Two things the verification taught, worth keeping:*
+
+- **Never build a scratch table in `public`.** v35 originally snapshotted balances into
+  `_v35_before` to compare before and after. The Supabase dashboard stopped and asked the
+  user to approve an RLS exception — a decision they cannot evaluate, in the middle of a
+  repair. It was also unnecessary: the old rule reads only columns the backfill does not
+  touch, so both rules can be computed side by side at the end. And the balance half of
+  that check compared `sum(delta_days)` with `sum(delta_days)` while nothing writes that
+  column — **a check that could not fail.** `install.sql` had the same shape
+  (`_leavedesk_setup`); that one is genuinely needed, so it enables RLS with no policy.
+- **A fixture that cannot distinguish right from wrong is not evidence.** The reported
+  company's data sits entirely in 2026, so wording-year and typed-year always agree in it.
+  Four deliberate year-tagging bugs were introduced and that fixture caught **none** of
+  them. `tests/seed_two_years.sql` exists for this reason and catches all four. Check what
+  a fixture can *discriminate*, not just that it passes.
+
+Tests: `hr-leave-system/tests/` — `./run.sh` runs three scenarios plus the page
+(65 SQL + 18 browser assertions). Mutants: 7 on the fresh-install path, 5 more on the
+upgrade path (the wording classifier is only reachable there — every live code path sets
+`kind` explicitly, so a broken classifier is invisible on a new install).
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 

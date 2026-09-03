@@ -67,6 +67,12 @@ create table _leavedesk_setup (
   owner_name           text,     -- YOU — the first HR/Owner account
   owner_email          text      -- must match the login you created in Authentication
 );
+-- Nobody but this SQL Editor session ever needs to read this, and the last thing
+-- this file does is drop it. Row Level Security with no policy = no anon or
+-- signed-in client can see it. Without this line the Supabase dashboard stops and
+-- asks you to approve an exception -- and being asked to approve something you
+-- cannot judge, in the middle of setting up a new company, is not a setup step.
+alter table _leavedesk_setup enable row level security;
 insert into _leavedesk_setup values (
   'My Company',
   'company.com',
@@ -8344,24 +8350,18 @@ create trigger trg_ledger_tag before insert or update on leave_ledger
   for each row execute function tag_leave_ledger();
 
 -- ---------- 4. 回填 ----------
--- 先把「今年每个人每种假别的额度」按**旧规则**记下来。回填之后要一模一样。
-drop table if exists _v35_before;
-create table _v35_before as
-select l.emp_id, l.leave_type,
-       sum(l.delta_days) as total,
-       sum(l.delta_days) filter (
-         where l.ref_application is null
-           and extract(year from l.created_at)::int = extract(year from current_date)::int
-           and l.reason not like '%expired (unused)%'
-           and l.reason not like '%above the carry-over cap%'
-           and l.reason not like '%reset — use it or lose it%'
-           and l.reason not like '%excess forfeited%'
-           and l.reason not like '%expired carry-over%'
-           and l.reason not like 'Offboarding%'
-           and l.reason not like '%结转%'
-           and l.reason not like '%作废%') as entitled_now
-from leave_ledger l group by l.emp_id, l.leave_type;
-
+-- 只写 leave_year 和 kind 这两列。**delta_days 一个字都不碰** —— 整个文件里
+-- 没有任何一条语句写它，所以没有人会因为这次升级多一天或少一天。
+--
+-- 这里本来先建了一张 _v35_before 表，把「升级前的数字」拍个快照，升级后拿来对账。
+-- 那张表有两个毛病：
+--   1. 它建在 public 里，没有 RLS —— Supabase 会弹窗要你批准一个「让登录用户
+--      可能读到全公司余额」的例外。让人去批一个他判断不了的例外，本身就是错的。
+--   2. 那个余额对账**永远不可能失败** —— 它拿 sum(delta_days) 跟 sum(delta_days)
+--      比，而没有任何语句写这一列。一条不可能失败的检查比没有检查更糟。
+-- 旧那套判定只读 reason / created_at / ref_application / delta_days，这四列回填
+-- 都不动，所以**旧规则在升级前后给出的答案一模一样** —— 快照根本不需要，末尾
+-- 直接把新旧两套规则并排算一次就行，而且这样还骗不过一份过期的快照。
 update leave_ledger set
   kind       = coalesce(kind,       ledger_kind_of(reason, ref_application, delta_days)),
   leave_year = coalesce(leave_year, ledger_year_of(reason, ref_application, created_at))
@@ -8807,32 +8807,58 @@ begin
   select count(*) into bad from leave_ledger where leave_year is null or kind is null;
   if bad > 0 then raise exception 'v35 FAILED: % ledger row(s) still have no year or no kind', bad; end if;
 
-  -- 余额：回填只写标签，不碰 delta_days，所以每个人每种假别的合计必须一模一样
+  -- 请假／销假：必须挂在**假期日期**那一年，不是录入那一天
   select count(*) into bad
-    from _v35_before b
-    join (select emp_id, leave_type, sum(delta_days) as total
-            from leave_ledger group by emp_id, leave_type) a
-      on a.emp_id = b.emp_id and a.leave_type = b.leave_type
-   where a.total is distinct from b.total;
-  if bad > 0 then raise exception 'v35 FAILED: % balance(s) changed during the backfill', bad; end if;
-
-  -- 今年的额度：新旧两套规则必须给出同一个数字
-  select count(*) into bad
-    from _v35_before b
-   where coalesce(b.entitled_now, 0)
-         is distinct from entitled_in_year(b.emp_id, b.leave_type,
-                                           extract(year from current_date)::int);
+    from leave_ledger l join applications a on a.id = l.ref_application
+   where l.leave_year <> extract(year from a.start_date)::int;
   if bad > 0 then
-    for r in
-      select e.name, b.leave_type, coalesce(b.entitled_now, 0) as was,
-             entitled_in_year(b.emp_id, b.leave_type, extract(year from current_date)::int) as now
-        from _v35_before b join employees e on e.id = b.emp_id
-       where coalesce(b.entitled_now, 0)
-             is distinct from entitled_in_year(b.emp_id, b.leave_type, extract(year from current_date)::int)
-    loop
-      raise warning '  % / % : % → %', r.name, r.leave_type, r.was, r.now;
-    end loop;
-    raise exception 'v35 FAILED: % entitlement figure(s) moved during the backfill', bad;
+    raise exception 'v35 FAILED: % leave entr(ies) are filed under a different year from the leave itself', bad;
+  end if;
+
+  -- 措辞里写明了年份的（发放、清零、调整都是这个格式）：标签必须跟措辞一致
+  select count(*) into bad
+    from leave_ledger l
+   where l.ref_application is null
+     and substring(coalesce(l.reason, '') from '^([0-9]{4})') is not null
+     and substring(l.reason from '^([0-9]{4})')::int between 2000 and 2100
+     and l.leave_year <> substring(l.reason from '^([0-9]{4})')::int;
+  if bad > 0 then
+    raise exception 'v35 FAILED: % entr(ies) are filed under a year their own wording contradicts', bad;
+  end if;
+
+  -- **这是真正重要的一条。** 今年每个人每种假别的额度，新旧两套判定必须给出同一个数字。
+  -- 两边都在同一次扫描里现算 —— 不存快照，所以骗不过一份过期的数据；而旧那套只读
+  -- 回填不碰的那几列，所以它现在的答案就是升级前的答案。
+  bad := 0;
+  for r in
+    with cy as (select extract(year from current_date)::int as y),
+    cmp as (
+      select l.emp_id, l.leave_type,
+             coalesce(sum(l.delta_days) filter (
+               where l.ref_application is null
+                 and extract(year from l.created_at)::int = (select y from cy)
+                 and l.reason not like '%expired (unused)%'
+                 and l.reason not like '%above the carry-over cap%'
+                 and l.reason not like '%reset — use it or lose it%'
+                 and l.reason not like '%excess forfeited%'
+                 and l.reason not like '%expired carry-over%'
+                 and l.reason not like 'Offboarding%'
+                 and l.reason not like '%结转%'
+                 and l.reason not like '%作废%'), 0) as was,
+             coalesce(sum(l.delta_days) filter (
+               where l.leave_year = (select y from cy)
+                 and l.kind in ('grant', 'adjust')), 0) as now
+        from leave_ledger l group by l.emp_id, l.leave_type)
+    select e.name, cmp.leave_type, cmp.was, cmp.now
+      from cmp join employees e on e.id = cmp.emp_id
+     where cmp.was is distinct from cmp.now
+     order by e.name, cmp.leave_type
+  loop
+    bad := bad + 1;
+    raise warning '  % / % : % → %', r.name, r.leave_type, r.was, r.now;
+  end loop;
+  if bad > 0 then
+    raise exception 'v35 FAILED: % entitlement figure(s) moved during the backfill — nothing has been changed', bad;
   end if;
 
   -- 规则里不该再出现按年份猜的写法
@@ -8851,8 +8877,6 @@ begin
 
   raise notice 'v35 installed: every ledger entry now records the leave year it belongs to.';
 end $$;
-
-drop table if exists _v35_before;
 
 
 -- ===========================================================================

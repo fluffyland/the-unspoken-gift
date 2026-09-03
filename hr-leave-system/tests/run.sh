@@ -33,15 +33,30 @@ sql() {
   P -q -f "$HERE/seed_new_company.sql" >/dev/null 2>&1
   P -f "$HERE/t35.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
 
-  echo
-  echo "--- an existing company, upgraded in place by migration_app_v35.sql ---"
   # install.sql with the v35 section cut out = the database as it is before the upgrade
   awk '/^-- migration_app_v35\.sql$/{s=1} /^-- keepalive_ping_v3\.sql$/{s=0} !s' "$SB/install.sql" > "$D/pre35.sql"
-  fresh; P -q -f "$D/pre35.sql" >/dev/null 2>&1
-  P -q -f "$HERE/seed_reported_case.sql" >/dev/null 2>&1
-  P -q -c "create table _pre as select emp_id, leave_type, balance from leave_balances" >/dev/null
-  P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
-  P -f "$HERE/t35_reported_case.sql" 2>&1 | grep -E "NOTICE:  ok|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  # $1 = seed, $2 = assertions. Snapshot the balances BEFORE the migration: a snapshot
+  # taken afterwards could never disagree, and a check that cannot fail is worse than none.
+  upgrade() {
+    fresh; P -q -f "$D/pre35.sql" >/dev/null 2>&1
+    P -q -f "$HERE/$1" >/dev/null 2>&1
+    P -q -c "create table _pre as select emp_id, leave_type, balance from leave_balances" >/dev/null
+    P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
+    P -f "$HERE/$2" 2>&1 | grep -E "NOTICE:  ok|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+  }
+
+  echo
+  echo "--- upgraded in place: the company that reported the bug (all of it in one year) ---"
+  upgrade seed_reported_case.sql t35_reported_case.sql
+
+  echo
+  echo "--- upgraded in place: a company with a real previous year ---"
+  # This fixture exists because the one above cannot test the year tags at all. Every
+  # row in it sits in 2026, so "the year the wording names" and "the year it was typed"
+  # always agree, and a migration that filed everything under the wrong year would look
+  # exactly like one that got it right. Here they disagree in three places on purpose.
+  upgrade seed_two_years.sql t35_two_years.sql
 
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 }
