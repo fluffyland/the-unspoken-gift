@@ -422,11 +422,37 @@ grant  execute on function amend_leave_type_days(text, numeric, boolean) to auth
 create or replace function reconcile_all_leave_types(p_preview boolean default true)
 returns table ("Leave type" text, "Set to" numeric, "People corrected" int, "Newly credited" int)
 language plpgsql security definer set search_path = public as $$
-declare t record; v jsonb;
+declare t record; v jsonb; y int := extract(year from current_date)::int; miss int;
 begin
   if not is_hr() and session_user <> 'postgres' then
     raise exception 'Only HR can level the leave types';
   end if;
+
+  -- ---- 年假先补 ----
+  -- 年假不在下面那个循环里：它是**每人一个数字**，没有全公司统一的天数。
+  -- 但「没有统一天数」不等于「不用管」：一个人今年的年假额度**整条都不见了**，
+  -- 下面的循环一辈子也修不到他 —— 那就是 Balances 上那个「-1 / 0」：
+  -- 休掉了一天，额度是零，两个数字**彼此自洽**，所以余额对账根本看不出问题。
+  -- （ABB 就是这样：他那条 2026 年假是年初那次错误运行写的，撤销时一并删掉了，
+  --   而他本来就没有别的年假发放。）
+  -- grant_annual_entitlements 正好做这件事：谁今年缺哪一种假的发放就补哪一种，
+  -- 年假按他自己的 Annual Leave Entitled / Yr 发。有的人一天都不动。
+  select count(*) into miss
+    from employees e cross join leave_types lt
+   where e.active and lt.code <> 'oil' and (lt.default_days > 0 or lt.code = 'annual')
+     and (lt.gender_eligibility is null or lt.gender_eligibility = e.gender)
+     and not exists (select 1 from leave_ledger l
+                      where l.emp_id = e.id and l.leave_type = lt.code
+                        and l.leave_year = y and l.kind = 'grant');
+  if not p_preview and miss > 0 then perform grant_annual_entitlements(y); end if;
+  if miss > 0 then
+    "Leave type"       := 'Annual Leave (and any missing allowance)';
+    "Set to"           := null;
+    "People corrected" := 0;
+    "Newly credited"   := miss;
+    return next;
+  end if;
+
   for t in select code, name_en, default_days from leave_types
             where code <> 'annual' and code <> 'oil' and not no_deduct
             order by sort loop
@@ -714,24 +740,33 @@ end $$;
 -- 实际是多少。**有几个不同的数字，就是几年下来欠的账**：入职发放用的是入职那天
 -- 的天数，后来改过的每一次都留下新的一层。要抹平：照它说的做，去 Leave types
 -- 把那个数字重打一遍保存 —— v35 之后，那一下会把每个人对账到那个数字。
-select t.name_en                                                   as "Leave type",
-       trim_scale(t.default_days)                                  as "Leave types tab says",
-       count(distinct x.ent)                                       as "Different figures in use",
-       string_agg(distinct trim_scale(x.ent)::text, '  /  ')       as "Figures people actually hold",
-       case when count(distinct x.ent) > 1
+-- 「有几个不同的数字」看的是拿到过额度的人。**没拿到过的人在那一列里是看不见的**：
+-- 他的余额和额度彼此自洽（休了一天、额度为零，就是 -1 / 0），任何余额对账都查不出来。
+-- 所以「一个人都没发过」单独一列。ABB 的年假就是这样丢的。
+select t.name_en                                              as "Leave type",
+       trim_scale(t.default_days)                             as "Leave types tab says",
+       count(distinct x.ent) filter (where x.granted)         as "Different figures in use",
+       string_agg(distinct trim_scale(x.ent)::text, '  /  ')
+         filter (where x.granted)                             as "Figures people actually hold",
+       count(*) filter (where not x.granted)                  as "Holding NO allowance",
+       case when count(*) filter (where not x.granted) > 0
+            then '⚠ ' || count(*) filter (where not x.granted)
+                 || ' person(s) hold none — run reconcile_all_leave_types(false)'
+            when count(distinct x.ent) filter (where x.granted) > 1
             then '⚠ retype ' || trim_scale(t.default_days) || ' on the Leave types tab and save'
-            else 'consistent' end                                  as "What to do"
+            else 'consistent' end                             as "What to do"
   from leave_types t
   join lateral (
-    select entitled_in_year(e.id, t.code, extract(year from current_date)::int) as ent
+    select entitled_in_year(e.id, t.code, extract(year from current_date)::int) as ent,
+           exists (select 1 from leave_ledger l
+                    where l.emp_id = e.id and l.leave_type = t.code
+                      and l.leave_year = extract(year from current_date)::int
+                      and l.kind = 'grant') as granted
       from employees e
      where e.active
        and (t.gender_eligibility is null or t.gender_eligibility = e.gender)
-       and exists (select 1 from leave_ledger l
-                    where l.emp_id = e.id and l.leave_type = t.code
-                      and l.leave_year = extract(year from current_date)::int
-                      and l.kind = 'grant')
   ) x on true
- where t.code <> 'annual' and t.code <> 'oil' and not t.no_deduct
+ where t.code <> 'oil' and not t.no_deduct
+   and (t.default_days > 0 or t.code = 'annual')
  group by t.code, t.name_en, t.default_days, t.sort
  order by t.sort;

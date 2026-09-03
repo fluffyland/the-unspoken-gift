@@ -73,6 +73,12 @@ sql() {
   # got it right. Here they disagree in three places on purpose.
   upgrade seed_two_years.sql t35_two_years.sql
 
+  echo
+  echo "--- every leave type, every employee, through the whole life of an application ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t35_lifecycle.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 }
 

@@ -802,6 +802,21 @@ the yearly run will not credit them a second time. Writing it as a correction in
 what produced sick 27 in the first place — there is a mutant for exactly that (`L`).
 `reconcile_all_leave_types(false)` applies it to every yearly type in one call.
 
+**A self-consistent ledger can still be wrong, and no balance check will say so.**
+Reported as "why still have one employee different". `available == entitled + carried −
+taken − pending` held for every employee and every leave type — and ABB still read
+**−1 / 0** on Balances. He had taken a day and held no allowance at all; those two
+figures agree with each other perfectly. His annual allowance had been written by the
+bad year start and removed by the undo, and he had no other, and
+`reconcile_all_leave_types` deliberately skips annual leave (it is per person, not
+company-wide), so nothing was ever going to restore it. The fix is one line —
+`reconcile_all_leave_types` now calls `grant_annual_entitlements` first, which fills a
+missing allowance of ANY type at that person's own figure. The migration's report grew a
+**"Holding NO allowance"** column, because this class of fault is invisible in the
+figures themselves. `t35_lifecycle.sql` asserts `drift()` cannot see it (L8) before
+asserting `missing_allowance()` can (L9) — the point being that the check that would
+have caught it did not exist.
+
 **Supabase's SQL Editor does not display `raise notice`.** A migration whose only success
 signal is a notice reports "Success. No rows returned." and the user has no idea whether it
 worked — which is what happened. v35 now **ends with a `select`**, and that select is the
@@ -824,10 +839,20 @@ types to retype. End every migration with something visible.
   them. `tests/seed_two_years.sql` exists for this reason and catches all four. Check what
   a fixture can *discriminate*, not just that it passes.
 
-Tests: `hr-leave-system/tests/` — `./run.sh` runs four scenarios plus the page
-(100 SQL + 18 browser assertions). The joiners scenario deliberately runs the migration
-**twice**, putting the old mis-classification back in between, because that is the case
-that was reported and the one a single run cannot catch. Mutants: 7 on the fresh-install path, 5 more on the
+Tests: `hr-leave-system/tests/` — `./run.sh` runs five scenarios plus the page
+(139 SQL + 18 browser assertions). Two of them exist because of how this went wrong:
+the joiners scenario runs the migration **twice**, putting the old mis-classification
+back in between (a single run cannot catch it); and `t35_lifecycle.sql` walks EVERY
+leave type through apply → approve → withdraw → reject → cancel → amend, re-checking
+every employee and every type after each step.
+
+**Two harness bugs found while mutation-testing, both of which reported a passing
+result that was not real.** A mutant was built on `install.sql`, which already contains
+v35 — so removing a unique index from the migration changed nothing and the mutant
+"survived". And a mutant of the cancellation refund edited three dead copies of
+`confirm_cancel`; the live one delegates to `apply_cancellation`. Both looked like
+"the test does not catch this". **When a mutant survives, check the mutant reached the
+code before believing the test is weak.** Mutants: 7 on the fresh-install path, 5 more on the
 upgrade path (the wording classifier is only reachable there — every live code path sets
 `kind` explicitly, so a broken classifier is invisible on a new install).
 
