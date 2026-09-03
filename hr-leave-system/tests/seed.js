@@ -31,6 +31,10 @@ window.__seed = function (opts) {
            defaultCarryCap: 5, carryExpiryMonths: opts.carryMonths === undefined ? 12 : opts.carryMonths,
            // v24: the expiry is a day + month that repeats every year. Defaults to
            // 31 December, which is what carryExpiryMonths: 12 always meant.
+           // v36: off-in-lieu gets the same pair. Default null/null = never expires,
+           // which is what every existing company keeps until HR picks a month.
+           oilExpiryMonth: opts.oilMD === undefined ? null : (opts.oilMD && opts.oilMD[0]),
+           oilExpiryDay:   opts.oilMD === undefined ? null : (opts.oilMD && opts.oilMD[1]),
            carryExpiryMonth: opts.carryMD === undefined ? 12 : (opts.carryMD && opts.carryMD[0]),
            carryExpiryDay:   opts.carryMD === undefined ? 31 : (opts.carryMD && opts.carryMD[1]),
            // v28: who notification email is limited to while testing. "" = everyone.
@@ -58,6 +62,7 @@ window.__seed = function (opts) {
     orgV16: opts.noV16 ? false : true,
     orgV18: (opts.noV16 || opts.noV18) ? false : true,
     orgV24: (opts.noV16 || opts.noV24) ? false : true,
+    orgV36: opts.noV36 ? false : true,
     orgV28: (opts.noV16 || opts.noV28) ? false : true,
     amendments: opts.amendments || [],
     allCarry: opts.allCarry || [],

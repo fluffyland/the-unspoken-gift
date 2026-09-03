@@ -840,7 +840,7 @@ types to retype. End every migration with something visible.
   a fixture can *discriminate*, not just that it passes.
 
 Tests: `hr-leave-system/tests/` — `./run.sh` runs five scenarios plus the page
-(139 SQL + 18 browser assertions). Two of them exist because of how this went wrong:
+(176 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
 the joiners scenario runs the migration **twice**, putting the old mis-classification
 back in between (a single run cannot catch it); and `t35_lifecycle.sql` walks EVERY
 leave type through apply → approve → withdraw → reject → cancel → amend, re-checking
@@ -855,6 +855,43 @@ v35 — so removing a unique index from the migration changed nothing and the mu
 code before believing the test is weak.** Mutants: 7 on the fresh-install path, 5 more on the
 upgrade path (the wording classifier is only reachable there — every live code path sets
 `kind` explicitly, so a broken classifier is invisible on a new install).
+
+**v36 — the off-in-lieu expiry date (Sep 2026).** Asked for as "same as the carry
+forward AL function", but the rule the user chose is **not** the same, and that
+difference is the whole thing to remember:
+
+| | carried annual leave | off-in-lieu |
+|---|---|---|
+| what dies on the date | last year's leftover only | **the whole balance**, however recently earned |
+| this year's | safe until next year's date | goes too |
+
+Off by default (`oil_expiry_month`/`oil_expiry_day` both NULL). Installing it costs
+nobody a day until HR picks a month. Everything else mirrors the carry-forward
+machinery: `oil_expiry_for`, `oil_last_cutoff`, `oil_expiry_log` (the equivalent of
+`annual_carry.expired_at`), `due_unwritten_oil` subtracted inside `leave_balances` as
+the safety net, `expire_due_oil` to write it down, `set_oil_expiry` with a preview,
+and the daily heartbeat to run it.
+
+*Three things the tests caught that would have shipped otherwise:*
+
+- **`created_at` on the write-off must be the CUT-OFF DATE, not `now()`.**
+  `oil_balance_asof` asks "what was in hand on that day", so a write-off stamped today
+  is invisible to it — and the next cut-off then forfeits the same days again, driving
+  the balance negative. Found by a balance going to −2 in a later section.
+- **`install.sql` loads `keepalive_ping_v3.sql` AFTER the migrations, and that file
+  does `drop function` + `create function`** — so v36's version of `keepalive_ping` was
+  thrown away on every fresh install and off-in-lieu would never have expired, silently.
+  The call now lives in `keepalive_ping_v3.sql` too. **Anything a migration adds to
+  `keepalive_ping` must be added there as well.**
+- **Do not redefine `keepalive_ping` casually.** It returns `bigint` and maintains
+  `keepalive_heartbeat.ping_count`, which is the only proof the heartbeat actually
+  writes. A first draft returned `text` and dropped the counter — that breaks keeping
+  the project awake, and nobody finds out until Supabase pauses it.
+
+`oil_balance_asof` uses `created_at` for credits and the LEAVE DATES for taken/refund
+rows. That is not a v35 relapse: v35 forbids inferring which *leave year* a row belongs
+to, whereas this asks "had the day been earned yet when the cut-off passed", which is
+exactly what `created_at` answers.
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 

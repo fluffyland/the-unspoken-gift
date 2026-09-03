@@ -782,6 +782,13 @@ Two things, both in **Company settings**, decide what happens:
 - **Carry Forward AL Maximum Day** — the most annual leave one person may keep.
   There is a company default, and each employee can have their own in **Edit employee**.
   Somebody with `5` keeps at most 5 days, however many they have left.
+- **Off-in-Lieu expiry date** — the day unused off-in-lieu dies.
+  Starts on **— Never expires —**; nothing happens until you pick a month.
+  ⚠️ **This one is not the same as the annual-leave box below it.** Carried annual
+  leave loses only *last year's* leftover. Off-in-lieu loses the **whole balance** on
+  that day, however recently it was earned — someone who earns a day in February and
+  has a 31 March deadline loses it in March. The screen says so before you save, and
+  tells you how many days go and from how many people.
 - **Carry Forward AL expiry date** — the day the kept days die.
   Set **30 June** and they must be used by 30 June, or they are gone. It repeats every
   year. **— Never expires —** means they never expire.

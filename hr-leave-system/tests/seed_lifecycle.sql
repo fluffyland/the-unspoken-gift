@@ -55,3 +55,23 @@ select 'f0000000-0000-0000-0000-000000000004', lt.code,
 
 -- ...and now they leave.
 update employees set active = false where name = 'Gone';
+
+-- ---- Off-in-lieu, earned at different times of the year (for t36) ----
+-- Fem: 2 days earned before 31 January, 2 more after it, 1 taken in April.
+-- April on purpose: the lifecycle test walks Fem through every leave type in
+-- consecutive weeks from 5 January, and one application per person may not overlap
+-- another. A date inside that run makes the OTHER suite fail, for a reason that has
+-- nothing to do with what either is testing.
+-- Male: 2 days, both earned before 31 January and none after.
+-- The dates matter: they are what tells "forfeit the lot" apart from
+-- "forfeit only last year's".
+insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_at) values
+ ('f0000000-0000-0000-0000-000000000001','oil', 2, 'Off-in-lieu earned', '2026-01-10 02:00:00+00'),
+ ('f0000000-0000-0000-0000-000000000001','oil', 2, 'Off-in-lieu earned', '2026-02-10 02:00:00+00'),
+ ('f0000000-0000-0000-0000-000000000002','oil', 2, 'Off-in-lieu earned', '2026-01-10 02:00:00+00');
+insert into applications (id, emp_id, leave_type, start_date, end_date, days, status, reason)
+values ('c0000000-0000-0000-0000-0000000000b1','f0000000-0000-0000-0000-000000000001','oil',
+        '2026-04-20','2026-04-20', 1, 'approved', 'oil day');
+insert into leave_ledger (emp_id, leave_type, delta_days, reason, ref_application, created_at)
+values ('f0000000-0000-0000-0000-000000000001','oil', -1, 'Leave taken',
+        'c0000000-0000-0000-0000-0000000000b1', '2026-04-20 02:00:00+00');

@@ -533,6 +533,10 @@ async function loadAll() {
     // v24: the expiry is a day + month that repeats every year. Both null = never expires.
     carryExpiryMonth: (o.carry_expiry_month == null ? null : Number(o.carry_expiry_month)),
     carryExpiryDay:   (o.carry_expiry_day   == null ? null : Number(o.carry_expiry_day)),
+    // v36: the same idea for off-in-lieu. Both null = never expires, which is the
+    // default and what every existing company keeps until HR picks a month.
+    oilExpiryMonth:   (o.oil_expiry_month   == null ? null : Number(o.oil_expiry_month)),
+    oilExpiryDay:     (o.oil_expiry_day     == null ? null : Number(o.oil_expiry_day)),
     notifyOnlyEmp: o.notify_only_emp || "" };
 
   const [appR, ledR] = await Promise.all([
@@ -601,6 +605,8 @@ async function loadAll() {
   // v35: every ledger entry records its leave year and what kind of entry it is.
   // An empty ledger reads as "not tagged", which is correct — there is nothing to read.
   db.ledgerTagged = !!(ledR.data && ledR.data[0] && ("leave_year" in ledR.data[0]));
+  // v36: off-in-lieu can be given an expiry date, alongside the carry-forward one.
+  db.orgV36     = !!(orgR.data && ("oil_expiry_month" in orgR.data));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -950,7 +956,7 @@ function baseAboveCap(v) {
   return `Annual Leave Entitled / Yr can't be more than the company maximum of ${fmtD(cap)} days.`;
 }
 
-function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : k === "carryMon" ? (o.carryExpiryMonth ?? "") : k === "carryDay" ? (o.carryExpiryDay ?? "") : k === "notifyOnly" ? (o.notifyOnlyEmp ?? "") : (o.defaultAnnualBase ?? 14); }
+function oPick(k) { const dv = vp.draft && vp.draft.org, o = db.org || {}; if (dv && (k in dv)) return dv[k]; return k === "company" ? (o.company || "") : k === "domain" ? (o.emailDomain || "") : k === "annualCap" ? (o.annualCap ?? "") : k === "accrualMode" ? (o.accrualMode || "annual") : k === "carryCap" ? (o.defaultCarryCap ?? 0) : k === "carryMonths" ? (o.carryExpiryMonths ?? "") : k === "carryMon" ? (o.carryExpiryMonth ?? "") : k === "carryDay" ? (o.carryExpiryDay ?? "") : k === "oilMon" ? (o.oilExpiryMonth ?? "") : k === "oilDay" ? (o.oilExpiryDay ?? "") : k === "notifyOnly" ? (o.notifyOnlyEmp ?? "") : (o.defaultAnnualBase ?? 14); }
 function draftSummary() {
   const d = vp.draft || {}, out = [];
   for (const c in (d.types || {})) { const t = lt(c), dv = d.types[c], p = [];
@@ -1011,6 +1017,47 @@ function expiryChanged() {
   const e = expiryPick(), o = db.org || {};
   return e.mon !== (o.carryExpiryMonth ?? null) || e.day !== (o.carryExpiryDay ?? null);
 }
+/* v36 — off-in-lieu, the same three helpers. Deliberately separate from the carry ones
+   rather than parameterised: the two rules are NOT the same and merging them would
+   invite somebody to "simplify" one into the other later.
+     carried annual leave : last year's leftover dies on this year's date
+     off-in-lieu          : whatever is in the balance on the date is forfeited */
+function oilExpiryPick() {
+  const d = (vp.draft || {}).org || {}, o = db.org || {};
+  const raw = k => (k in d) ? d[k] : (k === "oilMon" ? o.oilExpiryMonth : o.oilExpiryDay);
+  let mon = raw("oilMon"), day = raw("oilDay");
+  mon = (mon === "" || mon == null) ? null : Number(mon);
+  day = (day === "" || day == null) ? null : Number(day);
+  if (!mon) return { mon: null, day: null };
+  return { mon, day: Math.min(day || 1, daysInMon(mon)) };
+}
+function oilExpiryChanged() {
+  if (!db.orgV36) return false;
+  const d = (vp.draft || {}).org || {};
+  if (!("oilMon" in d) && !("oilDay" in d)) return false;
+  const e = oilExpiryPick(), o = db.org || {};
+  return e.mon !== (o.oilExpiryMonth ?? null) || e.day !== (o.oilExpiryDay ?? null);
+}
+function oilExpiryLines(prev) {
+  const e = oilExpiryPick();
+  const to = e.mon ? `<b>${e.day} ${MONFULL[e.mon - 1]}</b>, every year from now on`
+                   : "<b>never</b> — off-in-lieu stops expiring";
+  const holding = Number((prev || {}).holding) || 0;
+  const dying = Number((prev || {}).days_lost) || 0;
+  const dyingWho = Number((prev || {}).dying_people) || 0;
+  const already = Number((prev || {}).already_expired) || 0;
+  const nd = (prev || {}).new_date;
+  const out = [`Off-in-lieu will expire on ${to}.`];
+  out.push(holding === 0
+    ? "Nobody is holding off-in-lieu right now, so only the setting changes."
+    : `<b>${holding}</b> employee${holding === 1 ? "" : "s"} ${holding === 1 ? "is" : "are"} holding off-in-lieu.`);
+  if (dying > 0) out.push(`<b style="color:var(--bad)">${nd ? fmtDateY(nd) : "That date"} has already passed, so ${fmtD(dying)} day${dying === 1 ? "" : "s"} across ${dyingWho} ${dyingWho === 1 ? "person" : "people"} are forfeited immediately.</b>`);
+  else if (e.mon) out.push("Nothing is forfeited today — the next one of those dates is still ahead.");
+  if (already > 0) out.push(`Off-in-lieu has been written off before. Moving the date does not bring those days back.`);
+  out.push("Unlike carried annual leave, <b>the whole off-in-lieu balance</b> goes on that date — not just what was earned last year.");
+  return out;
+}
+
 /* The confirmation's words, built from what set_carry_expiry's PREVIEW actually returned —
    never from a guess made on this side. Moving the date earlier destroys days somebody is
    holding right now, so that sentence has to be the truth or it is worse than useless. */
@@ -1091,6 +1138,14 @@ async function saveDraft() {
       const { error: e2 } = await sb.rpc("set_carry_expiry",
         { p_month: e.mon, p_day: e.day, p_preview: false });
       if (e2) { rpcErr(e2); return false; }
+    }
+    // Off-in-lieu, same reasoning: not a plain column write, because saving it can
+    // forfeit days somebody is holding right now.
+    if (oilExpiryChanged()) {
+      const e = oilExpiryPick();
+      const { error: e3 } = await sb.rpc("set_oil_expiry",
+        { p_month: e.mon, p_day: e.day, p_preview: false });
+      if (e3) { rpcErr(e3); return false; }
     }
   }
   return true;
@@ -2631,6 +2686,30 @@ function carryExpiryField() {
       } How many days each person may carry is set per employee, on the Employees tab.</span></div>`;
 }
 
+function oilExpiryField() {
+  const e = oilExpiryPick();
+  const nextYear = new Date().getFullYear() + 1;
+  const on = carryExpiryDate(e.mon, e.day, nextYear);   // same day/month -> date helper
+  const days = e.mon ? daysInMon(e.mon) : 31;
+  return `<div class="field" style="max-width:300px"><label>Off-in-Lieu expiry date</label>
+    <div style="display:flex;gap:8px">
+      <select data-f="org.oilMon" style="flex:2;min-width:0">
+        <option value="" ${e.mon ? "" : "selected"}>— Never expires —</option>
+        ${MONFULL.map((n, i) => `<option value="${i + 1}" ${e.mon === i + 1 ? "selected" : ""}>${n}</option>`).join("")}
+      </select>
+      <select data-f="org.oilDay" style="flex:1;min-width:0" ${e.mon ? "" : "disabled"}>
+        ${Array.from({ length: days }, (_, i) => i + 1).map(d =>
+          `<option value="${d}" ${e.day === d ? "selected" : ""}>${d}</option>`).join("")}
+      </select>
+    </div>
+    <span class="hint">${on
+      ? `Off-in-lieu must be used by <b>${fmtDateY(on)}</b>. It repeats every year — set it once.
+         <b>The whole balance</b> goes on that day, however recently it was earned — that is
+         different from carried annual leave, where only last year's leftover expires.`
+      : `Off-in-lieu <b>never expires</b>. Pick a month to give it a deadline.`
+      } Off-in-lieu is earned by working, so it is credited per employee on the Employees tab.</span></div>`;
+}
+
 /* Email notifications. Everything about sending lives in the Edge Function; the only
    thing the app decides is WHO may receive anything while you are still testing. */
 function notifyCard() {
@@ -2718,6 +2797,7 @@ function hrSettings() {
           <option value="monthly" ${oPick("accrualMode") === "monthly" ? "selected" : ""}>Monthly, as it is earned</option>
         </select>
         <span class="hint">🔒 Fixed — this is not something to change from here.</span></div>
+      ${db.orgV36 ? oilExpiryField() : ""}
       ${db.orgV24 ? carryExpiryField() : db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Forward AL expire after (months)</label>
         <input ${NUMBOX} data-f="org.carryMonths" value="${oPick("carryMonths")}" placeholder="never expires">
         <span class="hint">Counted from 1 January, so 6 means carried days must be used by 30 June. Leave it blank and they never expire.How many days each person may carry is set per employee, on the Employees tab.</span></div>` : ""}
@@ -3122,8 +3202,8 @@ async function runAction(el) {
       // A days-per-year change reaches everybody's balance at once, so it is stated in
       // full before it happens — the same rule as balance adjustments and the holiday paste.
       const ch = typeDayChanges();
-      const expPend = expiryChanged();
-      if ((ch.length || expPend) && !vp.typeOk) {
+      const expPend = expiryChanged(), oilPend = oilExpiryChanged();
+      if ((ch.length || expPend || oilPend) && !vp.typeOk) {
         let lines = [];
         if (ch.length) lines = ch.map(c => `<b>${esc(c.name)}</b>: ${fmtD(c.before)} → <b>${fmtD(c.after)}</b> days per year.<br>` +
             `<b style="color:${c.delta > 0 ? "var(--good)" : "var(--bad)"}">${c.delta > 0 ? "+" : ""}${fmtD(c.delta)} day${Math.abs(c.delta) === 1 ? "" : "s"}</b> ` +
@@ -3138,8 +3218,15 @@ async function runAction(el) {
           if (error) return rpcErr(error);
           lines = lines.concat(expiryLines(data));
         }
+        if (oilPend) {
+          const e = oilExpiryPick();
+          const { data, error } = await sb.rpc("set_oil_expiry",
+            { p_month: e.mon, p_day: e.day, p_preview: true });
+          if (error) return rpcErr(error);
+          lines = lines.concat(oilExpiryLines(data));
+        }
         vp.confirmModal = {
-          title: ch.length ? "Confirm leave amendment" : "Change the expiry date?",
+          title: ch.length ? "Confirm leave amendment" : "Change the expiry date?",   // covers either or both expiry dates
           lines,
           okLabel: "Save changes", cancelLabel: "Cancel", act: "hrsaveok"
         };

@@ -93,6 +93,18 @@ begin
     null;
   end;
 
+  -- v36：补休到期，同样落账。
+  -- **这一段必须写在这里，不能只写在 migration_app_v36.sql 里。**
+  -- install.sql 的顺序是「所有 migration，然后这个文件」，而这个文件开头是
+  -- drop function + create function —— 它会把 v36 改好的 keepalive_ping 整个盖掉。
+  -- 新装的库因此永远不会到期补休，而且一点声音都没有。
+  -- （v36 里那一份还是要留着：已经跑过 v3 的旧库靠它升级。）
+  begin
+    perform public.expire_due_oil();
+  exception when undefined_function then
+    null;
+  end;
+
   -- 万一那一行被人删了，自愈补回来
   if v_count is null then
     insert into public.keepalive_heartbeat (id, last_ping_at, ping_count)

@@ -1,4 +1,4 @@
-# Tests for v35 — the leave-year tags
+# Tests for v35 and v36
 
 Two halves, both self-contained. Neither touches the live database and neither can
 send an email.
@@ -19,6 +19,7 @@ send an email.
 | `seed_two_years.sql` | A company with history — see below for why this one has to exist. |
 | `t35_joiners.sql` / `seed_joiners.sql` | The reported split: sick 13 / 14 / 27 in one company. Somebody added through **Add employee** is credited at whatever the leave type said the day they joined, and that credit was not recognised as the year's allowance — so the yearly run credited them again. Reproduces all three strata, then proves retyping the figure levels everyone without losing a day. |
 | `t35_lifecycle.sql` / `seed_lifecycle.sql` | Every leave type and every employee — including one with no gender recorded, a leaver, and a mid-year joiner — through apply → approve → withdraw → reject → cancel → amend. After each step it re-checks `available == entitled + carried − taken − pending` for the whole company, **and** that nobody is left holding no allowance at all. That second check exists because the first one cannot see a person whose entitlement is simply missing: their figures agree with each other. |
+| `t36_oil_expiry.sql` / `t36.mjs` | The off-in-lieu expiry date: off by default, forfeits the whole balance on the day, unusable even if every scheduled job is dead, and driven by the daily heartbeat rather than a job of its own. The browser half checks the control sits next to the annual-leave one and says out loud how the two rules differ. |
 | `t35.mjs` | The page: that it reads the leave year off the entry instead of the day it was typed, that it still works against a database which has not been upgraded, and that starting a year already running is explained rather than attempted. |
 | `seed.js` | An in-memory company for the page, so no Supabase project is needed. |
 | `supabase_shim.sql` | The few things Supabase provides that a bare Postgres does not — `auth.uid()`, the storage tables, `net.http_post`. Small on purpose: the less this pretends, the more the tests mean. |
