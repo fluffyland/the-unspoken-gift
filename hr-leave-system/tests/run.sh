@@ -51,11 +51,15 @@ sql() {
   upgrade seed_reported_case.sql t35_reported_case.sql
 
   echo
+  echo "--- upgraded in place: the joining-credit split (sick 13 / 14 / 27) ---"
+  upgrade seed_joiners.sql t35_joiners.sql
+
+  echo
   echo "--- upgraded in place: a company with a real previous year ---"
-  # This fixture exists because the one above cannot test the year tags at all. Every
-  # row in it sits in 2026, so "the year the wording names" and "the year it was typed"
-  # always agree, and a migration that filed everything under the wrong year would look
-  # exactly like one that got it right. Here they disagree in three places on purpose.
+  # None of the fixtures above can test the year tags at all: every row in them sits in
+  # 2026, so "the year the wording names" and "the year it was typed" always agree, and a
+  # migration that filed everything under the wrong year would look exactly like one that
+  # got it right. Here they disagree in three places on purpose.
   upgrade seed_two_years.sql t35_two_years.sql
 
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true

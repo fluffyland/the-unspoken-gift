@@ -759,7 +759,38 @@ so and naming the two screens that *do* change a running year's figures.
   zero: somebody who overspent last year must start the new year owing those days.
   Clamping forgives them silently. There is a test for exactly this (`B16`).
 
-*Two things the verification taught, worth keeping:*
+**The joining credit (the follow-up that mattered more than the migration).** After the
+undo the Balances tab still showed sick 13 / 14 / 27, hospitalisation 57 / 59 / 117,
+shared parental 42 / 70 / 140 — in one company, on one day. One cause, at
+`app.html` Add employee: somebody added through the form is credited
+`"Leave allowance on joining"` at whatever the leave type said **on the day they
+joined**. Nothing recognised that wording as the year's allowance, so:
+
+- `grant_annual_entitlements` matched only `'<Y> annual allowance'` / `'<Y> 年度配额'`
+  and credited these people a **second** time — that is the doubling, exactly
+  (27 = 13 + 14, 117 = 57 + 60, 140 = 70 + 70).
+- Every later change to a leave type left another stratum behind, and because the types
+  were changed on different days the membership of each stratum differs per column — which
+  is why shared parental's group of 70 is not the same people as sick's group of 14.
+- **And v35 as first shipped made it worse for exactly these people:** it filed a joining
+  credit as `adjust`, and the new `amend_leave_type_days` only touches employees holding a
+  `kind = 'grant'` row — so retyping a figure on the Leave types tab skipped precisely the
+  staff whose figures were wrong.
+
+Fixed in `ledger_kind_of` (a joining credit **is** an allowance) and at the point the app
+writes it (`leave_year` + `kind` set explicitly). All three consequences fall out of that
+one line: the unique index makes the second credit impossible, the yearly run skips them,
+and the Leave types tab reconciles them. `tests/seed_joiners.sql` reproduces all three
+strata and `t35_joiners.sql` proves the repair keeps every day (27 → 14 only when HR
+retypes the figure, never silently).
+
+**Supabase's SQL Editor does not display `raise notice`.** A migration whose only success
+signal is a notice reports "Success. No rows returned." and the user has no idea whether it
+worked — which is what happened. v35 now **ends with a `select`**, and that select is the
+per-leave-type report: what the Leave types tab says, what staff actually hold, and which
+types to retype. End every migration with something visible.
+
+*Three more things the verification taught, worth keeping:*
 
 - **Never build a scratch table in `public`.** v35 originally snapshotted balances into
   `_v35_before` to compare before and after. The Supabase dashboard stopped and asked the
@@ -775,8 +806,8 @@ so and naming the two screens that *do* change a running year's figures.
   them. `tests/seed_two_years.sql` exists for this reason and catches all four. Check what
   a fixture can *discriminate*, not just that it passes.
 
-Tests: `hr-leave-system/tests/` — `./run.sh` runs three scenarios plus the page
-(65 SQL + 18 browser assertions). Mutants: 7 on the fresh-install path, 5 more on the
+Tests: `hr-leave-system/tests/` — `./run.sh` runs four scenarios plus the page
+(88 SQL + 18 browser assertions). Mutants: 7 on the fresh-install path, 5 more on the
 upgrade path (the wording classifier is only reachable there — every live code path sets
 `kind` explicitly, so a broken classifier is invisible on a new install).
 

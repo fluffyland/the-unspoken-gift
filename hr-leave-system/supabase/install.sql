@@ -8309,6 +8309,14 @@ returns text language sql immutable as $$
     when coalesce(p_reason,'') like '%结转%' or coalesce(p_reason,'') like '%作废%' then 'writeoff'
     -- 年度发放：措辞是系统写的，中英两种
     when coalesce(p_reason,'') ~ '^[0-9]{4} (annual allowance|年度配额)$' then 'grant'
+    -- 入职发放：Add employee 写的是「Leave allowance on joining」。
+    -- **这一条就是那一堆错数字的根源。** 它是这个人当年的额度，可是措辞对不上上面那一句，
+    -- 于是全系统都不认得它：
+    --   · 年初发放看不见它 ⇒ 给这个人**再发一次** ⇒ 病假 27、住院假 117、SPL 140
+    --   · 归类成 adjust ⇒ Leave types 里重打一个数字**跳过**这些人，修不到他们
+    -- 认成 grant，这三件事同时解决：唯一索引让第二次发放根本发不出来，
+    -- 年初发放会跳过他们，Leave types 也终于能把他们对账回去。
+    when coalesce(p_reason,'') like '%allowance on joining%' then 'grant'
     else 'adjust'
   end;
 $$;
@@ -8877,6 +8885,37 @@ begin
 
   raise notice 'v35 installed: every ledger entry now records the leave year it belongs to.';
 end $$;
+
+-- ---------- 14. 把结果**显示出来** ----------
+-- Supabase 的 SQL Editor **不显示 raise notice**。上面那句「v35 installed」在
+-- psql 里看得见，在网页上只会显示「Success. No rows returned.」—— 等于没有回执，
+-- 跑完了也不知道到底成没成。最后一句必须是 select：看得见的才算数。
+--
+-- 顺便就把该看的东西一次列出来：每种假别，Leave types 里写的是多少，员工手上
+-- 实际是多少。**有几个不同的数字，就是几年下来欠的账**：入职发放用的是入职那天
+-- 的天数，后来改过的每一次都留下新的一层。要抹平：照它说的做，去 Leave types
+-- 把那个数字重打一遍保存 —— v35 之后，那一下会把每个人对账到那个数字。
+select t.name_en                                                   as "Leave type",
+       trim_scale(t.default_days)                                  as "Leave types tab says",
+       count(distinct x.ent)                                       as "Different figures in use",
+       string_agg(distinct trim_scale(x.ent)::text, '  /  ')       as "Figures people actually hold",
+       case when count(distinct x.ent) > 1
+            then '⚠ retype ' || trim_scale(t.default_days) || ' on the Leave types tab and save'
+            else 'consistent' end                                  as "What to do"
+  from leave_types t
+  join lateral (
+    select entitled_in_year(e.id, t.code, extract(year from current_date)::int) as ent
+      from employees e
+     where e.active
+       and (t.gender_eligibility is null or t.gender_eligibility = e.gender)
+       and exists (select 1 from leave_ledger l
+                    where l.emp_id = e.id and l.leave_type = t.code
+                      and l.leave_year = extract(year from current_date)::int
+                      and l.kind = 'grant')
+  ) x on true
+ where t.code <> 'annual' and t.code <> 'oil' and not t.no_deduct
+ group by t.code, t.name_en, t.default_days, t.sort
+ order by t.sort;
 
 
 -- ===========================================================================

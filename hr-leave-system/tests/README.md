@@ -17,11 +17,12 @@ send an email.
 | `seed_new_company.sql` | Four people, nothing granted yet. |
 | `seed_reported_case.sql` | The same people with the July allowances and the August top-ups already in the ledger. |
 | `seed_two_years.sql` | A company with history — see below for why this one has to exist. |
+| `t35_joiners.sql` / `seed_joiners.sql` | The reported split: sick 13 / 14 / 27 in one company. Somebody added through **Add employee** is credited at whatever the leave type said the day they joined, and that credit was not recognised as the year's allowance — so the yearly run credited them again. Reproduces all three strata, then proves retyping the figure levels everyone without losing a day. |
 | `t35.mjs` | The page: that it reads the leave year off the entry instead of the day it was typed, that it still works against a database which has not been upgraded, and that starting a year already running is explained rather than attempted. |
 | `seed.js` | An in-memory company for the page, so no Supabase project is needed. |
 | `supabase_shim.sql` | The few things Supabase provides that a bare Postgres does not — `auth.uid()`, the storage tables, `net.http_post`. Small on purpose: the less this pretends, the more the tests mean. |
 
-## Why there are two upgrade fixtures
+## Why there are three upgrade fixtures
 
 `seed_reported_case.sql` is the real company's data, and every row in it sits in 2026.
 That makes it useless for testing the year tags: "the year the wording names" and "the

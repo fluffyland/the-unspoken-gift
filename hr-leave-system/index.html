@@ -3393,12 +3393,23 @@ async function runAction(el) {
         // Credit joining entitlements. Annual leave is the figure HR typed, in full:
         // v18 removed pro-rating from the database, and this mirror was the last place
         // still halving it — so the screen and the data disagreed on a new joiner's days.
+        // These rows ARE this person's allowance for the year. Nothing said so until v35,
+        // and every consequence of that showed up on one screen: the yearly grant did not
+        // recognise them, so it credited these people a SECOND time (sick 27, hospitalisation
+        // 117, shared parental 140); and because they were filed as corrections rather than
+        // allowances, retyping a figure on the Leave types tab skipped exactly the people
+        // whose figures were wrong. Say what they are, at the point they are written.
         const rows = [];
+        const joinYear = new Date().getFullYear();
         for (const t of db.leaveTypes) {
           if (t.noDeduct || (t.gender && t.gender !== f.gender)) continue;
           const amt = t.code === "annual" ? base : t.days;
-          if (amt > 0) rows.push({ emp_id: ins.id, leave_type: t.code, delta_days: amt,
-            reason: t.code === "annual" ? "Annual leave allowance on joining" : "Leave allowance on joining", created_by: me.id });
+          if (amt > 0) {
+            const r = { emp_id: ins.id, leave_type: t.code, delta_days: amt,
+              reason: t.code === "annual" ? "Annual leave allowance on joining" : "Leave allowance on joining", created_by: me.id };
+            if (db.ledgerTagged) { r.leave_year = joinYear; r.kind = "grant"; }
+            rows.push(r);
+          }
         }
         if (rows.length) { const { error: e2 } = await sb.from("leave_ledger").insert(rows); if (e2) return rpcErr(e2); }
         const nm = f.name.trim(), addedMsg = nm + " has been added, with " + fmtD(base) + " day" + (base === 1 ? "" : "s") + " of annual leave.";
