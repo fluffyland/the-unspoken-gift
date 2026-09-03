@@ -840,7 +840,7 @@ types to retype. End every migration with something visible.
   a fixture can *discriminate*, not just that it passes.
 
 Tests: `hr-leave-system/tests/` — `./run.sh` runs five scenarios plus the page
-(210 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
+(226 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
 the joiners scenario runs the migration **twice**, putting the old mis-classification
 back in between (a single run cannot catch it); and `t35_lifecycle.sql` walks EVERY
 leave type through apply → approve → withdraw → reject → cancel → amend, re-checking
@@ -951,6 +951,35 @@ With one honest carry figure the remainder behaves as it should, and as the user
 described: **carry is used first, so this year's own figure does not move until the
 carry is exhausted** (`t38` Q3–Q6; Q6 asserts Annual Leave STAYS at 14 when a day is
 taken, which is the exact symptom reported).
+
+**v39 — a carry-forward has two halves, and a correction of my own diagnosis.**
+
+I told the user the Carry Forward figure was wrong because the expiry date had been set
+to a date already past. **That was wrong** — their own screen said *"Expiry Date: 31 Dec
+2026"*, which is in the future. I inferred instead of reading what they had pasted. Both
+shapes were then reproduced side by side:
+
+| | Available | Carry shown |
+|---|---|---|
+| ledger `carry_in` present, expiry in the future | **16** ✓ | 2 |
+| `annual_carry` row alone, ledger half missing | **11** | **2** ← the reported screen |
+
+So the real cause is that a carry-forward was written **half way**. The two halves are:
+
+- `annual_carry` — what the screen shows and the expiry job reads
+- ledger `carry_in` — the days that can actually be booked
+
+Write one without the other and the screen advertises days the balance does not have.
+`credit_carry_forward` (v37) writes both, which is why it exists; something wrote only
+one. `carry_health_check()` compares the halves for everyone and
+`repair_carry_ledger(false)` writes the missing one. The repair **only ever adds** days
+already promised on screen — the opposite direction could be a deliberate manual credit,
+and taking days away needs a person to decide (`t39` R14–R16, and a self-check that the
+function contains no `delete`).
+
+v38 stands on its own merits — the screen should never advertise expired days — but it
+was **not** the fix for this, and saying it was is the mistake to avoid repeating: when
+the user pastes their own figures, read them before theorising.
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 
