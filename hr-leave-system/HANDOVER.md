@@ -840,7 +840,7 @@ types to retype. End every migration with something visible.
   a fixture can *discriminate*, not just that it passes.
 
 Tests: `hr-leave-system/tests/` — `./run.sh` runs five scenarios plus the page
-(176 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
+(197 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
 the joiners scenario runs the migration **twice**, putting the old mis-classification
 back in between (a single run cannot catch it); and `t35_lifecycle.sql` walks EVERY
 leave type through apply → approve → withdraw → reject → cancel → amend, re-checking
@@ -892,6 +892,38 @@ and the daily heartbeat to run it.
 rows. That is not a v35 relapse: v35 forbids inferring which *leave year* a row belongs
 to, whereas this asks "had the day been earned yet when the cut-off passed", which is
 exactly what `created_at` answers.
+
+**v37 — the two expiry dates become one mechanism (Sep 2026).**
+
+*The root cause of "I set Sep 3 and nothing happened".* v36 declared `oil_cutoff_of`
+**IMMUTABLE** while it reads `current_date`, which is STABLE. Postgres does not stop
+you lying about volatility — it just lets the planner evaluate the function once and
+**freeze that date into a cached plan**. Every test passed, because psql opens a fresh
+session and builds a fresh plan each time. Production is PostgREST on pooled,
+long-lived connections, where a plan can be days old, so the cut-off was computed
+against a stale "today" and the expiry silently did nothing.
+
+> **A function that reads `current_date`, `now()` or `clock_timestamp()` must never be
+> IMMUTABLE.** v37 adds a self-check reading `pg_proc.provolatile` and refuses to
+> install if either cut-off helper is marked immutable. Plan caching cannot be
+> reproduced in a normal test, so a static check is the right guard.
+
+*The parity work.* Both expiries now share `oil_cutoff_of` (with `carry_cutoff_of` as a
+one-line alias so neither side grows its own copy), both write a ledger `writeoff`
+dated on the cut-off, and **both call `log_expiry_amendment`** so a forfeit appears in
+Amendment records with identical wording, kind (`expiry`) and per-person detail. What
+each forfeits still differs, and that is the nature of the leave rather than the
+method: annual expires the **carried** portion, off-in-lieu the **whole** balance.
+
+`credit_carry_forward(emp, days)` writes **both halves** of a carry-forward — the
+ledger entry that makes the days usable and the `annual_carry` row the expiry job
+reads. Hand-written INSERTs routinely do one and not the other, and the mismatch only
+shows up when the expiry date arrives. `supabase/credit_carry_forward_for_testing.sql`
+uses it and refuses the whole run if any name is misspelled, rather than crediting some
+of the list.
+
+`AMD_KIND` in app.html needed the two new kinds. Its own comment warns that a kind
+added later prints its raw key at the user — which is exactly what would have happened.
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 

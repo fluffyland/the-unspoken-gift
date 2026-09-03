@@ -782,6 +782,11 @@ Two things, both in **Company settings**, decide what happens:
 - **Carry Forward AL Maximum Day** — the most annual leave one person may keep.
   There is a company default, and each employee can have their own in **Edit employee**.
   Somebody with `5` keeps at most 5 days, however many they have left.
+> **Every forfeit is written down.** When either expiry date passes, the days that go
+> appear in **HR Console → Amendment records** as *"Expired — days forfeited"*, naming
+> the person, the leave type, how many days and the date. They are in each person's
+> leave history too. Nothing disappears without a record.
+
 - **Off-in-Lieu expiry date** — the day unused off-in-lieu dies.
   Starts on **— Never expires —**; nothing happens until you pick a month.
   ⚠️ **This one is not the same as the annual-leave box below it.** Carried annual

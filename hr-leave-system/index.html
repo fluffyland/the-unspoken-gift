@@ -2881,7 +2881,12 @@ function ysExport(rows, year) {
    than to a blank cell. */
 const AMD_KIND = { entitlement: "Entitlement changed", oil_credit: "Off-in-lieu credited",
                    type_days: "Company leave amendment", annual_bump: "Company annual leave credit",
-                   correction: "Correction" };
+                   correction: "Correction",
+                   // v37: expiry forfeits, written by BOTH the carry-forward and the
+                   // off-in-lieu expiry. One kind for both on purpose — they are the same
+                   // event and belong under the same heading.
+                   expiry: "Expired — days forfeited",
+                   carry_credit: "Carry-forward credited" };
 const kindName = k => AMD_KIND[k] || k;
 /* What a leaver had left on their last day. Read from the settlement entries
    offboard_employee writes, so everyone already offboarded is covered with no migration. */

@@ -85,6 +85,12 @@ sql() {
   P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
   P -f "$HERE/t36_oil_expiry.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
 
+  echo
+  echo "--- both expiry dates are one mechanism, and every forfeit is recorded (v37) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t37_expiry_parity.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 }
 
