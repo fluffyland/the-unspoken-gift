@@ -18,7 +18,8 @@ const nums = fs.readdirSync(dir)
   .map(f => (f.match(/^migration_app_v(\d+)\.sql$/) || [])[1])
   .filter(Boolean).map(Number).sort((a, b) => a - b);
 
-const parts = ['schema.sql', ...nums.map(n => `migration_app_v${n}.sql`), 'keepalive_ping_v3.sql'];
+const parts = ['schema.sql', ...nums.map(n => `migration_app_v${n}.sql`),
+               'keepalive_ping_v3.sql', 'undo_year_start.sql'];
 for (const f of parts)
   if (!fs.existsSync(dir + f)) { console.error('BUILD FAILED — missing', f); process.exit(1); }
 
