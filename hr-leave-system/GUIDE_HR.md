@@ -333,8 +333,20 @@ else stays at 14. *"If I set 14 everything follow 14."*
 **Days already taken are still untouched.** Only the entitlement is reconciled. Somebody
 who has taken 3 sick days ends the change on 14 entitled, 3 taken, 11 left.
 
-**People who have not been credited this year are skipped**, and that is correct — nothing
-of theirs has drifted, and they will be granted the new figure when you start the year.
+**Nobody is skipped.** Somebody who has no allowance for this leave type yet — a new
+joiner, or someone the system missed — is given the full figure, as a proper allowance.
+They will not be credited a second time when you start the new year.
+
+**To level every leave type at once**, instead of eleven trips to this tab, run this in
+Supabase → SQL Editor:
+
+```sql
+select * from reconcile_all_leave_types();        -- shows what would change
+select * from reconcile_all_leave_types(false);   -- does it
+```
+
+It brings every employee to the figure on this tab, for every leave type that resets
+each year. Annual leave is not included — that one is per employee, in Edit employee.
 
 **Two types have no days box, on purpose.** **Annual Leave** is set per employee (Edit
 employee → Annual Leave Entitled / Yr), and **Off-in-Lieu** is earned rather than granted.

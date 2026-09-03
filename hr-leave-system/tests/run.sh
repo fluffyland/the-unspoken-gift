@@ -51,8 +51,19 @@ sql() {
   upgrade seed_reported_case.sql t35_reported_case.sql
 
   echo
-  echo "--- upgraded in place: the joining-credit split (sick 13 / 14 / 27) ---"
-  upgrade seed_joiners.sql t35_joiners.sql
+  echo "--- upgraded in place: the joining-credit split, on a database v35 ALREADY ran on ---"
+  fresh; P -q -f "$D/pre35.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_joiners.sql" >/dev/null 2>&1
+  P -q -c "create table _pre as select emp_id, leave_type, balance from leave_balances" >/dev/null
+  P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
+  # Put back exactly what the FIRST version of v35 left behind: joining credits filed
+  # as corrections rather than allowances. Re-running the corrected file has to repair
+  # them. It did not, at first: the backfill only fills nulls, so a corrected rule
+  # reached nothing that a previous run had already tagged, and the staff whose figures
+  # were wrong were precisely the ones it could not touch.
+  P -q -c "update leave_ledger set kind = 'adjust' where reason like '%allowance on joining%'" >/dev/null
+  P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
+  P -f "$HERE/t35_joiners.sql" 2>&1 | grep -E "NOTICE:  ok|FAIL|ERROR" | sed 's/^psql[^ ]* //'
 
   echo
   echo "--- upgraded in place: a company with a real previous year ---"

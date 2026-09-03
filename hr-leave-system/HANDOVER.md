@@ -784,6 +784,24 @@ and the Leave types tab reconciles them. `tests/seed_joiners.sql` reproduces all
 strata and `t35_joiners.sql` proves the repair keeps every day (27 → 14 only when HR
 retypes the figure, never silently).
 
+**A backfill that only fills nulls cannot deliver a corrected rule.** The first v35
+tagged joining credits as `adjust`. The classifier was then fixed — and re-running the
+migration changed nothing, because those rows' `kind` was no longer null so the backfill
+skipped them. The staff whose figures were wrong were exactly the ones it could not
+reach. `kind` is now **recomputed from the wording on every run** (the unique index is
+dropped first and rebuilt after the de-duplication, since the recompute can transiently
+produce two allowances). `leave_year` is deliberately NOT recomputed — `run_year_start`
+sets it explicitly for carry-in rows and the wording cannot imply it.
+
+**"Set 15" now means everyone is on 15, including people with no allowance yet.**
+`amend_leave_type_days` used to skip anybody without a `kind='grant'` row for the year —
+copied from `bump_annual_all`, whose reason for skipping was to avoid crediting a floating
+difference to someone never granted (the original cause of the doubling). With tags and a
+unique index that risk is gone: an uncredited person now gets a real **allowance** row, so
+the yearly run will not credit them a second time. Writing it as a correction instead is
+what produced sick 27 in the first place — there is a mutant for exactly that (`L`).
+`reconcile_all_leave_types(false)` applies it to every yearly type in one call.
+
 **Supabase's SQL Editor does not display `raise notice`.** A migration whose only success
 signal is a notice reports "Success. No rows returned." and the user has no idea whether it
 worked — which is what happened. v35 now **ends with a `select`**, and that select is the
@@ -807,7 +825,9 @@ types to retype. End every migration with something visible.
   a fixture can *discriminate*, not just that it passes.
 
 Tests: `hr-leave-system/tests/` — `./run.sh` runs four scenarios plus the page
-(88 SQL + 18 browser assertions). Mutants: 7 on the fresh-install path, 5 more on the
+(100 SQL + 18 browser assertions). The joiners scenario deliberately runs the migration
+**twice**, putting the old mis-classification back in between, because that is the case
+that was reported and the one a single run cannot catch. Mutants: 7 on the fresh-install path, 5 more on the
 upgrade path (the wording classifier is only reachable there — every live code path sets
 `kind` explicitly, so a broken classifier is invisible on a new install).
 

@@ -8375,8 +8375,22 @@ update leave_ledger set
   leave_year = coalesce(leave_year, ledger_year_of(reason, ref_application, created_at))
 where kind is null or leave_year is null;
 
--- ---------- 5. 一年一个人一种假别，只能有一条「发放」 ----------
--- 用户看到的「sick 变成 28」「hosp 变成 118」就是同一年发了两次。
+-- ---------- 5. 归类：每次跑都**重算一遍** ----------
+-- 上面那句回填只补 null。这在第一次跑的时候没问题，第二次就要命：
+-- v35 的第一版把入职发放归成了 adjust，等这个文件改好再跑一次，那些行的 kind
+-- 已经不是 null 了，**回填根本不碰它们** —— 改对了的规则永远到不了已有的数据。
+-- 用户原话：「why Barbie Girl and Doraemon San leave remains unchange after i click
+-- save changes」。就是这个原因：他们的入职发放还挂着上一版留下的 adjust。
+--
+-- 所以 kind 每次都从措辞重算。以后规则再改，重跑一次就生效。
+-- leave_year **不重算** —— run_year_start 写结转时是明确指定年份的，
+-- 而措辞里推不出来（十二月跑明年的年初，按写入日期算就错了）。
+drop index if exists ux_ledger_one_grant;
+update leave_ledger set kind = ledger_kind_of(reason, ref_application, delta_days)
+ where kind is distinct from ledger_kind_of(reason, ref_application, delta_days);
+
+-- ---------- 5b. 一年一个人一种假别，只能有一条「发放」 ----------
+-- 同一年发了两次，就是「sick 27」「hosp 117」的来源。
 -- 多出来的那几条**不删**（删了就是凭空扣人天数），改标成 adjust：
 -- 天数一天不动，但从此 grant 是唯一的，再也不可能发第二次。
 -- 想把它们抹平：Leave types 里把天数填成想要的数字按保存，v35 的 amend_leave_type_days
@@ -8396,7 +8410,7 @@ begin
   end if;
 end $$;
 
-create unique index if not exists ux_ledger_one_grant
+create unique index ux_ledger_one_grant
   on leave_ledger (emp_id, leave_type, leave_year) where kind = 'grant';
 
 -- ---------- 6. 约束和索引 ----------
@@ -8564,7 +8578,7 @@ grant  execute on function bump_annual_all(numeric, boolean) to authenticated;
 -- 「对账到目标」两句都做到：**额度**变成那个数字，**已休掉的天数一天不动**。
 create or replace function amend_leave_type_days(p_code text, p_days numeric, p_preview boolean default false)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare t leave_types%rowtype; diff numeric; n int := 0; adj numeric; r record;
+declare t leave_types%rowtype; diff numeric; n int := 0; granted_n int := 0; adj numeric; r record;
         y int := extract(year from current_date)::int;
 begin
   if not is_hr() and session_user <> 'postgres' then raise exception 'Only HR can change a leave type'; end if;
@@ -8585,23 +8599,42 @@ begin
       'after', p_days, 'delta', diff, 'affected', 0, 'credited', false);
   end if;
 
-  -- 只动「今年已经发过这种假」的人。还没发的人不用补 —— 年初发放时就是新数字。
+  -- **每一个在职、符合条件的人**，一个不漏。
+  -- 用户原话：「if i change 14-15 why it wont update all employee to 15??????」
+  -- 上一版只动「今年已经发过这种假」的人 —— 那是照搬 bump_annual_all 的老规矩，
+  -- 而那条规矩是为了防「给没发过额度的人补一笔浮空的差额」，也就是 27 天的老病根。
+  -- 现在有了标签和唯一索引，那个担心不成立了：没发过的人**直接补一条本年度发放**，
+  -- 唯一索引保证年初再跑一次也不会重复发。于是「填 15 就是全公司 15」真的成立。
   for r in
-    select e.id, entitled_in_year(e.id, p_code, y) as have
+    select e.id, e.name,
+           entitled_in_year(e.id, p_code, y) as have,
+           exists (select 1 from leave_ledger l
+                    where l.emp_id = e.id and l.leave_type = p_code
+                      and l.leave_year = y and l.kind = 'grant') as granted
       from employees e
      where e.active
        and (t.gender_eligibility is null or t.gender_eligibility = e.gender)
-       and exists (select 1 from leave_ledger l
-                    where l.emp_id = e.id and l.leave_type = p_code
-                      and l.leave_year = y and l.kind = 'grant')
      order by e.name
   loop
     adj := p_days - r.have;
-    if adj <> 0 then
-      n := n + 1;
-      if not p_preview then
+    if adj = 0 and r.granted then continue; end if;   -- 已经就是这个数字，什么都不用写
+    n := n + 1;
+    if p_preview then continue; end if;
+
+    if r.granted then
+      insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by, leave_year, kind)
+      values (r.id, p_code, adj,
+              y || ' ' || t.name_en || ' set to ' || fmt_days(p_days), current_emp_id(), y, 'adjust');
+    else
+      -- 今年还没有过这种假的额度。写成**发放**，不是调整 ——
+      -- 写成调整的话，年初发放看不见它，会再发一次；那正是 sick 27 的来源。
+      granted_n := granted_n + 1;
+      insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by, leave_year, kind)
+      values (r.id, p_code, p_days, y || ' annual allowance', current_emp_id(), y, 'grant');
+      -- 之前如果有零散的调整，把它们抵掉，好让额度正好等于填进去的数字。
+      if r.have <> 0 then
         insert into leave_ledger (emp_id, leave_type, delta_days, reason, created_by, leave_year, kind)
-        values (r.id, p_code, adj,
+        values (r.id, p_code, -r.have,
                 y || ' ' || t.name_en || ' set to ' || fmt_days(p_days), current_emp_id(), y, 'adjust');
       end if;
     end if;
@@ -8619,10 +8652,40 @@ begin
     end if;
   end if;
   return jsonb_build_object('code', p_code, 'name', t.name_en, 'before', t.default_days,
-    'after', p_days, 'delta', diff, 'affected', n, 'credited', n > 0);
+    'after', p_days, 'delta', diff, 'affected', n, 'newly_granted', granted_n, 'credited', n > 0);
 end $$;
 revoke execute on function amend_leave_type_days(text, numeric, boolean) from anon, public;
 grant  execute on function amend_leave_type_days(text, numeric, boolean) to authenticated;
+
+-- ---------- 11b. 一次把**所有**假别对齐 ----------
+-- 用户原话：「not only one leave is chekc all the leave also SL HL CCL OIL ML PL SPL
+-- UIC ADL CL MRL」。一个一个假别去 Leave types 里重打十一遍，不是个答案。
+--   select * from reconcile_all_leave_types();        -- 只看，不改
+--   select * from reconcile_all_leave_types(false);   -- 真的做
+-- 年假不在里面：它是每人一个数字（Edit employee）。补休也不在：那是加班换来的。
+create or replace function reconcile_all_leave_types(p_preview boolean default true)
+returns table ("Leave type" text, "Set to" numeric, "People corrected" int, "Newly credited" int)
+language plpgsql security definer set search_path = public as $$
+declare t record; v jsonb;
+begin
+  if not is_hr() and session_user <> 'postgres' then
+    raise exception 'Only HR can level the leave types';
+  end if;
+  for t in select code, name_en, default_days from leave_types
+            where code <> 'annual' and code <> 'oil' and not no_deduct
+            order by sort loop
+    v := amend_leave_type_days(t.code, t.default_days, p_preview);
+    "Leave type"       := t.name_en;
+    "Set to"           := t.default_days;
+    "People corrected" := coalesce((v->>'affected')::int, 0);
+    "Newly credited"   := coalesce((v->>'newly_granted')::int, 0);
+    return next;
+  end loop;
+end $$;
+revoke execute on function reconcile_all_leave_types(boolean) from anon, public;
+grant  execute on function reconcile_all_leave_types(boolean) to authenticated;
+comment on function reconcile_all_leave_types(boolean) is
+  'Brings every employee''s entitlement for every yearly leave type to the figure on the Leave types tab. Previews by default. Days already taken are never touched; annual leave and off-in-lieu are excluded because neither has a company-wide figure.';
 
 -- ---------- 12. 年初：三步，全部按标签 ----------
 --   结转 = 上一年剩下的（夹到上限）
