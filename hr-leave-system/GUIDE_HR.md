@@ -313,8 +313,8 @@ allowed, whether an MC attachment is compulsory, and who is eligible.
 **This is the one that used to do nothing.** Editing "Days / year" only affected the
 *next* yearly credit — everyone already employed kept the old number, and nothing said so.
 
-Now it **credits the difference to every eligible employee, immediately** — from the table
-cell *and* from inside **Edit**, which was still doing a plain label change until v19:
+Now it **brings every eligible employee's entitlement for this year to exactly the number
+you type** — from the table cell *and* from inside **Edit**:
 
 > Hospitalisation Leave: 60 → **62** days per year.
 > **+2 days** will be credited to **21 employees**.
@@ -323,6 +323,18 @@ cell *and* from inside **Edit**, which was still doing a plain label change unti
 Somebody who has already used 5 days goes from 55 left to 57. Reducing the figure deducts
 the same way, and says so first. Nothing is written until you confirm, and the whole thing
 is recorded as **one** line in Amendment records — not twenty-one lines with names.
+
+**"Set to", not "add the difference".** Those are the same thing when everyone is on the
+old figure, which is the normal case. They differ when somebody's figure has drifted — and
+that is exactly when you want this box to fix it. If one person's Sick Leave somehow reads
+**28** while the type says 14, typing **14** and saving brings them to 14, and everybody
+else stays at 14. *"If I set 14 everything follow 14."*
+
+**Days already taken are still untouched.** Only the entitlement is reconciled. Somebody
+who has taken 3 sick days ends the change on 14 entitled, 3 taken, 11 left.
+
+**People who have not been credited this year are skipped**, and that is correct — nothing
+of theirs has drifted, and they will be granted the new figure when you start the year.
 
 **Two types have no days box, on purpose.** **Annual Leave** is set per employee (Edit
 employee → Annual Leave Entitled / Yr), and **Off-in-Lieu** is earned rather than granted.
@@ -764,6 +776,28 @@ Two things, both in **Company settings**, decide what happens:
 
 Also make sure last year's leave is finished: nothing still sitting on **Pending**.
 
+> ### ⚠️ It sets up the year **ahead**. It does not fix the year you are in.
+>
+> If the year you type has already had its allowances credited, LeaveDesk **refuses** and
+> tells you so:
+>
+> > ⚠ **2026 has already been credited** — 24 employees already hold 2026 leave.
+> > Start a new year sets up the year AHEAD. To change figures for a year already
+> > running, use Edit employee (one person) or the Leave types tab (everyone).
+>
+> This is not the system being awkward. It is the exact accident that happened in
+> September 2026: the 2026 allowances had been given out by hand in July, the button was
+> pressed for **2026** rather than 2027, and the system read every day credited since July
+> as "last year's leftover", carried it forward, then cleared every other leave type and
+> credited nothing back. Nobody could tell from the screen that anything had gone wrong.
+>
+> **To change this year's figures, use one of these two instead:**
+>
+> | What you want | Where |
+> |---|---|
+> | One person's annual leave | **Employees → Edit employee → Annual Leave Entitled / Yr** |
+> | One leave type, everybody | **Leave types** — type the number and save |
+
 **LeaveDesk now enforces this.** If any application dated in the closing year is still
 pending — or waiting on a cancellation — Start a new year **refuses to run** and lists them:
 
@@ -782,12 +816,18 @@ and the expiry date is set to 30 June. During 2026 she took 6 days.
 | Step | What LeaveDesk does | Siti |
 |---|---|---|
 | **1** | Look at anything carried into last year that has already passed its expiry date, and write those dead days off. | Nothing carried into 2026, so nothing happens. |
-| **2** | Work out what she has left of last year's annual leave. | 14 entitled − 6 taken = **8 days left**. |
+| **2** | Work out what she has left of last year's annual leave — by adding up **everything recorded against that year**, and nothing else. | 14 entitled − 6 taken = **8 days left**. |
 | **3** | Compare that with her maximum. Whatever fits, **carries forward**. | Her maximum is 5, so **5 days carry into 2027**. |
 | **4** | Whatever does not fit is **forfeited** — written off, not paid out. | 8 − 5 = **3 days forfeited**. |
 | **5** | Stamp the expiry date on the days that carried. | The date is set to 30 June → **use by 30 June 2027**. |
 | **6** | Every other leave type that starts fresh each year (sick, hospitalisation, and so on) is cleared to zero, whatever was left in it. | Her 9 unused sick days are written off. |
 | **7** | Write one permanent line into **Past runs** saying exactly all of the above, with her name on it. | Done — readable in 2030. |
+
+**If there is no previous year, nothing carries.** A company in its first year on LeaveDesk
+has no entries tagged with last year, so "what she has left of last year" is **zero** for
+everybody — not because a rule remembered to check, but because there is nothing there to
+carry. If you see a carry-forward figure appear out of a year you never used, that is a
+bug; send the numbers.
 | **8** | Once everybody has been through steps 1–7, hand out the new year's allowances. | Siti is credited **14 days for 2027**, on top of the 5 she carried. |
 
 So on 2 January Siti opens LeaveDesk and sees **19 days**: 14 new, plus 5 carried

@@ -92,7 +92,10 @@ Wait for "Success" before starting the next.
 | 9 | `migration_app_v27.sql` | **Start a new year refuses to run while leave is awaiting approval**; leavers are frozen; one application cannot span two years |
 | 10 | `migration_app_v28.sql` | The setting that limits notification emails to one person while testing |
 | 11 | `migration_app_v31.sql` | **Annual leave never grows by itself** — no day per year of service, no first-year pro-rating |
-| 12 | `keepalive_ping_v3.sql` | The heartbeat that stops a free project sleeping, and expires due carry-over daily |
+| 12 | `migration_app_v32.sql` | Where notification emails are sent from — filled in by the website itself, not typed twice |
+| 13 | `migration_app_v35.sql` | **Every leave record now says which year it belongs to.** Carry-forward is worked out from last year's actual entries instead of being guessed, and Start a new year refuses a year whose allowances have already been credited |
+| 14 | `keepalive_ping_v3.sql` | The heartbeat that stops a free project sleeping, and expires due carry-over daily |
+| 15 | `undo_year_start.sql` | Puts one "Start a new year" run back exactly as it was. Shows you what it would do before it does anything |
 
 **How to know it worked:** `install.sql` finishes by printing
 **"LeaveDesk installed — now run bootstrap_owner.sql to create your first Owner."**
@@ -102,6 +105,14 @@ If you see a red error instead, stop and get the message checked rather than run
 > accumulating: 14 sick days credited in 2026 plus 14 in 2027 is 28, because nothing has
 > ever cleared the old year. v16 is what resets them. Until you run it, the app says so on
 > the Company settings tab rather than pretending otherwise.
+
+> **v35 is the one to run if you run only one, on a system that is already live.**
+> Before it, nothing recorded which leave year an entry belonged to — the system worked it
+> out from the day the entry was typed and from the wording of its note. That is why, in
+> September 2026, pressing **Start a new year** for a year whose allowances had already been
+> credited in July read the top-ups given since July as "last year's leftover" and carried
+> them forward, then cleared every other leave type and credited nothing back. v35 makes the
+> year a recorded fact, and makes that button refuse a year that is already running.
 
 > **v18 is the one to run if you run only one.** Before it, changing "Days / year" on the
 > Leave types tab did **nothing** for anyone already employed — it only affected the next

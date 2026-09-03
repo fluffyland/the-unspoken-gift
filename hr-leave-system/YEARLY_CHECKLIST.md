@@ -100,6 +100,13 @@ read any more, and no schedule that can have stopped.
 
 **HR Console → Company settings → Start a new year** → pick the year → **Start 2027…**
 
+**Type the year you are moving INTO, not the year you are in.** If the year you type has
+already had its allowances credited, LeaveDesk refuses and says so — that is deliberate.
+Pressing it for a year already running would read every day credited since January as
+"last year's leftover", carry it forward, then clear every other leave type without
+crediting the new one. To change a running year's figures use **Edit employee** (one
+person) or the **Leave types** tab (everybody).
+
 **First, clear the decks.** Anything dated in the closing year that is still *Pending*, or
 waiting on a cancellation, now **stops the year start** — it lists the people so you know who
 to chase. Leave awaiting approval has not come off anyone's balance yet, so the year start

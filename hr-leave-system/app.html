@@ -558,7 +558,12 @@ async function loadAll() {
       .map(s => ({ order: s.step_order, approverId: s.approver_id, status: s.status, comment: s.comment || "", ts: s.acted_at ? Date.parse(s.acted_at) : null }))
   }));
   const ledger = (ledR.data || []).map(l => ({ id: l.id, empId: l.emp_id, type: l.leave_type,
-    delta: Number(l.delta_days), reason: l.reason, refApp: l.ref_application, by: l.created_by, ts: Date.parse(l.created_at) }));
+    delta: Number(l.delta_days), reason: l.reason, refApp: l.ref_application, by: l.created_by, ts: Date.parse(l.created_at),
+    // v35: the database now says which leave year each entry belongs to, and what it is.
+    // Before v35 both were guessed here — the year off the day it was typed, the meaning
+    // off the wording. Those two guesses are what made a company-wide top-up look like
+    // last year's leftover. Kept as a fallback so an un-upgraded database still works.
+    year: (l.leave_year == null ? null : Number(l.leave_year)), kind: l.kind || null }));
   // The timeline prints "<action> — <comment>", and the database writes a fixed sentence
   // for the two automatic actions, so the explanation landed twice and named a job title
   // ("Managing Director") that is only right for one person. Normalise it here rather than
@@ -593,6 +598,9 @@ async function loadAll() {
   // file, and asking somebody to copy them into the SQL as well is how two places end
   // up disagreeing. See tellDbWhereWeAre() below.
   db.orgV32     = !!(orgR.data && ("notify_url" in orgR.data));
+  // v35: every ledger entry records its leave year and what kind of entry it is.
+  // An empty ledger reads as "not tagged", which is correct — there is nothing to read.
+  db.ledgerTagged = !!(ledR.data && ledR.data[0] && ("leave_year" in ledR.data[0]));
 
   // In-app notices (public-holiday updates etc.) + this year's carried-over annual leave.
   // Views may not exist until the v7 migration runs — degrade gracefully to none.
@@ -873,12 +881,17 @@ function entNow(empId) { return bal(empId, "annual").yGranted; }
    other, and saving pulled his real 20.5 down to the stale figure. They now come from ONE
    source: the ledger. The column is only consulted for somebody with nothing credited this
    year, where the ledger has no opinion yet. */
+/* "Has anything been credited to this person this year?" — the same question the database
+   asks in set_annual_entitlement, so it has to be answered the same way: by the entry's
+   leave year and kind, not by the day it was typed. */
+function creditedThisYear(empId, code) {
+  const y = new Date().getFullYear();
+  return (db.ledger || []).some(l => l.empId === empId && l.type === code &&
+    ledgerYear(l) === y && isEntitlement(l));
+}
 function entBoxValue(e) {
   if (!e) return 14;
-  const y = new Date().getFullYear();
-  const credited = (db.ledger || []).some(l => l.empId === e.id && l.type === "annual" &&
-    !l.refApp && new Date(l.ts).getFullYear() === y);
-  return credited ? entNow(e.id) : (e.annualBase ?? 14);
+  return creditedThisYear(e.id, "annual") ? entNow(e.id) : (e.annualBase ?? 14);
 }
 /* What saving this number will actually do. It used to say "this year's balance moves from
    19 to 20" — where 19 was the WHOLE ledger history, not this year, and where the database
@@ -895,8 +908,7 @@ function entChange(empId, typed) {
   // two numbers had drifted looked like "no change" — and saving quietly moved their balance.
   if (after === before && after === entNow(empId)) return "";
   const y = new Date().getFullYear();
-  const anyThisYear = db.ledger.some(l => l.empId === empId && l.type === "annual" &&
-    !l.refApp && new Date(l.ts).getFullYear() === y);
+  const anyThisYear = creditedThisYear(empId, "annual");
   if (!anyThisYear) {
     return `<div class="callout acc" style="margin:8px 0 0"><b>${fmtD(before)} → ${fmtD(after)} days.</b><br>
       ${y} has not been credited yet, so nothing changes today — they will be granted <b>${fmtD(after)}</b> days when you start the year.</div>`;
@@ -1117,9 +1129,19 @@ function canSeeLedger(empId) { return empId === me.id || me.role === "hr" || me.
        refunds are positive, and they net off;
      · year-end write-offs and offboarding settlements are neither;
      · everything else is entitlement, ADDED WITH ITS SIGN. */
-const HOUSEKEEPING = /expired \(unused\)|above the carry-over cap|reset — use it or lose it|expired carry-over|excess forfeited|^Offboarding/;
-const isLeaveEntry = l => !!l.refApp;
-const isHousekeeping = l => HOUSEKEEPING.test(l.reason || "");
+const HOUSEKEEPING = /expired \(unused\)|above the carry-over cap|reset — use it or lose it|expired carry-over|excess forfeited|annual leave closed|^Offboarding/;
+/* v35 answers all three questions from stored fields instead of from the wording and the
+   timestamp. The old guesses are kept underneath, unchanged, for a database that has not
+   had the migration yet — never as a "correction" on top of the stored value, because a
+   second opinion about the same fact is how the two drift apart again. */
+const ledgerYear    = l => (l.year != null ? l.year : new Date(l.ts).getFullYear());
+const isLeaveEntry  = l => (l.kind ? (l.kind === "taken" || l.kind === "refund") : !!l.refApp);
+const isHousekeeping = l => (l.kind ? (l.kind === "writeoff") : HOUSEKEEPING.test(l.reason || ""));
+/* Entitlement is the allowance plus corrections. Carried-forward days are real days you may
+   book, but they are LAST year's — counting them as this year's entitlement makes "Annual
+   Leave Entitled / Yr" jump by the carried amount every January. */
+const isEntitlement = l => (l.kind ? (l.kind === "grant" || l.kind === "adjust")
+                                   : !(isLeaveEntry(l) || isHousekeeping(l)));
 function bal(empId, code) {
   const key = empId + "|" + code;
   // Approvers see only a precomputed available-days number for applicants (RLS
@@ -1128,12 +1150,12 @@ function bal(empId, code) {
   let granted = 0, used = 0, yGranted = 0, yUsed = 0;
   // yGranted / yUsed are THIS YEAR's. They used to be all-time sums while every label said
   // "this year" — that was 19 / 22, and 972 / 528 after a few years.
-  const y = String(new Date().getFullYear());
+  const y = new Date().getFullYear();
   for (const l of db.ledger) if (l.empId === empId && l.type === code) {
     if (l.delta > 0) granted += l.delta; else used -= l.delta;
-    if (String(new Date(l.ts).getFullYear()) !== y) continue;
+    if (ledgerYear(l) !== y) continue;
     if (isLeaveEntry(l)) yUsed -= l.delta;                  // deduction negative, refund positive
-    else if (!isHousekeeping(l)) yGranted += l.delta;       // signed: a reduction reduces it
+    else if (isEntitlement(l)) yGranted += l.delta;         // signed: a reduction reduces it
   }
   let pending = 0;
   for (const a of db.applications) if (a.empId === empId && a.type === code && a.status === "pending") pending += a.days;
@@ -1688,6 +1710,25 @@ function ysPreviewBox(gy) {
   // v27: leave still waiting on somebody's desk is counted as UNUSED by the year start, so
   // it is carried or forfeited, and then deducted again when it is finally approved — the
   // employee quietly loses those days. The database refuses; this says who to chase.
+  // v35: the year is already running — its allowances have been credited. Pressing the
+  // button anyway is what destroyed a real company's balances in September 2026: the days
+  // credited earlier in the year were mistaken for last year's leftover and carried
+  // forward, and every other leave type was cleared and never granted again. The database
+  // now refuses; this explains it and points at the two places that DO change a running
+  // year's figures.
+  if (d.already_started && !done) return `<div class="callout warn" style="margin:12px 0">
+    <b>⚠ ${gy} has already been credited</b>
+    <p style="margin:6px 0">${esc(d.blocked_reason || "")}</p>
+    <p style="margin:6px 0"><b>Start a new year</b> sets up the year <b>ahead</b> — it closes
+      off the year that is ending, carries what may be carried, and credits the new year's
+      allowances. It is not a way to correct a year that is already running.</p>
+    <p style="margin:6px 0">To change figures for ${gy}:</p>
+    <ul style="margin:0 0 10px;padding-left:18px;font-size:13.5px;line-height:1.7">
+      <li>one person's annual leave — <b>Employees → Edit employee → Annual Leave Entitled / Yr</b></li>
+      <li>everybody, one leave type — <b>Leave types</b>, type the number and save</li>
+    </ul>
+    <p class="meta" style="margin:0 0 10px">Nothing has been changed.</p>
+    <div class="actions"><button class="btn sec" data-act="yscancel">Close</button></div></div>`;
   const blk = d.blockers || [];
   if (blk.length && !done) return `<div class="callout warn" style="margin:12px 0">
     <b>⚠ ${blk.length} application${blk.length === 1 ? " is" : "s are"} still waiting</b>

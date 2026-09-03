@@ -167,6 +167,7 @@ Migrations are cumulative SQL files the USER pastes into Supabase SQL Editor
 | ✅ v25 | `carry_expiry_for` → `security definer` | user ran it 2026-08-31 |
 | ⏳ v27 | the audit fixes | **written, tested (t27.sql 41 assertions, 5 mutants), NOT yet run** |
 | ⏳ v28 | `org_settings.notify_only_emp` for the email test mode | **written, tested, NOT yet run.** Needs the Edge Function deployed and Resend configured — see MIGRATION_GUIDE |
+| ⏳ v35 | **every ledger entry records its leave year and kind** | **written, tested (51 SQL + 18 browser assertions, 7 mutants), NOT yet run.** Run `undo_year_start.sql` and the undo for the bad 2026 run FIRST, then v35 — the backfill should tag clean data. The frontend feature-detects it (`db.ledgerTagged`), so the page is safe either way |
 | ⏳ v26 | leave dated in a closed year | **written, tested (t25.sql, 44 assertions, 4 of 5 mutants caught + 2 proven equivalent), NOT yet run.** The frontend feature-detects nothing here — without v26 the database simply has no closed-year rule, and the screen falls back to today's behaviour. **Contains a `drop function`: read the overload note in §12 before touching it** |
 
 v9 is **optional** — the frontend feature-detects (`db.orgProrate`) and hides
@@ -712,6 +713,54 @@ all-English DB + client translation nets · approve-feedback render fix ·
 approval-card redesign (labelled grid + half-day chips + red zero balance) ·
 My team card (auto-updating same-dept roster) · free-typed hire date ·
 SOP manual + bootstrap/reset scripts.
+
+**v35 — the leave-year tag (Sep 2026).** The one to understand before touching anything
+in this area.
+
+*What went wrong.* The user pressed **Start a new year** for 2026 in September 2026, on a
+system whose 2026 allowances had been granted by hand in July. Five things happened at
+once, all from one cause:
+
+1. `run_year_start` worked out "last year's leftover" as
+   *annual balance − the row whose reason is exactly `'2026 annual allowance'`*. Every
+   other 2026 entry stayed in that figure, so the company-wide top-ups given in August
+   (+3.5, +4, +5 …) were carried forward as if they were 2025 days — in a system that has
+   no 2025 data at all.
+2. The same run cleared every resetting leave type to zero…
+3. …and then called `grant_annual_entitlements(2026)`, which skips anybody who already
+   holds a row reading `'2026 annual allowance'` — which was everybody granted in July.
+   **Cleared, and never credited back.** That is the "some employees became zero".
+4. The Balances tab reads `available / entitled this year`, and *entitled this year* was
+   computed in the page by bucketing entries on **the day they were typed** and classifying
+   them by **the wording of their note**. Both are guesses.
+5. `amend_leave_type_days` credited a flat difference to every active employee, including
+   people whose allowance for the year had never been granted, and was not idempotent
+   against the year — so a type could end up at twice its figure (sick 28, hospitalisation
+   118) with no single row to point at.
+
+*The fix, in one sentence:* `leave_ledger` now carries `leave_year` and `kind`, so the year
+and the meaning of an entry are **recorded facts, not inferences**. All 77 inference sites
+are gone. `entitled_in_year` / `annual_used_in_year` / `run_year_start` /
+`grant_annual_entitlements` / `set_annual_entitlement` / `bump_annual_all` filter on the
+tags. A unique index makes a second allowance for the same person, type and year impossible.
+`amend_leave_type_days` now **reconciles to the number typed** rather than adding a
+difference, which is what "if I set 14 everything follow 14" asks for and also heals an
+inflated figure. And `run_year_start` refuses a year that already holds allowances, saying
+so and naming the two screens that *do* change a running year's figures.
+
+*Two things worth knowing before you change it:*
+
+- **The carried days are a real ledger entry now** (`kind = 'carry_in'`, tagged the NEW
+  year), and last year is closed with a write-off that takes its remainder to exactly zero.
+  The balance moves by the forfeited amount only — identical to before — but the years are
+  now separable. `annual_carry` keeps the expiry date and the figure; the days live in the
+  ledger.
+- **A debt carries too.** `v_carry := least(cap, left)` is deliberately not clamped at
+  zero: somebody who overspent last year must start the new year owing those days.
+  Clamping forgives them silently. There is a test for exactly this (`B16`).
+
+Tests: `hr-leave-system/tests/` — `./run.sh` runs both halves (51 SQL + 18 browser
+assertions), and 7 mutants were checked one at a time.
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 

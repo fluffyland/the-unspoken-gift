@@ -15,6 +15,9 @@
 --   select undo_year_start(2026, false);       -- 确认无误后才真的退
 --
 -- 幂等：退过一次之后再跑，year_start_log 里已经没有那一年了，直接返回「无事可做」。
+--
+-- 措辞清单里既有 v35 之前的写法，也有 v35 之后的写法 —— 这个文件必须在两种库上都能用：
+-- 要退的那一次运行是**升级之前**跑的，而升级本身要等退完了才做。
 -- ============================================================================
 
 create or replace function undo_year_start(p_year int, p_preview boolean default true)
@@ -54,6 +57,8 @@ begin
           l.reason like (p_year - 1) || '%expired (unused)%'                       -- 其它假别清零
        or l.reason like (p_year - 1) || ' annual leave above the carry-over cap%'  -- 超上限作废
        or l.reason like '%carry-over expired (unused)%'                            -- 结转到期核销
+       or l.reason like (p_year - 1) || ' annual leave closed%'                     -- v35：年假结清
+       or l.reason like 'Carried forward from ' || (p_year - 1) || '%'              -- v35：结转入账
        or l.reason in (p_year || ' annual allowance', p_year || ' 年度配额')        -- 新年度发放
      );
 
