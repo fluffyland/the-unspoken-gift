@@ -840,7 +840,7 @@ types to retype. End every migration with something visible.
   a fixture can *discriminate*, not just that it passes.
 
 Tests: `hr-leave-system/tests/` — `./run.sh` runs five scenarios plus the page
-(197 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
+(210 SQL + 38 browser assertions). Two of them exist because of how this went wrong:
 the joiners scenario runs the migration **twice**, putting the old mis-classification
 back in between (a single run cannot catch it); and `t35_lifecycle.sql` walks EVERY
 leave type through apply → approve → withdraw → reject → cancel → amend, re-checking
@@ -924,6 +924,33 @@ of the list.
 
 `AMD_KIND` in app.html needed the two new kinds. Its own comment warns that a kind
 added later prints its raw key at the user — which is exactly what would have happened.
+
+**v38 — the carry-forward figure on screen (Sep 2026).** Reported as
+*"why lee jian wei carried foward is 2 days? i told you to credit 5"* and
+*"why after i apply the Annual leave will change from Annual Leave: 9 · Carry Forward: 2
+to Annual Leave: 10 · Carry Forward: 1?"* — reproduced exactly (Available 11, carry
+shown 2, actually withheld 5).
+
+The carry-forward expiry date had been set to a date already past, to test it. The
+**balance was right**: all 5 carried days were withheld, so 14 + 5 − 3 − 5 = 11. The
+**screen was wrong**: `my_annual_carry.remaining` was `carry_in − days taken` and never
+asked whether those days had expired, so it advertised 2 days the balance had already
+refused. Two rules for the same days.
+
+Worse, the "Annual Leave" figure beside it is the **remainder** —
+`available − carry shown`. So as the phantom carry number shrank with each day taken,
+Annual Leave *grew*: 9 → 10. That is the whole of the reported nonsense, and it followed
+from the single wrong number.
+
+The fix is one rule: `remaining` now subtracts `due_unwritten_carry` too, plus an
+`expired` flag so the screen can say *why* it is zero. `carryOf()` in app.html (the HR
+path, which reads `annual_carry` rows directly) got the same treatment — past its date
+is gone, whether or not the daily job has written it off yet.
+
+With one honest carry figure the remainder behaves as it should, and as the user
+described: **carry is used first, so this year's own figure does not move until the
+carry is exhausted** (`t38` Q3–Q6; Q6 asserts Annual Leave STAYS at 14 when a day is
+taken, which is the exact symptom reported).
 
 ## 12. Known gaps / offered-but-not-built / watch-outs
 

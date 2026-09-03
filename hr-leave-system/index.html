@@ -1727,11 +1727,18 @@ function carryLine(code, b) {
   // "you have none" from "this app has no such thing".
   if (code !== "annual" || !db.orgV16) return "";
   const avail = Number(b.avail) || 0;
+  // `remaining` from my_annual_carry is expiry-aware since v38: it is what can ACTUALLY
+  // still be booked. It used to be carry_in minus days taken, ignoring the expiry date —
+  // so once the date had passed the screen advertised carried days the balance had
+  // already refused, and because "Annual Leave" below is the REMAINDER, that phantom
+  // number shrinking made Annual Leave grow every time leave was taken.
   const c = Math.max(0, Number((db.annualCarry || {}).remaining) || 0);
   const usable = Math.max(0, Math.min(c, avail));   // carry you can still actually book
   const own = avail - usable;                        // the two always sum to Available
+  const gone = !!(db.annualCarry || {}).expired;
   const exp = (db.annualCarry || {}).expires_on ? fmtDateY(db.annualCarry.expires_on) : "N/A";
-  return `Annual Leave: ${fmtD(own)} · Carry Forward: ${fmtD(usable)} (Expiry Date: ${exp}) · `;
+  return `Annual Leave: ${fmtD(own)} · Carry Forward: ${fmtD(usable)} `
+       + `(${gone ? `Expired ${exp} — those days are gone` : `Expiry Date: ${exp}`}) · `;
 }
 /* ---- Start a new year: preview, result, and the permanent log --------------------
    The preview and the run are the SAME database function called with preview=true/false,
@@ -2950,6 +2957,11 @@ function carryOf(empId) {
   const y = new Date().getFullYear();
   const row = (db.allCarry || []).find(c => c.emp_id === empId && Number(c.year) === y && !c.expired_at);
   if (!row) return 0;
+  // Past its expiry date but not yet written off is still GONE — the balance withholds
+  // those days from the moment the date passes, whether or not the daily job has run.
+  // Reporting them here as still available is the same lie v38 took out of the view.
+  const today = new Date().toISOString().slice(0, 10);
+  if (row.expires_on && String(row.expires_on) < today) return 0;
   // Same "carried days are used first" rule the database applies: what is left of the
   // carry is what was carried minus this year's annual leave already taken.
   const taken = db.applications

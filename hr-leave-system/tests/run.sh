@@ -91,6 +91,12 @@ sql() {
   P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
   P -f "$HERE/t37_expiry_parity.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
 
+  echo
+  echo "--- the carry-forward figure on screen is the one you can book (v38) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t38_carry_display.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 }
 

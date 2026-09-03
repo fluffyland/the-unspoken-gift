@@ -97,8 +97,9 @@ Wait for "Success" before starting the next.
 | | | *Supabase will warn that this file "includes destructive operations". Expected: it drops a trigger and two constraints and recreates each on the very next line. No `delete`, no `truncate`, and no statement anywhere in the file writes a day count — the file checks that for itself at the end and refuses to finish if any figure moved.* |
 | 14 | `migration_app_v36.sql` | **Off-in-lieu can be given an expiry date**, next to the carry-forward one on Company settings. Off until you choose a month — installing it takes nobody's days. Note the rule differs from annual leave: the **whole** off-in-lieu balance goes on that day, not just last year's |
 | 15 | `migration_app_v37.sql` | **Fixes an expiry date set to today doing nothing**, and makes both expiries work identically — every forfeit now appears in **Amendment records**, whether it was carried annual leave or off-in-lieu. Also adds `credit_carry_forward()` for giving somebody carried days by hand |
-| 16 | `keepalive_ping_v3.sql` | The heartbeat that stops a free project sleeping, and expires due carry-over daily |
-| 17 | `undo_year_start.sql` | Puts one "Start a new year" run back exactly as it was. Shows you what it would do before it does anything |
+| 16 | `migration_app_v38.sql` | **The Carry Forward figure on screen is now the one you can actually book.** Once the expiry date had passed the balance withheld those days but the screen still showed them — which also made the Annual Leave figure beside it go UP when leave was taken |
+| 17 | `keepalive_ping_v3.sql` | The heartbeat that stops a free project sleeping, and expires due carry-over daily |
+| 18 | `undo_year_start.sql` | Puts one "Start a new year" run back exactly as it was. Shows you what it would do before it does anything |
 
 **How to know it worked:** `install.sql` finishes by printing
 **"LeaveDesk installed — now run bootstrap_owner.sql to create your first Owner."**
