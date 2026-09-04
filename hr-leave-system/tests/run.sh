@@ -103,10 +103,38 @@ sql() {
   P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
   P -f "$HERE/t39_carry_halves.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
 
+  echo
+  echo "--- the balance report names a fault, and stays quiet when there is none ---"
+  # explain_balances.sql is what gets pasted into the SQL Editor when a number on
+  # screen is disputed. A report that says "all fine" whatever the data is worse
+  # than no report, so it is run twice: once on a healthy company, once on the
+  # same company with one fault of each shape planted in it.
+  say() { if [ "$1" = ok ]; then echo "ok    $2"; else echo "FAIL  $2"; fi; }
+  has() { grep -qE "$1" "$D/rep.txt" && say ok "$2" || say no "$2"; }
+  hasnt() { grep -qE "$1" "$D/rep.txt" && say no "$2" || say ok "$2"; }
+
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -q -t -f "$SB/explain_balances.sql" > "$D/rep.txt" 2>&1
+  hasnt "ERROR" "R0 the report runs without an error"
+  has "LEAVE YEAR" "R0b and prints its header"
+  has "every balance on screen is exactly this year" "R1 a healthy company shows no gap"
+  has "everybody holds exactly what the Leave types tab says" "R2 and no entitlement mismatch"
+  has "every row belongs to this year and is tagged" "R3 and no stray rows"
+
+  P -q -f "$HERE/seed_explain_faults.sql" >/dev/null 2>&1
+  P -q -t -f "$SB/explain_balances.sql" > "$D/rep.txt" 2>&1
+  has "^ Boss +Annual Leave .* 19 +5$"        "R4 a previous year's leftover is named, with the gap"
+  has "^ Boss +Annual Leave +2025 +grant"     "R5 and the exact row that causes it is listed"
+  has "Shared Parental Leave +65 +70 +5$"     "R6 people still holding 70 after the type was set to 65"
+  hasnt "^ Male +Shared Parental Leave +65"   "R7 the one person already levelled is not accused"
+  has "Compassionate Leave +3 +NOTHING"       "R8 somebody holding no allowance at all is named"
+  has "^ Nogender +5 +0 "                     "R9 a carry-forward with no ledger half is named"
+
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 }
 
-browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs"; }
+browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs"; }
 
 case "${1:-both}" in
   sql) sql ;;

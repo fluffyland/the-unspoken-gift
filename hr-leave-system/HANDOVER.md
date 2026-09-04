@@ -981,6 +981,44 @@ v38 stands on its own merits — the screen should never advertise expired days 
 was **not** the fix for this, and saying it was is the mistake to avoid repeating: when
 the user pastes their own figures, read them before theorising.
 
+**v40 — two pots, never mixed; and a diagnostic instead of a third guess.**
+
+Reported, with the numbers: *"Lee Jian Wei ... CF 5 | AL 11 / 14 ... WHY LEE JIAN WEI AL
+HAVE NO APPLICATION BUT IT SHOWS 11 days / 14 days"*, and the rule stated plainly:
+*"Annual leave for this year is one group, then carry forward annual leave is another
+thing they do not mix ... when user apply it should deduct from carryfoward first until
+zero out only use its annual leave for this year."*
+
+Two real faults, both found by writing the test first:
+
+1. **The same days were printed in two columns.** The Balances tab showed `CF` from
+   `carryOf()` and, in the Annual Leave cell beside it, `b.avail` — which *includes* the
+   carried days. 14 entitled + 5 carried read as `CF 5` next to `19 / 14`. The AL column
+   now shows this year's **own** days only, and `own + carry` is exactly Available by
+   construction (`annualSplit`). Same split in the CSV export.
+2. **The carry left was worked out from the wrong source.** `carryOf()` subtracted
+   *approved applications* from the carried days while `avail` came from the *ledger*.
+   Those are different numbers: HR entering leave by hand, a balance adjustment and a
+   refund all move the ledger with no application to count. That mismatch is what
+   produced `Available 16 (Annual Leave: 11 · Carry Forward: 5)` — total right, split
+   wrong, and Annual Leave appearing to **grow** as leave was taken. It now reads the
+   ledger, like everything else.
+
+Also fixed: `carryLine()` read `db.annualCarry` — *my* carry — whatever balance was on
+screen, so HR entering leave for somebody else saw their own carried days against that
+person's figures. It takes an employee now.
+
+**`supabase/explain_balances.sql` is the important part of this pass.** Two of my last
+three diagnoses of this user's data were wrong because I inferred instead of looking. The
+report is read-only, creates nothing, and is one query on purpose — the SQL Editor shows
+only the last statement's result, so a file of five SELECTs would silently discard four.
+It names: balances that are not this year's arithmetic, people holding a different figure
+from the Leave types tab (**including people holding nothing at all**, which no
+self-consistency check can see), the exact rows causing each gap, and carry-forwards with
+only one half. `tests/seed_explain_faults.sql` plants one fault of each shape and
+`run.sh` asserts the report finds all four and stays quiet on a healthy company — a
+report that says "all fine" whatever the data is worse than no report.
+
 ## 12. Known gaps / offered-but-not-built / watch-outs
 
 - ~~**v9 not applied**~~ — applied 2026-08-19. It stayed unapplied so long that a

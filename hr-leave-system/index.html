@@ -1721,23 +1721,47 @@ function chainText(e) {
 /* Carried-forward annual leave shown as its OWN category, never folded into Annual Leave —
    the two are different money: carried days can expire, this year's cannot. It stays on
    screen at zero rather than vanishing, so the figure is always answerable. */
-function carryLine(code, b) {
+/* The carry-forward record for ANY employee. For yourself it is my_annual_carry, which
+   the database keeps expiry-aware; for anybody else it is the row HR loaded. Both are
+   read through here so no screen can quietly show one person's carry against another
+   person's balance — which is exactly what the Apply-on-behalf form used to do. */
+function carryRecord(empId) {
+  if (empId === me.id && db.annualCarry) return db.annualCarry;
+  const y = new Date().getFullYear();
+  return (db.allCarry || []).find(c => c.emp_id === empId && Number(c.year) === y && !c.expired_at) || null;
+}
+function carryExpired(empId) {
+  const c = carryRecord(empId);
+  if (!c) return false;
+  if (c.expired != null) return !!c.expired;
+  return !!(c.expires_on && String(c.expires_on) < new Date().toISOString().slice(0, 10));
+}
+/* Annual leave is TWO pots and they must never be added twice on one screen: this year's
+   own days, and days carried in from last year. Carried days are spent first, so what is
+   left of the carry is min(carry, available) and this year's own days are the remainder.
+
+   own + carry is ALWAYS exactly Available. That property is the point. Without it the
+   Balances tab printed "CF 5" in one column and an Annual Leave figure that already
+   included those 5 in the next — the same days counted twice on the same row. */
+function annualSplit(empId, b) {
+  const avail = Math.max(0, Number(b.avail) || 0);
+  const carry = db.orgV16 ? Math.max(0, carryOf(empId)) : 0;
+  const usable = Math.min(carry, avail);
+  return { own: avail - usable, carry: usable };
+}
+function carryLine(empId, code, b) {
   // Shown for annual leave ALWAYS — including 0, and including when no carry-over record
   // exists at all. It used to vanish entirely in that case, so there was no way to tell
   // "you have none" from "this app has no such thing".
   if (code !== "annual" || !db.orgV16) return "";
-  const avail = Number(b.avail) || 0;
-  // `remaining` from my_annual_carry is expiry-aware since v38: it is what can ACTUALLY
-  // still be booked. It used to be carry_in minus days taken, ignoring the expiry date —
-  // so once the date had passed the screen advertised carried days the balance had
-  // already refused, and because "Annual Leave" below is the REMAINDER, that phantom
-  // number shrinking made Annual Leave grow every time leave was taken.
-  const c = Math.max(0, Number((db.annualCarry || {}).remaining) || 0);
-  const usable = Math.max(0, Math.min(c, avail));   // carry you can still actually book
-  const own = avail - usable;                        // the two always sum to Available
-  const gone = !!(db.annualCarry || {}).expired;
-  const exp = (db.annualCarry || {}).expires_on ? fmtDateY(db.annualCarry.expires_on) : "N/A";
-  return `Annual Leave: ${fmtD(own)} · Carry Forward: ${fmtD(usable)} `
+  // It used to read db.annualCarry — MY carry — no matter whose balance was on screen.
+  // HR entering leave for somebody else saw their own carried days against that person's
+  // figures, and the two never had to agree with each other.
+  const s = annualSplit(empId, b);
+  const c = carryRecord(empId) || {};
+  const gone = carryExpired(empId);
+  const exp = c.expires_on ? fmtDateY(c.expires_on) : "N/A";
+  return `Annual Leave: ${fmtD(s.own)} · Carry Forward: ${fmtD(s.carry)} `
        + `(${gone ? `Expired ${exp} — those days are gone` : `Expiry Date: ${exp}`}) · `;
 }
 /* ---- Start a new year: preview, result, and the permanent log --------------------
@@ -1980,7 +2004,7 @@ function vApply() {
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
               : "Recorded for HR's records only — it doesn't use any leave balance.")
-          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(t.code, b)}Entitled this year: ${fmtD(b.yGranted)} · Taken: ${fmtD(b.yUsed)} · Pending: ${fmtD(b.pending)})`}</span>
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(who.id, t.code, b)}Entitled this year: ${fmtD(b.yGranted)} · Taken: ${fmtD(b.yUsed)} · Pending: ${fmtD(b.pending)})`}</span>
       </div>
       <div class="frow">
         ${/* v26: the mirror of `max`. A year that has been closed off is not something an
@@ -2953,22 +2977,26 @@ function ltShort(t) {
 // Carried-forward days still available to this person. HR reads it per employee; the
 // employee's own screens read db.annualCarry, which is the same figure for themselves.
 function carryOf(empId) {
-  if (empId === me.id && db.annualCarry) return Math.max(0, Number(db.annualCarry.remaining) || 0);
-  const y = new Date().getFullYear();
-  const row = (db.allCarry || []).find(c => c.emp_id === empId && Number(c.year) === y && !c.expired_at);
-  if (!row) return 0;
+  const rec = carryRecord(empId);
+  if (!rec) return 0;
   // Past its expiry date but not yet written off is still GONE — the balance withholds
   // those days from the moment the date passes, whether or not the daily job has run.
   // Reporting them here as still available is the same lie v38 took out of the view.
-  const today = new Date().toISOString().slice(0, 10);
-  if (row.expires_on && String(row.expires_on) < today) return 0;
-  // Same "carried days are used first" rule the database applies: what is left of the
-  // carry is what was carried minus this year's annual leave already taken.
-  const taken = db.applications
-    .filter(a => a.empId === empId && a.type === "annual" && a.status === "approved" &&
-                 String(a.start).slice(0, 4) === String(y))
-    .reduce((n, a) => n + Number(a.days || 0), 0);
-  return Math.max(0, (Number(row.carry_in) || 0) - taken);
+  if (rec.expired_at || carryExpired(empId)) return 0;
+  const carryIn = Math.max(0, Number(rec.carry_in) || 0);
+  // Carried days are spent first, so what is left of the carry is what was carried minus
+  // this year's annual leave already taken.
+  //
+  // Taken comes from the LEDGER, not from the list of approved applications. Those two
+  // are not the same number: HR entering leave by hand, a balance adjustment and a
+  // refund all move the ledger without there being an application to count. Reading one
+  // of them while `avail` reads the other is what printed
+  //   "Available Balance: 16 (Annual Leave: 11 · Carry Forward: 5)"
+  // for somebody with 14 entitled, 5 carried and 3 days taken — the total was right and
+  // the split was wrong, so Annual Leave appeared to GROW as leave was taken.
+  const b = bal(empId, "annual");
+  if (b.yUsed == null) return Math.max(0, Number(rec.remaining) || 0);  // ledger hidden by RLS
+  return Math.max(0, carryIn - Math.max(0, Number(b.yUsed) || 0));
 }
 function hrApply() {
   const list = activeEmps();
@@ -3057,14 +3085,20 @@ function hrBalances() {
   const emps = activeEmps();
   return `<div class="card">
     <div class="frow" style="justify-content:space-between;align-items:center;margin-bottom:10px">
-      <p class="meta" style="margin:0">Each cell shows <b>days left / entitled this year</b> (pending requests already reserved). Export for payroll or backup (e.g. to your NAS).</p>
+      <p class="meta" style="margin:0">Each cell shows <b>days left / entitled this year</b> (pending requests already reserved).${db.orgV16 ? ` <b>CF</b> is last year's carried days, kept separate: <b>AL</b> counts this year's own days only, and carried days are spent first, so a person's annual leave available is <b>CF + AL</b>.` : ""} Export for payroll or backup (e.g. to your NAS).</p>
       <button class="btn sec" data-act="balcsv">⬇ Export CSV</button>
     </div>
     <div class="tablebox"><table class="nowrap"><thead><tr><th>Employee</th><th>Team</th>${db.orgV16 ? `<th class="num" title="Carry Forward — unused annual leave brought in from last year">CF</th>` : ""}${types.map(t => `<th class="num" title="${esc(t.en)}">${esc(ltShort(t))}</th>`).join("")}</tr></thead><tbody>
     ${emps.map(e => `<tr>
       <td><b>${esc(e.name)}</b></td><td class="meta">${esc(e.dept)}</td>
-      ${db.orgV16 ? `<td class="num meta">${fmtD(carryOf(e.id))}</td>` : ""}
-      ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code); return `<td class="num" title="${fmtD(b.avail)} left of ${fmtD(b.yGranted)} entitled this year">${fmtD(b.avail)} / ${fmtD(b.yGranted)}</td>`; }).join("")}
+      ${db.orgV16 ? `<td class="num meta">${fmtD(annualSplit(e.id, bal(e.id, "annual")).carry)}</td>` : ""}
+      ${types.map(t => { if (!eligible(t, e)) return `<td class="num meta">n/a</td>`; const b = bal(e.id, t.code);
+        // Annual leave is shown WITHOUT the carried days, because the CF column beside it
+        // is already showing them. Printing b.avail here put the same days in both
+        // columns — "CF 5" next to "11 / 14" for somebody with 14 entitled and 5 carried.
+        if (t.code === "annual" && db.orgV16) { const s = annualSplit(e.id, b);
+          return `<td class="num" title="${fmtD(s.own)} of this year's ${fmtD(b.yGranted)} left, plus ${fmtD(s.carry)} carried forward — ${fmtD(b.avail)} available in total">${fmtD(s.own)} / ${fmtD(b.yGranted)}</td>`; }
+        return `<td class="num" title="${fmtD(b.avail)} left of ${fmtD(b.yGranted)} entitled this year">${fmtD(b.avail)} / ${fmtD(b.yGranted)}</td>`; }).join("")}
     </tr>`).join("")}</tbody></table></div>
     <p class="meta" style="margin-top:10px;line-height:1.9">${db.orgV16 ? `<b>CF</b> Carry Forward · ` : ""}${types.map(t => `<b>${esc(ltShort(t))}</b> ${esc(t.en)}`).join(" · ")}</p></div>`;
 }
@@ -3928,8 +3962,15 @@ async function runAction(el) {
     }
     case "balcsv": {
       const types = db.leaveTypes.filter(t => !t.noDeduct).sort((a, b) => a.sort - b.sort);
-      const rows = [["Employee", "Team", ...types.flatMap(t => [t.en + " left", t.en + " entitled this year"])]];
-      for (const e of activeEmps()) rows.push([e.name, e.dept, ...types.flatMap(t => { if (!eligible(t, e)) return ["n/a", "n/a"]; const b = bal(e.id, t.code); return [fmtD(b.avail), fmtD(b.yGranted)]; })]);
+      // Same split as the table it exports: carried days in the Carry Forward column and
+      // nowhere else, so a payroll spreadsheet cannot add a person's carry in twice.
+      const rows = [["Employee", "Team", ...(db.orgV16 ? ["Carry Forward left"] : []),
+        ...types.flatMap(t => [t.en + " left", t.en + " entitled this year"])]];
+      for (const e of activeEmps()) rows.push([e.name, e.dept,
+        ...(db.orgV16 ? [fmtD(annualSplit(e.id, bal(e.id, "annual")).carry)] : []),
+        ...types.flatMap(t => { if (!eligible(t, e)) return ["n/a", "n/a"]; const b = bal(e.id, t.code);
+          const left = (t.code === "annual" && db.orgV16) ? annualSplit(e.id, b).own : b.avail;
+          return [fmtD(left), fmtD(b.yGranted)]; })]);
       csvDownload("leave-balances-" + todayStr() + ".csv", rows);
       toast("Balances exported"); break;
     }

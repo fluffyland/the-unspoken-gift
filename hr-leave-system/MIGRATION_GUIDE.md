@@ -102,6 +102,24 @@ Wait for "Success" before starting the next.
 | 18 | `keepalive_ping_v3.sql` | The heartbeat that stops a free project sleeping, and expires due carry-over daily |
 | 19 | `undo_year_start.sql` | Puts one "Start a new year" run back exactly as it was. Shows you what it would do before it does anything |
 
+## When a number on screen looks wrong
+
+Do not guess, and do not let me guess either. Paste
+**`supabase/explain_balances.sql`** into the SQL Editor and press Run. It changes
+nothing — it only reads — and it can be run as often as you like. One table comes back,
+in six sections:
+
+| Section | Answers |
+|---|---|
+| **A** | Which balances on screen are **not** this year's arithmetic, and by how many days |
+| **B** | Who is holding a different number of days from what the **Leave types** tab says — including anyone holding **nothing at all**, which no self-consistency check can see |
+| **C** | The exact ledger rows causing every gap in A: which year they belong to, when they were written, and what they say |
+| **D** | Annual leave for every person: entitled, carried, taken, forfeited, pending, what it should be, what is shown |
+| **E** | Carry-forward's two halves — the carry record and the ledger entry — side by side, so a half-written one is obvious |
+| **F** | What the leave types and the two expiry dates are actually set to |
+
+Copy the whole column back and the answer is arithmetic instead of an opinion.
+
 **How to know it worked:** `install.sql` finishes by printing
 **"LeaveDesk installed — now run bootstrap_owner.sql to create your first Owner."**
 If you see a red error instead, stop and get the message checked rather than running it again.
