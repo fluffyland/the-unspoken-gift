@@ -1,0 +1,143 @@
+#!/bin/sh
+# Run the v35 suite. Nothing here touches a real database and nothing can send an email.
+#
+#   ./run.sh sql        the database tests, on a throwaway Postgres 16
+#   ./run.sh browser    the page tests, on the local app.html
+#   ./run.sh            both
+#
+# The SQL half stands a fresh Postgres up in a temp folder, loads supabase_shim.sql
+# (a small stand-in for what Supabase provides: auth.uid(), storage, pg_net), then
+# ../supabase/install.sql, then the tests. It stops the server afterwards.
+set -e
+HERE=$(cd "$(dirname "$0")" && pwd)
+SB=$HERE/../supabase
+PGB=$(ls -d /usr/lib/postgresql/*/bin | tail -1)
+D=${TMPDIR:-/tmp}/leavedesk-test-pg
+
+sql() {
+  runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
+  rm -rf $D; mkdir -p $D; chown postgres:postgres $D
+  runuser -u postgres -- $PGB/initdb -D $D/data -U postgres -A trust >/dev/null 2>&1
+  echo "listen_addresses=''" >> $D/data/postgresql.conf
+  runuser -u postgres -- $PGB/pg_ctl -D $D/data -o "-k $D" -l $D/log -w start >/dev/null 2>&1
+  chmod 777 $D
+  P() { $PGB/psql -h $D -U postgres -d hr -v ON_ERROR_STOP=1 "$@"; }
+  fresh() {
+    $PGB/psql -h $D -U postgres -d postgres -q -c "drop database if exists hr" >/dev/null
+    $PGB/psql -h $D -U postgres -d postgres -q -c "create database hr" >/dev/null
+    P -q -f "$HERE/supabase_shim.sql" >/dev/null 2>&1
+  }
+
+  echo "--- a brand-new company, installed from install.sql alone ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_new_company.sql" >/dev/null 2>&1
+  P -f "$HERE/t35.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  # install.sql with the v35 section cut out = the database as it is before the upgrade
+  awk '/^-- migration_app_v35\.sql$/{s=1} /^-- keepalive_ping_v3\.sql$/{s=0} !s' "$SB/install.sql" > "$D/pre35.sql"
+
+  # $1 = seed, $2 = assertions. Snapshot the balances BEFORE the migration: a snapshot
+  # taken afterwards could never disagree, and a check that cannot fail is worse than none.
+  upgrade() {
+    fresh; P -q -f "$D/pre35.sql" >/dev/null 2>&1
+    P -q -f "$HERE/$1" >/dev/null 2>&1
+    P -q -c "create table _pre as select emp_id, leave_type, balance from leave_balances" >/dev/null
+    P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
+    P -f "$HERE/$2" 2>&1 | grep -E "NOTICE:  ok|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+  }
+
+  echo
+  echo "--- upgraded in place: the company that reported the bug (all of it in one year) ---"
+  upgrade seed_reported_case.sql t35_reported_case.sql
+
+  echo
+  echo "--- upgraded in place: the joining-credit split, on a database v35 ALREADY ran on ---"
+  fresh; P -q -f "$D/pre35.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_joiners.sql" >/dev/null 2>&1
+  P -q -c "create table _pre as select emp_id, leave_type, balance from leave_balances" >/dev/null
+  P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
+  # Put back exactly what the FIRST version of v35 left behind: joining credits filed
+  # as corrections rather than allowances. Re-running the corrected file has to repair
+  # them. It did not, at first: the backfill only fills nulls, so a corrected rule
+  # reached nothing that a previous run had already tagged, and the staff whose figures
+  # were wrong were precisely the ones it could not touch.
+  P -q -c "update leave_ledger set kind = 'adjust' where reason like '%allowance on joining%'" >/dev/null
+  P -q -f "$SB/migration_app_v35.sql" >/dev/null 2>&1
+  P -f "$HERE/t35_joiners.sql" 2>&1 | grep -E "NOTICE:  ok|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
+  echo "--- upgraded in place: a company with a real previous year ---"
+  # None of the fixtures above can test the year tags at all: every row in them sits in
+  # 2026, so "the year the wording names" and "the year it was typed" always agree, and a
+  # migration that filed everything under the wrong year would look exactly like one that
+  # got it right. Here they disagree in three places on purpose.
+  upgrade seed_two_years.sql t35_two_years.sql
+
+  echo
+  echo "--- every leave type, every employee, through the whole life of an application ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t35_lifecycle.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
+  echo "--- off-in-lieu expiry (v36) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t36_oil_expiry.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
+  echo "--- both expiry dates are one mechanism, and every forfeit is recorded (v37) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t37_expiry_parity.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
+  echo "--- the carry-forward figure on screen is the one you can book (v38) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t38_carry_display.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
+  echo "--- a carry-forward has two halves and both must be written (v39) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -f "$HERE/t39_carry_halves.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
+  echo "--- the balance report names a fault, and stays quiet when there is none ---"
+  # explain_balances.sql is what gets pasted into the SQL Editor when a number on
+  # screen is disputed. A report that says "all fine" whatever the data is worse
+  # than no report, so it is run twice: once on a healthy company, once on the
+  # same company with one fault of each shape planted in it.
+  say() { if [ "$1" = ok ]; then echo "ok    $2"; else echo "FAIL  $2"; fi; }
+  has() { grep -qE "$1" "$D/rep.txt" && say ok "$2" || say no "$2"; }
+  hasnt() { grep -qE "$1" "$D/rep.txt" && say no "$2" || say ok "$2"; }
+
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -q -f "$HERE/seed_lifecycle.sql" >/dev/null 2>&1
+  P -q -t -f "$SB/explain_balances.sql" > "$D/rep.txt" 2>&1
+  hasnt "ERROR" "R0 the report runs without an error"
+  has "LEAVE YEAR" "R0b and prints its header"
+  has "every balance on screen is exactly this year" "R1 a healthy company shows no gap"
+  has "everybody holds exactly what the Leave types tab says" "R2 and no entitlement mismatch"
+  has "every row belongs to this year and is tagged" "R3 and no stray rows"
+
+  P -q -f "$HERE/seed_explain_faults.sql" >/dev/null 2>&1
+  P -q -t -f "$SB/explain_balances.sql" > "$D/rep.txt" 2>&1
+  has "^ Boss +Annual Leave .* 19 +5$"        "R4 a previous year's leftover is named, with the gap"
+  has "^ Boss +Annual Leave +2025 +grant"     "R5 and the exact row that causes it is listed"
+  has "Shared Parental Leave +65 +70 +5$"     "R6 people still holding 70 after the type was set to 65"
+  hasnt "^ Male +Shared Parental Leave +65"   "R7 the one person already levelled is not accused"
+  has "Compassionate Leave +3 +NOTHING"       "R8 somebody holding no allowance at all is named"
+  has "^ Nogender +5 +0 "                     "R9 a carry-forward with no ledger half is named"
+
+  runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
+}
+
+browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs"; }
+
+case "${1:-both}" in
+  sql) sql ;;
+  browser) browser ;;
+  *) sql; echo; browser ;;
+esac

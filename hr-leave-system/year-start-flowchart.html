@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Start a new year — what the button does</title>
+<style>
+  :root{
+    --ink:#1c2430; --muted:#5d6b7e; --line:#dfe5ec; --paper:#f4f6f9; --card:#fff;
+    --blue:#2563eb; --blue-soft:#eaf1fe; --green:#0f8a55; --green-soft:#e6f6ee;
+    --red:#c0392b; --red-soft:#fdecea; --amber:#9a6b00; --amber-soft:#fdf3dc;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font:15px/1.6 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:920px;margin:0 auto;padding:32px 20px 72px}
+  h1{font-size:26px;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 28px}
+  .lane{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px}
+  .lane h2{font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 16px}
+  .step{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border:1px solid var(--line);
+        border-radius:11px;background:var(--card);margin:0 auto;max-width:640px}
+  .step .n{flex:0 0 30px;height:30px;border-radius:50%;background:var(--blue-soft);color:var(--blue);
+           font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .step .t{flex:1}
+  .step b{display:block;margin-bottom:2px}
+  .step .d{color:var(--muted);font-size:13.5px}
+  .arrow{width:2px;height:22px;background:var(--line);margin:0 auto;position:relative}
+  .arrow::after{content:"";position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);
+                border:5px solid transparent;border-top-color:var(--line)}
+  .decision{max-width:640px;margin:0 auto;border:1px solid var(--amber);background:var(--amber-soft);
+            border-radius:11px;padding:14px 16px;text-align:center;color:var(--amber);font-weight:600}
+  .branch{display:flex;gap:14px;max-width:640px;margin:14px auto 0}
+  .branch>div{flex:1;border-radius:11px;padding:13px 15px;font-size:13.5px}
+  .yes{background:var(--green-soft);border:1px solid var(--green);color:#0b5f3c}
+  .no{background:var(--red-soft);border:1px solid var(--red);color:#8e2b20}
+  .branch b{display:block;margin-bottom:3px}
+  .end{max-width:640px;margin:0 auto;border-radius:11px;padding:15px 17px;
+       background:var(--green-soft);border:1px solid var(--green);color:#0b5f3c}
+  .end b{display:block;margin-bottom:3px}
+  .note{max-width:640px;margin:16px auto 0;border-left:3px solid var(--blue);background:var(--blue-soft);
+        padding:12px 15px;border-radius:0 9px 9px 0;font-size:13.5px}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin-top:6px}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left}
+  th{background:var(--paper);font-weight:600;color:var(--muted)}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .never li{margin-bottom:6px}
+  .foot{color:var(--muted);font-size:13px;margin-top:26px;text-align:center}
+  @media(max-width:620px){.branch{flex-direction:column}}
+</style></head><body><div class="wrap">
+
+<h1>Start a new year</h1>
+<p class="sub">What the button actually does, in order. HR Console → Company settings → Start a new year.</p>
+
+<div class="lane">
+  <h2>Before anything is written</h2>
+  <div class="step"><div class="n">0</div><div class="t"><b>Is anything still waiting?</b>
+    <div class="d">Any leave dated in the closing year that is still pending, or waiting on a cancellation, stops the run and is listed by name. Those days have not come off anyone's balance yet, so the year start would treat them as unused and the people would lose them.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">▸</div><div class="t"><b>You press the button</b>
+    <div class="d">Nothing is saved yet. LeaveDesk works out every number and shows you the preview.</div></div></div>
+  <div class="arrow"></div>
+  <div class="decision">Do the numbers look right?</div>
+  <div class="branch">
+    <div class="no"><b>No — close it</b>Nothing was written. Change what you need (someone's Carry Forward AL Maximum Day, a pending application) and press it again.</div>
+    <div class="yes"><b>Yes — confirm</b>Now it writes. Everything below happens, once, for each employee still working here.</div>
+  </div>
+</div>
+
+<div class="lane">
+  <h2>Then, for each employee — in this order</h2>
+
+  <div class="step"><div class="n">0</div><div class="t"><b>Already done this year?</b>
+    <div class="d">If this person was processed for this year before, skip them entirely. This is what makes pressing the button twice safe.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">1</div><div class="t"><b>Write off expired carry-forward</b>
+    <div class="d">Days carried in earlier that have passed their expiry date are removed now, so they cannot carry a second time.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">2</div><div class="t"><b>Count what is left of last year's annual leave</b>
+    <div class="d">Entitled minus taken. One pot — any surviving carry-forward is in there too.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">3</div><div class="t"><b>Carry forward, up to their maximum</b>
+    <div class="d">Whatever fits under their Carry Forward AL Maximum Day moves into the new year.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">4</div><div class="t"><b>Forfeit the rest</b>
+    <div class="d">Anything above the maximum is written off. LeaveDesk does not pay it out.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">5</div><div class="t"><b>Stamp an expiry date on what carried</b>
+    <div class="d">Set by Carry Forward AL expiry date — a month and a day that repeats every year. "Never expires" = the days never expire.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">6</div><div class="t"><b>Clear every leave type that starts fresh</b>
+    <div class="d">Sick, hospitalisation and so on go to zero, whatever was left in them.</div></div></div>
+  <div class="arrow"></div>
+  <div class="step"><div class="n">7</div><div class="t"><b>Write it down, permanently</b>
+    <div class="d">One row in Past runs with their name, what carried, what was forfeited, what expired. Kept forever, never overwritten.</div></div></div>
+</div>
+
+<div class="lane">
+  <h2>Last, once everybody has been through</h2>
+  <div class="step"><div class="n">8</div><div class="t"><b>Credit the new year's allowance</b>
+    <div class="d">Everybody gets their annual leave for the new year — exactly the figure in their Annual Leave Entitled / Yr. Nothing is added for length of service, and nothing is pro-rated for new joiners.</div></div></div>
+  <div class="arrow"></div>
+  <div class="end"><b>Done</b>People open LeaveDesk and see their new allowance, plus anything that carried, with its use-by date.</div>
+  <div class="note"><b>Why step 8 is last.</b> If the new allowance were credited before step 6,
+    step 6 would clear it away the moment it arrived. The order is not optional.</div>
+</div>
+
+<div class="lane">
+  <h2>A worked example — Siti, closing 2026</h2>
+  <p style="margin:0 0 10px;color:var(--muted)">Entitled to 14 days a year · maximum carry forward 5 · expiry date 30 June · took 6 days in 2026.</p>
+  <table>
+    <tr><th>Step</th><th>Working</th><th>Result</th></tr>
+    <tr><td>2 — what is left</td><td>14 entitled − 6 taken</td><td class="n">8 days</td></tr>
+    <tr><td>3 — carries forward</td><td>8 left, but her maximum is 5</td><td class="n">5 days</td></tr>
+    <tr><td>4 — forfeited</td><td>8 − 5</td><td class="n">3 days</td></tr>
+    <tr><td>5 — use them by</td><td>the expiry date, in the new year</td><td class="n">30 Jun 2027</td></tr>
+    <tr><td>6 — sick leave</td><td>9 days unused</td><td class="n">cleared</td></tr>
+    <tr><td>8 — credited for 2027</td><td>her yearly entitlement</td><td class="n">14 days</td></tr>
+  </table>
+  <div class="note">On 2 January Siti sees <b>19 days</b>: 14 new, plus 5 carried that she must use by 30 June.
+    Her 3 forfeited days and her leftover sick leave are gone — and both are written down in Past runs.</div>
+</div>
+
+<div class="lane">
+  <h2>What if you press it twice?</h2>
+  <div class="note" style="margin-top:0"><b>Nothing happens twice.</b> Step 0 catches it.
+    Press <b>Start 2026</b> again today and it reports <b>0 employees processed</b> — nothing carried,
+    nothing forfeited, nothing cleared, nothing credited.<br><br>
+    Same if it stops halfway — a laptop closing, the internet dropping. Press it again and it
+    finishes the people it never reached, leaving everyone else exactly as they are.</div>
+</div>
+
+<div class="lane">
+  <h2>A form for that year turns up afterwards</h2>
+  <div class="note" style="margin-top:0"><b>The year is closed, but it can still be corrected.</b>
+    Staff are refused and told to hand the form to HR. HR records it in Leave Application,
+    and before anything is written LeaveDesk redoes that person's year: the days that were
+    forfeited in error come back, and Carry Forward drops to what it should have been, so the
+    right amount expires later.<br><br>
+    Refused in two cases, because the sums could not be trusted: anything older than
+    <b>last year</b>, and a carry-forward that has <b>already expired</b>. For those, adjust
+    the person's Annual Leave Entitled / Yr instead.<br><br>
+    Past runs is never rewritten — the correction is recorded beside it.</div>
+</div>
+
+<div class="lane never">
+  <h2>What it never touches</h2>
+  <ul>
+    <li><b>Off-in-lieu</b> — never cleared, never expired, never credited here. It is earned day by day and stays until used.</li>
+    <li><b>Anyone who has left</b> — offboarded employees are skipped entirely. Once someone is offboarded their record is frozen: no expiry, no credit, no adjustment, ever.</li>
+    <li><b>Leave already taken</b> — days used last year stay used. Nothing is refunded.</li>
+    <li><b>Leave types set not to reset yearly</b> — those keep their balance.</li>
+    <li><b>The past</b> — last year's records, applications and approvals are never altered.</li>
+  </ul>
+</div>
+
+<p class="foot">LeaveDesk · Shanghai School Uniforms Pte Ltd</p>
+</div></body></html>
