@@ -75,10 +75,31 @@ ORGQ="select to_jsonb(o) - 'notify_url' - 'notify_key' - 'notify_only_emp' from 
 eq "org_settings is identical, column for column" "$(Q new "$ORGQ")" "$(Q old "$ORGQ")"
 eq "the email throttle did NOT travel" "$(Q new "select coalesce(notify_only_emp::text, 'NULL') from org_settings where id=1")" "NULL"
 LTQ="select string_agg(to_jsonb(l)::text, '|' order by code) from leave_types l"
-eq "every leave type is identical"    "$(Q new "$LTQ")" "$(Q old "$LTQ")"
-eq "including the one they deleted staying deleted" "$(Q new "select count(*) from leave_types where code='ns'")" "0"
-eq "Hospitalisation is 57, not the MOM 60" "$(Q new "select default_days::text from leave_types where code='hosp'")" "57.0"
-eq "Shared Parental is 65, not 70"         "$(Q new "select default_days::text from leave_types where code='shared_parental'")" "65.0"
+# Leave types are deliberately NOT applied: asked to be set up fresh on the new system.
+# They are still PRINTED, commented out, so the decision costs nothing to reverse. Both
+# halves of that are checked -- the default, and what happens when it is opted into.
+eq "leave types are NOT carried by default"  "$(Q new "select default_days::text from leave_types where code='hosp'")" "60.0"
+eq "so the new system has the MOM Shared Parental" "$(Q new "select default_days::text from leave_types where code='shared_parental'")" "70.0"
+eq "and a type the old company deleted is still present" "$(Q new "select count(*) from leave_types where code='ns'")" "1"
+eq "but the old figures ARE in the script, for reference" "$(grep -c 'Hospitalisation Leave 57' "$D/carry.sql")" "1"
+eq "every leave-type line is commented out" \
+   "$(grep -c '^-- insert into leave_types' "$D/carry.sql")" "$(Q old 'select count(*) from leave_types')"
+eq "none of them is live"  "$(grep -c '^insert into leave_types' "$D/carry.sql")" "0"
+
+echo
+echo "--- opting leave types in is one edit, and then they DO carry ---"
+sed 's/^-- insert into leave_types/insert into leave_types/; s/^-- delete from leave_types/delete from leave_types/' \
+    "$D/carry.sql" > "$D/carry_with_types.sql"
+$PGB/psql -h $D -U postgres -d new -q -v ON_ERROR_STOP=1 -f "$D/carry_with_types.sql" >/dev/null 2>&1 \
+  && ok ok "the opted-in script runs" || ok no "the opted-in script runs"
+eq "every leave type is now identical"     "$(Q new "$LTQ")" "$(Q old "$LTQ")"
+eq "Hospitalisation is 57"                 "$(Q new "select default_days::text from leave_types where code='hosp'")" "57.0"
+eq "Shared Parental is 65"                 "$(Q new "select default_days::text from leave_types where code='shared_parental'")" "65.0"
+eq "and the type they deleted is gone"     "$(Q new "select count(*) from leave_types where code='ns'")" "0"
+eq "still no employees"                    "$(Q new 'select count(*) from employees')" "0"
+# Put the new database back to the default-path state for the checks that follow.
+$PGB/psql -h $D -U postgres -d new -q -c "update leave_types set default_days = 60 where code='hosp'" >/dev/null
+$PGB/psql -h $D -U postgres -d new -q -c "update leave_types set default_days = 70 where code='shared_parental'" >/dev/null
 eq "off-in-lieu expiry came across"        "$(Q new "select oil_expiry_month || '-' || oil_expiry_day from org_settings where id=1")" "9-10"
 PHQ="select string_agg(holiday::text||'='||name, '|' order by holiday) from public_holidays"
 eq "public holidays are identical"    "$(Q new "$PHQ")" "$(Q old "$PHQ")"

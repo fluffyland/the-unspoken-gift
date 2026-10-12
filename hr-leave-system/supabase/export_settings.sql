@@ -8,9 +8,16 @@
 --
 -- What it carries:
 --     company settings (name, domain, defaults, caps, accrual, BOTH expiry dates)
---     leave types      (your days per type — Hospitalisation 57, SPL 65, …)
 --     public holidays  (every date and name you have keyed in)
 --     teams            (and whether each works Saturdays)
+--
+-- Leave types are written out too, but COMMENTED OUT, because they were the one
+-- thing asked to be set up fresh on the new system. The new system therefore keeps
+-- the MOM defaults from install.sql — Hospitalisation 60, Shared Parental 70 —
+-- until they are retyped on the Leave types tab. If that turns out to be the wrong
+-- call, the block is still in the script: delete the "-- " from the front of those
+-- lines and run it again. Nothing is lost either way, which is the point of
+-- printing them rather than leaving them out.
 --
 -- What it does NOT carry, by design — this is the "clean system" part:
 --     employees · logins · applications · approvals · the ledger ·
@@ -97,12 +104,23 @@ report as (
   union all select 2, 1, line from rowsql where t = 'departments'
   union all select 2, 9, ''
 
-  union all select 3, 0, '-- ---- 3. leave types — your days, not the MOM defaults ---------------'
-  union all select 3, 1 + ord, line from rowsql where t = 'leave_types'
+  union all select 3, 0, '-- ---- 3. leave types — NOT APPLIED, on purpose ----------------------'
+  union all select 3, 1, '-- You chose to set these up fresh on the new system, so every line below'
+  union all select 3, 2, '-- is commented out and the new system keeps install.sql''s MOM defaults'
+  union all select 3, 3, '-- (Hospitalisation 60, Shared Parental 70) until you retype them on the'
+  union all select 3, 4, '-- Leave types tab.'
+  union all select 3, 5, '--'
+  union all select 3, 6, '-- CHANGED YOUR MIND? Delete the "-- " from the front of each line in this'
+  union all select 3, 7, '-- section and run the script again. It is safe to re-run.'
+  union all select 3, 8, '--'
+  union all select 3, 9, format('-- Your old company''s figures, for reference: %s',
+                  (select string_agg(name_en || ' ' || trim_scale(default_days), ', ' order by sort)
+                     from leave_types where not no_deduct and default_days > 0))
+  union all select 3, 100 + ord, '-- ' || line from rowsql where t = 'leave_types'
   union all
   -- install.sql seeds the full MOM list. Anything the old company does not have
   -- should not survive into the new one, or "the same settings" is not true.
-  select 3, 9000, format('delete from leave_types where code not in (%s);',
+  select 3, 9000, format('-- delete from leave_types where code not in (%s);',
                          (select string_agg(quote_literal(code), ', ' order by code) from leave_types))
   union all select 3, 9001, ''
 
@@ -120,12 +138,13 @@ report as (
   union all select 9, 3, 'select company_name, email_domain, default_annual_base, default_carry_cap,'
   union all select 9, 4, '       carry_expiry_month, carry_expiry_day, oil_expiry_month, oil_expiry_day'
   union all select 9, 5, '  from org_settings where id = 1;'
-  union all select 9, 6, 'select code, name_en, default_days, gender_eligibility, no_deduct'
-  union all select 9, 7, '  from leave_types order by sort;'
-  union all select 9, 8, format('-- expect %s leave types, %s holidays, %s teams, and ZERO employees',
-                      (select count(*) from leave_types), (select count(*) from public_holidays),
-                      (select count(*) from departments))
-  union all select 9, 9, 'select count(*) as employees_should_be_zero from employees;'
+  union all select 9, 6, '-- Leave types below will show the MOM defaults, not the old company''s'
+  union all select 9, 7, 'select code, name_en, default_days, gender_eligibility, no_deduct'
+  union all select 9, 8, '  from leave_types order by sort;'
+  union all select 9, 85, format('-- expect %s holidays, %s teams, and ZERO employees (leave types: %s, unchanged)',
+                      (select count(*) from public_holidays), (select count(*) from departments),
+                      'MOM defaults')
+  union all select 9, 90, 'select count(*) as employees_should_be_zero from employees;'
 )
 select line as "copy this whole column, then run it on the NEW project"
   from report order by s, o, line;

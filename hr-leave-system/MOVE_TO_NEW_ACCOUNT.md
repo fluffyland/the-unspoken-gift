@@ -14,16 +14,30 @@ Nothing here touches the old system. It keeps running until you decide otherwise
 | The whole application | ✅ | 3 files uploaded to the new GitHub repo |
 | The whole database structure | ✅ | `supabase/install.sql`, one paste |
 | Company settings, both expiry dates | ✅ | `supabase/export_settings.sql` |
-| Leave types — **your** days (Hospitalisation 57, Shared Parental 65, …) | ✅ | same |
+| Leave types — your days (Hospitalisation 57, Shared Parental 65, …) | ⬜ **not applied** | printed in the script, commented out — see below |
 | Public holidays, every date and name | ✅ | same |
 | Teams, and which work Saturdays | ✅ | same |
 | Employees, logins, applications, approvals, the ledger, carry-forwards, amendment records, MC attachments | ❌ **by design** | nothing carries them |
 
-`install.sql` on its own gives you the **MOM defaults** — Hospitalisation 60, Shared
-Parental 70, the standard holiday list. That is not your setup. `export_settings.sql` is
-what makes the new system match the old one, and it is checked by
-`tests/t43_export_settings.sh`: it builds both databases for real, exports, imports, and
-compares every settings column rather than the ones somebody remembered.
+`install.sql` on its own gives you the **MOM defaults** and the standard holiday list.
+`export_settings.sql` is what makes the new system match the old one. It is checked by
+`tests/t43_export_settings.sh`, which builds both databases for real, exports, imports,
+and compares every settings column rather than the ones somebody remembered.
+
+### Leave types are the one exception
+
+You chose to set these up fresh, so the script **prints them commented out and does not
+apply them**. The new system will therefore show **Hospitalisation 60** and **Shared
+Parental 70** until you retype them on the Leave types tab — that is expected, not a
+fault. Your old figures are in the script as a reference line, so you have them to hand.
+
+**If you change your mind**, it is one edit: in the settings script, delete the `-- ` from
+the front of every line in section 3 and run it again. It is safe to re-run. That path is
+tested too, so it will behave.
+
+Retyping them in the app has one advantage worth knowing: saving a figure on the Leave
+types tab levels **every** eligible employee to it. On an empty system there is nobody to
+level, so either route gives the same result — do whichever you prefer.
 
 ---
 
@@ -107,20 +121,31 @@ It is never needed for any step below. Do not paste one anywhere.
     `send-notification` needs a secret: **`RESEND_API_KEY`**, from your Resend account.
     The app writes its own address into the database the first time you sign in as
     HR/Owner, so there is nothing to copy for that.
-16. **Keep the project awake.** The free plan pauses a project after **7 idle days**.
-    This has already caused a two-week outage once. Point a daily ping at the new
-    project — `cron-job.org`, calling `keepalive_ping` — and add it to UptimeRobot.
-    `MIGRATION_GUIDE.md` has the exact URLs and headers.
-    **If the new account is on a paid Supabase plan, skip this step entirely.** It exists
-    only to work around the free tier.
+16. **Keep the project awake — and note that you now need TWO of everything.**
+    The free plan pauses a project after **7 idle days** and deletes it 90 days later.
+    Both systems are staying live, so each needs its own:
+
+    | | Old project | New project |
+    |---|---|---|
+    | `cron-job.org` daily ping | already exists — **leave it pointing at the old one** | add a second job |
+    | private keepalive repo (12 h offset) | already exists | add the new URL, or accept one keeper |
+    | UptimeRobot monitor | already exists | add a second monitor |
+
+    `MIGRATION_GUIDE.md` has the exact URLs and headers. The thing to get wrong here is
+    re-pointing the existing ping at the new project instead of adding one: the old
+    project then goes quiet and Supabase pauses it. **If the new account is on a paid
+    Supabase plan, it needs none of this.**
 
 ### E · Afterwards
 
 17. Add your staff: HR console → **Employees & approval routes → Add employee**.
     Each person's annual-leave entitlement is set here, per employee.
-18. Nothing has been deleted from the old system. When you are satisfied the new one is
-    right, decide separately whether to retire the old project, and move its keepalive
-    ping over rather than leaving two pointing at the old one.
+18. Nothing has been deleted from the old system, and both are staying up. Keep the two
+    straight by naming them clearly in both dashboards — two LeaveDesks that look
+    identical, on two accounts, is exactly the setup where a change gets made in the
+    wrong one. The site URL is the quickest way to tell them apart.
+19. If you later retire one, remove *its* cron job and *its* monitor rather than the
+    other's, and leave the survivor's alone.
 
 ---
 
@@ -130,10 +155,13 @@ Run `supabase/explain_balances.sql` on the **new** project. On a correct empty s
 
 - sections A, C, D and E come back empty — there are no people to have balances
 - section B lists nothing — there is nobody holding the wrong entitlement
-- section F shows **your** figures: Hospitalisation 57, Shared Parental 65,
-  Compassionate 3, and both expiry dates as you set them
+- section F shows your **company settings** and both expiry dates as you set them
+- section F shows leave types at the **MOM defaults** — Hospitalisation 60, Shared
+  Parental 70 — because you chose to set those up fresh. Change them on the Leave types
+  tab, then run the report again and they will read what you typed.
 
-If section F shows 60 and 70, the settings script from step 3 was not run. Run it.
+If the **expiry dates or the company name** are wrong, the settings script from step 3
+was not run. Run it.
 
 ---
 
