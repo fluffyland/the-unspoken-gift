@@ -262,7 +262,42 @@ td.num{font-variant-numeric:tabular-nums}
 /* ============ Production build — talks to Supabase (real login + database) ============ */
 const SUPABASE_URL = "https://aypyolzkdupkpefpxius.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5cHlvbHprZHVwa3BlZnB4aXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDM0MTMsImV4cCI6MjA5OTA3OTQxM30.hoRS_j8yBTJkcQBG_IZRuVgDD06ZGCRam8lqz923f6s";
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* Are those two lines actually filled in? A fresh copy of this file carries
+   placeholders, and createClient() throws on a non-URL — which paints a BLANK PAGE
+   and gives the person setting up a new company nothing whatsoever to go on.
+   A screen that names the two lines and where to find the values is the difference
+   between a five-second fix and an afternoon.
+
+   Both key formats are accepted: the long "eyJ..." JWT that older projects issue,
+   and the "sb_publishable_..." form new projects issue. Rejecting the newer one
+   would turn a correct setup into an error message. */
+const urlLooksRight = u => /^https:\/\/[a-z0-9-]+\.supabase\.(co|in)\/?$/i.test(String(u || "").trim());
+const keyLooksRight = k => /^ey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\./.test(String(k || "").trim())
+                        || /^sb_(publishable|anon)_[A-Za-z0-9_\-]{12,}$/.test(String(k || "").trim());
+const NEEDS_SETUP = !urlLooksRight(SUPABASE_URL) || !keyLooksRight(SUPABASE_ANON_KEY);
+/* Never hand createClient a placeholder: it throws before anything can be rendered. */
+const sb = NEEDS_SETUP ? null : supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function setupScreen() {
+  const bad = [];
+  if (!urlLooksRight(SUPABASE_URL)) bad.push(["SUPABASE_URL", "Project URL", "https://xxxxxxxx.supabase.co"]);
+  if (!keyLooksRight(SUPABASE_ANON_KEY)) bad.push(["SUPABASE_ANON_KEY", "anon / public key", "eyJhbGci… or sb_publishable_…"]);
+  return `<div class="login"><div class="loginbox" style="max-width:560px;text-align:left">
+    <h1>LeaveDesk</h1>
+    <p class="tag">Almost there — this copy is not pointed at a database yet.</p>
+    <p style="font-size:14px;line-height:1.7;color:var(--muted)">Open <b>index.html</b> in any text editor.
+    Near the top, about <b>line 263</b>, there are two lines to fill in. Get both values from your
+    Supabase dashboard: <b>Project Settings → API</b>. Then save and upload the file again.</p>
+    <div class="tablebox"><table><thead><tr><th>Line</th><th>Where to get it</th><th>Looks like</th></tr></thead><tbody>
+      ${bad.map(b => `<tr><td><code>${esc(b[0])}</code></td><td>Settings → API → <b>${esc(b[1])}</b></td><td class="meta">${esc(b[2])}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p style="font-size:13px;line-height:1.7;color:var(--muted);margin-top:14px">
+    The <b>anon</b> key is the right one, and it is safe to publish — every permission is
+    enforced inside the database. Do <b>not</b> use the <b>service_role</b> key on the same page:
+    it bypasses all of them.</p>
+  </div></div>`;
+}
 
 /* db is an in-memory cache hydrated from Supabase; renderers read from it unchanged. */
 let db, me = null, view = "dashboard", vp = {}, hrTab = "records";
@@ -4333,6 +4368,10 @@ async function boot() {
 }
 if (typeof supabase === "undefined") {
   document.getElementById("app").innerHTML = '<div class="login"><div class="loginbox"><h1>LeaveDesk</h1><p class="tag">Could not load a required library. Check your internet connection and refresh.</p></div></div>';
+} else if (NEEDS_SETUP) {
+  /* Checked before boot() rather than inside it: boot() calls sb.auth, and sb is null
+     here on purpose. */
+  document.getElementById("app").innerHTML = setupScreen();
 } else {
   boot();
 }

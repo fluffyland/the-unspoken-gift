@@ -150,7 +150,7 @@ sql() {
   sh "$HERE/t43_export_settings.sh"
 }
 
-browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs" && echo && node "$HERE/t41.mjs" && echo && node "$HERE/t42_smoke.mjs"; }
+browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs" && echo && node "$HERE/t41.mjs" && echo && node "$HERE/t42_smoke.mjs" && echo && node "$HERE/t45_setup_guard.mjs"; }
 
 case "${1:-both}" in
   sql) sql ;;
