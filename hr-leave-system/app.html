@@ -1776,6 +1776,34 @@ function carryExpired(empId) {
   if (c.expired != null) return !!c.expired;
   return !!(c.expires_on && String(c.expires_on) < new Date().toISOString().slice(0, 10));
 }
+/* When does off-in-lieu die? Derived from the company setting on EVERY render, and
+   never stored against an employee — which is what makes "it must always be updated"
+   true by construction: there is no second copy that can go stale.
+
+   The date SHOWN is the next occurrence, because that is the date somebody needs in
+   order to use the days in time. The forfeit itself looks backward — a date already
+   gone this year takes the balance held on that date, now — and that is deliberate and
+   unchanged. The two agree: once this year's date has passed, the balance it claimed is
+   already gone, so what is left can only die on the next one.
+
+   29 February is clamped to the 28th in a non-leap year, the same as the database does. */
+function oilExpiryOn() {
+  const o = db.org || {};
+  if (!db.orgV36 || o.oilExpiryMonth == null || o.oilExpiryDay == null) return null;
+  const m = Number(o.oilExpiryMonth), d = Number(o.oilExpiryDay);
+  const today = new Date().toISOString().slice(0, 10);
+  const mk = y => {
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();   // day 0 of next month = last of this
+    return y + "-" + String(m).padStart(2, "0") + "-" + String(Math.min(d, last)).padStart(2, "0");
+  };
+  const y = new Date().getFullYear();
+  return mk(y) >= today ? mk(y) : mk(y + 1);      // on the day itself, it is today
+}
+function oilExpiryNote() {
+  if (!db.orgV36) return "";
+  const on = oilExpiryOn();
+  return on ? "Expiry Date: " + fmtDateY(on) : "Expiry Date: N/A";
+}
 /* Annual leave is TWO pots and they must never be added twice on one screen: this year's
    own days, and days carried in from last year. Carried days are spent first, so what is
    left of the carry is min(carry, available) and this year's own days are the remainder.
@@ -1917,7 +1945,7 @@ function balCard(t) {
   const taken = split ? Math.max(0, b.yUsed - carriedIn) : b.yUsed;
   return `<div class="bal"><div class="t">${esc(t.en)}</div>
     <div class="n">${fmtD(split ? split.own : b.avail)}<small> days left</small></div>
-    <div class="d">Entitled this year ${fmtD(b.yGranted)} \u00b7 Taken ${fmtD(taken)}${b.pending ? " \u00b7 Pending " + fmtD(b.pending) : ""}${split && split.carry ? `<br>+ ${fmtD(split.carry)} carried forward` : ""}</div></div>`;
+    <div class="d">Entitled this year ${fmtD(b.yGranted)} \u00b7 Taken ${fmtD(taken)}${b.pending ? " \u00b7 Pending " + fmtD(b.pending) : ""}${split && split.carry ? `<br>+ ${fmtD(split.carry)} carried forward` : ""}${t.code === "oil" && oilExpiryNote() ? `<br>${esc(oilExpiryNote())}` : ""}</div></div>`;
 }
 
 /* ---- My details (employee self-service) ---- */
@@ -1961,7 +1989,7 @@ function vProfile() {
           const taken = split ? Math.max(0, b.yUsed - carriedIn) : b.yUsed;
           const left  = split ? split.own : b.avail;
           return `<tr>
-          <td>${esc(t.en)}${t.noDeduct ? ` <span class="meta">· for records only</span>` : ""}</td>
+          <td>${esc(t.en)}${t.noDeduct ? ` <span class="meta">· for records only</span>` : ""}${t.code === "oil" && oilExpiryNote() ? `<div class="meta">${esc(oilExpiryNote())}</div>` : ""}</td>
           <td class="num">${t.noDeduct ? "—" : fmtD(b.yGranted)}</td>
           <td class="num">${fmtD(taken)}</td>
           <td class="num">${t.noDeduct ? "—" : fmtD(left)}</td></tr>`; }).join("")}
@@ -2081,7 +2109,7 @@ function vApply() {
           ? (t.code === "unpaid"
               ? "Unpaid leave may result in a salary deduction, depending on your company's policy."
               : "Recorded for HR's records only — it doesn't use any leave balance.")
-          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(who.id, t.code, b)}Entitled this year: ${fmtD(b.yGranted)} · Taken: ${fmtD(b.yUsed)} · Pending: ${fmtD(b.pending)})`}</span>
+          : `Available Balance: <b>${fmtD(b.avail)}</b> days (${carryLine(who.id, t.code, b)}Entitled this year: ${fmtD(b.yGranted)} · Taken: ${fmtD(b.yUsed)} · Pending: ${fmtD(b.pending)})${t.code === "oil" && oilExpiryNote() ? ` · ${esc(oilExpiryNote())} — the whole balance held on that day is forfeited` : ""}`}</span>
       </div>
       <div class="frow">
         ${/* v26: the mirror of `max`. A year that has been closed off is not something an
@@ -2650,7 +2678,7 @@ function empModal() {
         <input type="text" data-f="em.oilReason" value="${esc(f.oilReason || "")}" placeholder="Reason, e.g. worked 1 May" style="flex:1;min-width:0">
         ${numOr(f.oilDays, 0) ? `<span class="req" data-req="oilreason" title="A reason is required to credit off-in-lieu">*</span>` : ""}
       </div>
-      <span class="hint">Credit their off in lieu here. Their balance now: <b>${fmtD(bal(m.id, "oil").avail)}</b> days. Eg. If the employee entitled for 3 days, type 3 and it will credit 3 days OIL</span></div>` : ""}
+      <span class="hint">Credit their off in lieu here. Their balance now: <b>${fmtD(bal(m.id, "oil").avail)}</b> days. Eg. If the employee entitled for 3 days, type 3 and it will credit 3 days OIL${oilExpiryNote() ? " " + esc(oilExpiryNote()) + " — the whole balance held that day is forfeited." : ""}</span></div>` : ""}
     ${db.orgV16 ? `<div class="field" style="max-width:260px"><label>Carry Forward AL Maximum Day</label><input type="number" step="0.5" min="0" data-f="em.carryCap" value="${f.carryCap ?? 0}" ${selfLock ? "disabled" : ""}>
       <span class="hint">Setting to cap their maximum days.</span></div>` : ""}
     ${db.hasSat ? `<div class="field" style="max-width:230px"><label>Required to work on Saturday<span class="req">*</span></label>
