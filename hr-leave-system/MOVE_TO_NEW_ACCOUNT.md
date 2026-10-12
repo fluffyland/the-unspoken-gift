@@ -1,174 +1,137 @@
-# Moving LeaveDesk to a new account — same system, same settings, no staff data
+# LeaveDesk on the new account — what was done, and what is left
 
-For: a new Supabase project and a new GitHub account under **hr@shanghai-uniforms.com**,
-holding the identical system with the identical settings and **nobody in it yet**.
+**Never paste this file anywhere.** It is a `.md` — notes for reading. Pasting it into the
+SQL Editor produces `syntax error at or near "|"`, because the tables below are Markdown,
+not SQL. Only `.sql` files get pasted.
 
-Nothing here touches the old system. It keeps running until you decide otherwise.
+New project: `qpixlkcltjvzpamyspad` · Owner: `hr@shanghai-uniforms.com`
+The old system is untouched and still running. Both stay live for now.
 
 ---
 
-## What is being moved, and what is not
+## Done
 
-| | Moves | How |
+| | |
+|---|---|
+| ✅ | **Database built.** One paste. 17 leave types, 14 public holidays, 0 employees. |
+| ✅ | **Owner created and signed in.** The employee row was made automatically when the login appeared in Authentication — no second script. |
+| ✅ | **Website live.** `index.html`, `supabase.min.js`, `year-start-flowchart.html` in a public repo with Pages enabled. `index.html` already carries the new project's URL and anon key. |
+
+Verified against the live project, not assumed: a table that does not exist returns 404
+while `leave_types`, `org_settings` and `employees` return 200, so the schema is really
+there; `keepalive_ping` answers, so the install reached its end; and reading as `anon`
+returns empty — which is **RLS working**, not an empty database.
+
+---
+
+## Left to do
+
+### 1 · Settings from the old project (5 min, two pastes)
+
+The installer seeds Singapore MOM defaults. Your old company is not on all of them —
+Hospitalisation is 57, not 60. This copies the differences across and carries **no**
+employee data.
+
+1. Supabase → the **OLD** project → SQL Editor → paste **`export_settings.sql`** → Run.
+   It only reads. It prints one column of text.
+2. Copy that whole column. Supabase → the **NEW** project → SQL Editor → paste it → Run.
+
+It carries company settings and both expiry dates, public holidays, and teams.
+It does **not** carry leave types — you chose to set those up fresh, so the new system
+stays on Hospitalisation 60 / Shared Parental 70 until you retype them on the
+**Leave types** tab. The old figures are printed in the script as a reference line, and
+if you change your mind, delete the `-- ` from the front of section 3's lines and run it
+again.
+
+To confirm afterwards, run **`explain_balances.sql`** on the new project. Section F shows
+what every leave type and both expiry dates are set to.
+
+### 2 · The two Edge Functions (10 min, no GitHub)
+
+These are pasted into the **Supabase dashboard**, not uploaded to GitHub.
+
+| Function | What breaks without it |
+|---|---|
+| `create-login` | HR cannot create staff logins from the app |
+| `send-notification` | No approval emails. **Nothing else** — leave applications and approvals never wait on email |
+
+Dashboard → **Edge Functions** → Deploy a new function → name it exactly
+`create-login` / `send-notification` → paste that function's `index.ts` → Deploy.
+
+**Keep the name `index.ts`.** The dashboard deploys the entry point called `index.ts` and
+silently ignores anything else in the editor. A file named something else looks deployed,
+reports success, and never runs. That mistake cost this project three failed deploys.
+
+Then **Edge Functions → Secrets**, three of them:
+
+| Secret | Value |
+|---|---|
+| `RESEND_API_KEY` | from a Resend account **of your own** — see below |
+| `MAIL_FROM` | `LeaveDesk <onboarding@resend.dev>` to start with |
+| `APP_URL` | your new site's address, e.g. `https://<account>.github.io/<repo>/` |
+
+`APP_URL` has no fallback on purpose: set it, or the links inside the emails are blank.
+Leave **"Verify JWT with legacy secret" ON** for `send-notification` — the function has no
+auth logic of its own, so that verification is what protects it.
+
+**Resend must be a new account** under `hr@shanghai-uniforms.com`. Reusing the old API key
+would leave the new system depending on an account tied to your old email, which is the
+one thing you asked to avoid.
+
+### 3 · Keep the project awake — you now need TWO of everything (15 min)
+
+The free Supabase plan **pauses a project after 7 idle days** and deletes it 90 days
+later. This already cost a two-week outage once. Both systems are staying live, so:
+
+| | Old project | New project |
 |---|---|---|
-| The whole application | ✅ | 3 files uploaded to the new GitHub repo |
-| The whole database structure | ✅ | `supabase/install.sql`, one paste |
-| Company settings, both expiry dates | ✅ | `supabase/export_settings.sql` |
-| Leave types — your days (Hospitalisation 57, Shared Parental 65, …) | ⬜ **not applied** | printed in the script, commented out — see below |
-| Public holidays, every date and name | ✅ | same |
-| Teams, and which work Saturdays | ✅ | same |
-| Employees, logins, applications, approvals, the ledger, carry-forwards, amendment records, MC attachments | ❌ **by design** | nothing carries them |
+| cron-job.org daily ping | exists — **leave it pointing at the old one** | add a **second** job |
+| UptimeRobot monitor | exists | add a **second** monitor |
 
-`install.sql` on its own gives you the **MOM defaults** and the standard holiday list.
-`export_settings.sql` is what makes the new system match the old one. It is checked by
-`tests/t43_export_settings.sh`, which builds both databases for real, exports, imports,
-and compares every settings column rather than the ones somebody remembered.
+The mistake to avoid is re-pointing the existing ping at the new project. The old one then
+goes quiet and Supabase pauses it. `MIGRATION_GUIDE.md` has the exact URLs and headers.
 
-### Leave types are the one exception
+**On a paid Supabase plan none of this section is needed.** It exists only to work around
+the free tier, and it is the single change that removes the most moving parts.
 
-You chose to set these up fresh, so the script **prints them commented out and does not
-apply them**. The new system will therefore show **Hospitalisation 60** and **Shared
-Parental 70** until you retype them on the Leave types tab — that is expected, not a
-fault. Your old figures are in the script as a reference line, so you have them to hand.
+### 4 · Then add your staff
 
-**If you change your mind**, it is one edit: in the settings script, delete the `-- ` from
-the front of every line in section 3 and run it again. It is safe to re-run. That path is
-tested too, so it will behave.
-
-Retyping them in the app has one advantage worth knowing: saving a figure on the Leave
-types tab levels **every** eligible employee to it. On an empty system there is nobody to
-level, so either route gives the same result — do whichever you prefer.
+HR console → **Employees & approval routes → Add employee**. Annual-leave entitlement is
+set per employee there. Saving a figure on the **Leave types** tab levels everyone
+eligible to it, so set the types before adding people and there is nothing to level.
 
 ---
 
-## The two keys that connect the halves
+## Independence from the old account — checked, not assumed
 
-```js
-const SUPABASE_URL      = "https://xxxxxxxx.supabase.co";   // app.html, line ~263
-const SUPABASE_ANON_KEY = "eyJhbGciOi...";                   // app.html, line ~264
-```
+Every outbound URL and identifier in the code was searched. There are **no** hardcoded
+links to the old account:
 
-Change those two lines and the same website talks to the new company's database. The
-anon key is **meant to be public** — every permission is enforced inside the database
-(RLS), never by hiding the key. It is safe in a public repo and safe to paste into chat.
+| Possible tie | Reality |
+|---|---|
+| Old Supabase project | Was only in `index.html` lines 263–264. The file you uploaded has zero occurrences of the old ref. |
+| `fluffyland.github.io` in the email function | A **comment** showing an example. The real value is the `APP_URL` secret, per project, with no fallback. |
+| `notify_url` / `notify_key` in the database | The app writes them from its own URL on first HR sign-in. `export_settings.sql` deliberately excludes them, so the new project cannot inherit the old one's address. |
+| `supabase.min.js` | Committed and served from your own site. Nothing is fetched from any CDN at page load. |
+| `mom.gov.sg` | A link HR clicks. Not a dependency. |
+| Any personal email in the code | None. |
 
-The **service_role** / `sb_secret_…` key is the opposite: it bypasses every permission.
-It is never needed for any step below. Do not paste one anywhere.
+The three real shared-account risks are **Resend**, the **cron ping** and the **uptime
+monitor** — all in section 2 and 3 above, all set up separately.
 
----
-
-## Order of work
-
-### A · On the OLD project — take the settings out (2 min)
-
-1. Supabase dashboard → the **old** project → **SQL Editor** → **New query**.
-2. Paste the whole of `supabase/export_settings.sql` → **Run**.
-3. One column of text comes back. **Copy all of it** and keep it — that is your settings
-   script. It is read-only; it changed nothing.
-
-### B · On the NEW account — build the database (10 min)
-
-4. **supabase.com** → sign in as **hr@shanghai-uniforms.com** → **New project**.
-   Region **Southeast Asia (Singapore)**. Save the database password somewhere safe.
-5. Wait for the project to open, then **SQL Editor → New query**.
-6. Paste `supabase/install.sql`. **Before running, edit the six values at the top:**
-
-   | Value | Put |
-   |---|---|
-   | `company_name` | Shanghai School Uniforms Pte Ltd |
-   | `email_domain` | shanghai-uniforms.com |
-   | `default_annual_leave` | 14 |
-   | `default_carry_cap` | 5 |
-   | `owner_name` | your name |
-   | `owner_email` | hr@shanghai-uniforms.com |
-
-   Run it. It ends by printing
-   **"LeaveDesk installed — now run bootstrap_owner.sql…"**.
-   It will warn that it found no login for the Owner yet. That is expected — step 7.
-7. **Authentication → Users → Add user**: email `hr@shanghai-uniforms.com`, a password
-   you choose, and **tick Auto Confirm User**. Without the tick the account cannot sign in.
-8. **SQL Editor → New query** → paste the last section of `install.sql` again (the
-   `do $$ … end $$;` block at the very bottom) and Run. It now finds the login and links
-   it to the Owner record. It will say `Owner created and linked: hr@shanghai-uniforms.com`.
-9. **SQL Editor → New query** → paste the settings script from step 3 → **Run**. It ends
-   by printing your settings and `employees_should_be_zero`. Check that number is **0**
-   and that Hospitalisation reads 57 and Shared Parental 65.
-
-### C · On the NEW account — put the website up (10 min)
-
-10. **github.com** → sign in to the new account → **New repository**.
-    Name it anything (e.g. `hrleavesystem`). It **must be Public** — GitHub Pages does
-    not serve a private repo on the free plan.
-11. Upload three files from `hr-leave-system/`:
-    - `app.html`, **renamed to `index.html`**, with lines 263–264 changed to the new
-      project's URL and anon key (Supabase → **Project Settings → API**)
-    - `supabase.min.js` — exactly as it is
-    - `year-start-flowchart.html` — exactly as it is
-12. Repo → **Settings → Pages** → Source: **Deploy from a branch** → branch `main`,
-    folder `/ (root)` → Save. Two minutes later the site is at
-    `https://<new-account>.github.io/<repo>/`.
-13. Open it, sign in as `hr@shanghai-uniforms.com`, and check the HR console →
-    **Leave types** shows 57 and 65, and **Company settings** shows both expiry dates.
-
-### D · On the NEW account — the parts that are easy to forget (15 min)
-
-14. **Storage** → the attachments bucket is created by `install.sql`. Nothing to do.
-15. **Edge Functions.** Two of them, in `supabase/functions/`:
-    - `create-login` — the one-click staff login button. Without it, HR cannot create
-      logins from the app.
-    - `send-notification` — the approval emails.
-    Deploy both (Supabase dashboard → Edge Functions → Deploy, or the CLI).
-    `send-notification` needs a secret: **`RESEND_API_KEY`**, from your Resend account.
-    The app writes its own address into the database the first time you sign in as
-    HR/Owner, so there is nothing to copy for that.
-16. **Keep the project awake — and note that you now need TWO of everything.**
-    The free plan pauses a project after **7 idle days** and deletes it 90 days later.
-    Both systems are staying live, so each needs its own:
-
-    | | Old project | New project |
-    |---|---|---|
-    | `cron-job.org` daily ping | already exists — **leave it pointing at the old one** | add a second job |
-    | private keepalive repo (12 h offset) | already exists | add the new URL, or accept one keeper |
-    | UptimeRobot monitor | already exists | add a second monitor |
-
-    `MIGRATION_GUIDE.md` has the exact URLs and headers. The thing to get wrong here is
-    re-pointing the existing ping at the new project instead of adding one: the old
-    project then goes quiet and Supabase pauses it. **If the new account is on a paid
-    Supabase plan, it needs none of this.**
-
-### E · Afterwards
-
-17. Add your staff: HR console → **Employees & approval routes → Add employee**.
-    Each person's annual-leave entitlement is set here, per employee.
-18. Nothing has been deleted from the old system, and both are staying up. Keep the two
-    straight by naming them clearly in both dashboards — two LeaveDesks that look
-    identical, on two accounts, is exactly the setup where a change gets made in the
-    wrong one. The site URL is the quickest way to tell them apart.
-19. If you later retire one, remove *its* cron job and *its* monitor rather than the
-    other's, and leave the survivor's alone.
+Still documenting the old project: `HANDOVER.md`, `SETUP.md` and `MIGRATION_GUIDE.md`.
+That is history, not code, and cannot connect anything.
 
 ---
 
-## Checking it worked
+## Which file is which
 
-Run `supabase/explain_balances.sql` on the **new** project. On a correct empty system:
+| File | Run it on | Ends with |
+|---|---|---|
+| `LEAVEDESK-paste-this-once.sql` | NEW project, once | `as next_step;` |
+| `2-owner-autolink.sql` | NEW project, once | `as next_step;` |
+| `export_settings.sql` | **OLD** project | `"copy this whole column back to me"` |
+| `explain_balances.sql` | either, any time | `"copy this whole column back to me"` |
+| anything `.md` or `.txt` | **nowhere** — reading only | — |
 
-- sections A, C, D and E come back empty — there are no people to have balances
-- section B lists nothing — there is nobody holding the wrong entitlement
-- section F shows your **company settings** and both expiry dates as you set them
-- section F shows leave types at the **MOM defaults** — Hospitalisation 60, Shared
-  Parental 70 — because you chose to set those up fresh. Change them on the Leave types
-  tab, then run the report again and they will read what you typed.
-
-If the **expiry dates or the company name** are wrong, the settings script from step 3
-was not run. Run it.
-
----
-
-## What cannot be done for you
-
-The new GitHub and Supabase accounts are yours, and nothing in this session can sign in
-to them: no project can be created, no SQL run, and no file pushed to the new repo from
-here. Steps B, C and D are dashboard work in your own browser. What can be prepared for
-you is everything that is a file or a script — including an `index.html` with the new
-URL and anon key already filled in, if you paste those two values.
+If a SQL error mentions a line containing `|` characters, a `.md` was pasted by mistake.
