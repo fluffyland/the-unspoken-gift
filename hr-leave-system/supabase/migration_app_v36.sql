@@ -286,8 +286,26 @@ begin
   return v_count;
 end;
 $$;
-revoke execute on function public.keepalive_ping() from anon, public;
-grant  execute on function public.keepalive_ping() to authenticated;
+-- anon KEEPS execute here, and that is not an oversight.
+--
+-- This line used to read `revoke ... from anon, public`. On a fresh install it did
+-- no harm, because keepalive_ping_v3.sql loads afterwards and grants it back. But
+-- applying v36 to a database that ALREADY had v3 -- an ordinary in-place upgrade --
+-- left the revoke as the last word, and the daily keepalive ping then failed every
+-- day with `401 / 42501 permission denied for function keepalive_ping`. The cron
+-- service was calling correctly; the database was refusing. Nothing surfaces that
+-- except the cron provider's own failure email, and the project drifts toward the
+-- 7-day idle pause in the meantime. It happened in production on 4 Sep 2026.
+--
+-- The ping is called with the public anon key, by design: web-form cron services
+-- drop custom headers, so the key travels in the URL as anon. Revoking anon
+-- therefore breaks the only thing keeping a free project awake.
+--
+-- What anon can do with it is bounded: bump a counter and run the expiry check,
+-- which is date-gated and idempotent (t36 D1-D4, t46). It cannot cost anybody a
+-- day. PUBLIC stays revoked.
+revoke execute on function public.keepalive_ping() from public;
+grant  execute on function public.keepalive_ping() to anon, authenticated;
 
 -- ---------- 9. 自检 ----------
 do $$

@@ -64,6 +64,20 @@ KEEP-ALIVE / MONITORING  (three external services, none of them in this repo)
   Free Supabase pauses after 7 idle days and is DELETED 90 days after pausing.
   Two independent "keepers" poke it; one "watcher" reports when it dies anyway.
 
+  ⚠️ 4 Sep 2026 — THE PING WAS DEAD AND THE BLAME HERE WAS WRONG.
+    cron-job.org emailed "Failed (401 Unauthorized)". The key was fine: the same
+    key reads leave_types with a 200. The body was
+    `42501 permission denied for function keepalive_ping`.
+    migration_app_v36.sql revoked execute from anon; keepalive_ping_v3.sql grants
+    it back, and a fresh install loads v3 LAST so it ends up granted. Apply v36 to
+    a database that already had v3 -- an ordinary in-place upgrade -- and the
+    revoke is the last word. The cron service was calling correctly; the database
+    was refusing, every day, silently, while the project drifted toward the 7-day
+    idle pause. v36 now grants anon instead of revoking it, and t46 asserts the
+    grant BOTH on a fresh install and after v36 is re-applied on top.
+    The lesson is not about grants: it is that "the cron service failed" was
+    accepted here without reading the 401 body, and the real cause was ours.
+
   KEEPER 1  cron-job.org                POST daily, morning SGT
     URL: https://aypyolzkdupkpefpxius.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>
     NO headers, empty body.

@@ -132,6 +132,16 @@ sql() {
   has "^ Nogender +5 +0 "                     "R9 a carry-forward with no ledger half is named"
 
   echo
+  echo "--- the daily ping is allowed to run, before and after an upgrade (v45) ---"
+  fresh; P -q -f "$SB/install.sql" >/dev/null 2>&1
+  P -f "$HERE/t46_keepalive_grant.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+  # The production failure was not a fresh install: it was v36 applied on top of a
+  # database that already had the keepalive file. Re-assert after exactly that.
+  echo "    (and again, with v36 re-applied on top — the shape that broke in production)"
+  P -q -f "$SB/migration_app_v36.sql" >/dev/null 2>&1
+  P -f "$HERE/t46_keepalive_grant.sql" 2>&1 | grep -E "NOTICE:  ok    K1|FAIL|ERROR:" | sed 's/^psql[^ ]* //'
+
+  echo
   echo "--- the Owner links itself: one paste, then one click (v43) ---"
   # The owner name/email are substituted the way a real setup would type them, because
   # the whole point is what happens to THAT address and no other.
