@@ -1019,6 +1019,46 @@ only one half. `tests/seed_explain_faults.sql` plants one fault of each shape an
 `run.sh` asserts the report finds all four and stays quiet on a healthy company — a
 report that says "all fine" whatever the data is worse than no report.
 
+**v41 — the same fix, on the page the employee actually opens.**
+
+v40 stopped HR's Balances tab counting the carried days twice. It did not touch **My
+details → My leave entitlement**, which is the page the person complaining looks at, so
+the fault survived exactly where it would be seen:
+
+| | Balance | Taken | Left |
+|---|---|---|---|
+| Annual Leave | 14 | 0 | **19** ← the 5 carried days are in here |
+| Carry Forward | 5 | 0 | **5** ← and again here |
+
+14 entitled reading as 24 available. Both columns were double-counting: `Left` came from
+`b.avail` (carry included) and `Taken` from `b.yUsed` (which counts days paid out of the
+carry). `Taken` is now partitioned between the two rows — the carry pays first — so each
+row's `Balance − Taken = Left` closes and the two `Left` figures sum to what the database
+says can be booked. `t41.mjs` asserts the identity rather than the numbers, so an edit
+that breaks it fails whatever the figures happen to be.
+
+Two things found while mutation-checking, both worth keeping:
+
+- **`annual_carry` was fetched without `expires_on`**, so `carryExpired()` had nothing to
+  test for anybody but the viewer, and on the Balances tab an expired carry was
+  indistinguishable from a live one. One column in one `select`.
+- **`carriedIn − left` and `min(carriedIn, taken)` are the same number** right up until
+  the days expire — then the first reports the whole carry as leave the person took. The
+  mutant survived until a test existed for the expiry case, which is the lesson: a
+  surviving mutant means either a weak test or an equivalent mutation, and the way to
+  tell them apart is to find the input where the two differ.
+
+`balCard()` was deleted rather than fixed — dead code carrying a third copy of the same
+statement, which is how one screen gets fixed and another does not.
+
+**The wider point, for next time.** The user asked for the whole company's ledger to be
+cleared, on the theory that the ledger was miscalculating. It was not:
+`explain_balances.sql` came back clean on their live data and said 19. Clearing would
+have hidden a display bug and destroyed 24 people's leave history to do it. When a
+display rule changes, grep every screen that renders that quantity before calling it
+done: `grep -n "\.avail" app.html` finds all of them, and each one either needs the
+split or is a deliberate total with no carry line beside it to double.
+
 ## 12. Known gaps / offered-but-not-built / watch-outs
 
 - ~~**v9 not applied**~~ — applied 2026-08-19. It stayed unapplied so long that a

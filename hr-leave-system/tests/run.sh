@@ -134,7 +134,7 @@ sql() {
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 }
 
-browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs"; }
+browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs" && echo && node "$HERE/t41.mjs"; }
 
 case "${1:-both}" in
   sql) sql ;;

@@ -620,7 +620,12 @@ async function loadAll() {
     // HR can read the whole carry table (RLS: `emp_id = current_emp_id() or is_hr()`),
     // which is what lets the Balances tab show a CF column for everyone rather than
     // just for whoever is looking at it.
-    isHR ? sb.from("annual_carry").select("emp_id,year,carry_in,expired_at")
+    //
+    // expires_on has to be in this list. Without it carryExpired() had nothing to test
+    // for anybody but the person logged in, so on the Balances tab an expired carry was
+    // indistinguishable from a live one and HR was shown days the database had already
+    // stopped honouring.
+    isHR ? sb.from("annual_carry").select("emp_id,year,carry_in,expired_at,expires_on")
          : Promise.resolve({ data: [], error: null })
   ]);
   db.announcements = annR2.error ? [] : (annR2.data || []);
@@ -1862,13 +1867,6 @@ function ysLogBox() {
     ${rows.length ? `<div style="margin-top:8px">${ysRowsTable(rows, true)}</div>` : ""}
   </div>`;
 }
-function balCard(t) {
-  const b = bal(me.id, t.code);
-  return `<div class="bal"><div class="t">${esc(t.en)}</div>
-    <div class="n">${fmtD(b.avail)}<small> days left</small></div>
-    <div class="d">Entitled this year ${fmtD(b.yGranted)} · Taken ${fmtD(b.yUsed)}${b.pending ? " · Pending " + fmtD(b.pending) : ""}</div></div>`;
-}
-
 /* ---- My details (employee self-service) ---- */
 function vProfile() {
   const cards = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);
@@ -1895,11 +1893,25 @@ function vProfile() {
     <div class="card" style="margin-top:20px">
       <h3>My leave entitlement</h3>
       <div class="tablebox"><table><thead><tr><th>Leave type</th><th class="num">Balance</th><th class="num">Taken</th><th class="num">Left</th></tr></thead><tbody>
-        ${cards.map(t => { const b = bal(me.id, t.code); return `<tr>
+        ${cards.map(t => { const b = bal(me.id, t.code);
+          // Annual leave is shown WITHOUT the carried days, because carryRow() below is
+          // already showing them. Both columns used to include them: Left came from
+          // b.avail and Taken from b.yUsed, which counts days paid out of the carry. So
+          // somebody with 14 entitled and 5 carried read as
+          //   Annual Leave  14 · 0 · 19     <- the carry is in here
+          //   Carry Forward  5 · 0 ·  5     <- and again here
+          // 24 days for a man entitled to 14. Taken is now partitioned between the two
+          // rows — the carry pays first — so each row's Balance − Taken = Left closes and
+          // the two Left figures add up to exactly what can be booked.
+          const split = (t.code === "annual" && db.orgV16) ? annualSplit(me.id, b) : null;
+          const carriedIn = split ? Math.max(0, Number((db.annualCarry || {}).carry_in) || 0) : 0;
+          const taken = split ? Math.max(0, b.yUsed - carriedIn) : b.yUsed;
+          const left  = split ? split.own : b.avail;
+          return `<tr>
           <td>${esc(t.en)}${t.noDeduct ? ` <span class="meta">· for records only</span>` : ""}</td>
           <td class="num">${t.noDeduct ? "—" : fmtD(b.yGranted)}</td>
-          <td class="num">${fmtD(b.yUsed)}</td>
-          <td class="num">${t.noDeduct ? "—" : fmtD(b.avail)}</td></tr>`; }).join("")}
+          <td class="num">${fmtD(taken)}</td>
+          <td class="num">${t.noDeduct ? "—" : fmtD(left)}</td></tr>`; }).join("")}
         ${carryRow()}
       </tbody></table></div>
       <p class="meta" style="margin-top:8px"><b>Taken</b> is leave you applied for and had approved, this year. Cancelling gives the days straight back. Year-end write-offs and HR corrections are not leave you took, so they never appear here.</p>
@@ -1909,17 +1921,29 @@ function vProfile() {
 /* Carry Forward as its own line on My leave entitlement, next to the leave types.
    Always shown, including at zero — the same rule as the Apply tab, so "you have none" is
    never confused with "this app has no such thing". Balance is what was carried in, Taken
-   is what has gone from it, Left is what remains. */
+   is what has gone from it, Left is what remains.
+
+   Taken is the share of this year's annual leave the CARRY paid for, capped at what was
+   carried in. It used to be carriedIn − left, which is the same number but arrived at
+   from the wrong direction: it also moved when the days expired, so a forfeit was
+   reported as leave the person had taken. */
 function carryRow() {
   if (!db.orgV16) return "";
   const c = db.annualCarry || {};
   const carriedIn = Math.max(0, Number(c.carry_in) || 0);
   const left = carryOf(me.id);
+  const taken = Math.min(carriedIn, Math.max(0, Number(bal(me.id, "annual").yUsed) || 0));
+  // Say it out loud when the days are gone. A Left of 0 next to "Expiry Date: 30 Jun
+  // 2026" reads as "I have none left", which invites the wrong question to HR; the
+  // Apply screen has said "Expired" since v38 and this line should not disagree with it.
   const expiry = c.expires_on ? fmtDateY(c.expires_on) : "N/A";
+  const note = !c.expires_on ? "Expiry Date: N/A"
+             : carryExpired(me.id) ? `Expired ${expiry} — those days are gone`
+             : `Expiry Date: ${expiry}`;
   return `<tr>
-    <td>Carry Forward Annual Leave<div class="meta">Expiry Date: ${esc(expiry)}</div></td>
+    <td>Carry Forward Annual Leave<div class="meta">${esc(note)}</div></td>
     <td class="num">${fmtD(carriedIn)}</td>
-    <td class="num">${fmtD(Math.max(0, carriedIn - left))}</td>
+    <td class="num">${fmtD(taken)}</td>
     <td class="num">${fmtD(left)}</td></tr>`;
 }
 // My team — everyone in the same department. Rendered from the live roster, so a new
