@@ -131,6 +131,16 @@ sql() {
   has "Compassionate Leave +3 +NOTHING"       "R8 somebody holding no allowance at all is named"
   has "^ Nogender +5 +0 "                     "R9 a carry-forward with no ledger half is named"
 
+  echo
+  echo "--- the Owner links itself: one paste, then one click (v43) ---"
+  # The owner name/email are substituted the way a real setup would type them, because
+  # the whole point is what happens to THAT address and no other.
+  fresh
+  sed "s/'Owner Name'/'Lee Jian Wei'/; s/'owner@company.com'/'hr@shanghai-uniforms.com'/" \
+      "$SB/install.sql" > "$D/inst_owner.sql"
+  P -q -f "$D/inst_owner.sql" >/dev/null 2>&1
+  P -f "$HERE/t44_owner_links_itself.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
 
   echo

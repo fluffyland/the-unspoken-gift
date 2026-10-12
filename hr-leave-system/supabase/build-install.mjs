@@ -121,9 +121,17 @@ begin
     raise notice 'Owner created and linked: %', c.owner_email;
   elsif exists (select 1 from employees where lower(email) = lower(trim(c.owner_email))) then
     raise notice 'Owner already existed: %', c.owner_email;
-  else
-    raise warning 'NO LOGIN FOUND for %. Create it first: Authentication -> Add user (tick Auto Confirm User), then run just this last section again.', c.owner_email;
   end if;
+
+  -- Recording who the Owner is to be happens in migration_app_v43.sql, which reads
+  -- this same _leavedesk_setup table. It is not done here because this footer has to
+  -- be able to run on a database built WITHOUT v43 -- the test harness builds one --
+  -- and a footer naming a column that a migration adds cannot.
+  --
+  -- v43's trigger on auth.users then links the Owner the moment the login appears,
+  -- which replaces an instruction that could never have worked: it said to re-run
+  -- the last section of this file, and the line after that section drops the table
+  -- the section reads.
 
   -- ---- 3. email notifications ---------------------------------------------
   -- Nothing to do here on purpose. The trigger already exists (v32) and stays
@@ -136,15 +144,31 @@ end $$;
 drop table if exists _leavedesk_setup;
 
 -- ============================================================================
---  Done.
+--  Done. This ends with a SELECT on purpose.
+--
+--  The Supabase SQL Editor does not show raise-notice output. Every version of
+--  this file before now finished with notices saying what had happened and what to
+--  do next, and the only thing the person pasting it ever saw was
+--  "Success. No rows returned." A result table is the one thing it does show.
 -- ============================================================================
-do $$
-begin
-  raise notice ' ';
-  raise notice 'LeaveDesk installed. Next: deploy the two Edge Functions, then point';
-  raise notice 'app.html at this project (two lines near the top).';
-  raise notice ' ';
-end $$;
+select 'LeaveDesk installed' as status,
+       (select company_name from org_settings where id = 1)              as company,
+       (select count(*) from leave_types)                                as leave_types,
+       (select count(*) from public_holidays)                            as holidays,
+       (select count(*) from employees)                                  as employees,
+       case
+         when exists (select 1 from employees where role = 'admin' and auth_user_id is not null)
+           then 'READY — open the app and sign in.'
+         when exists (select 1 from pg_trigger where tgname = 'trg_leavedesk_owner')
+           then 'NEXT: Authentication -> Users -> Add user, email '
+                || coalesce((select to_jsonb(o) ->> 'pending_owner_email' from org_settings o where id = 1), '(none set)')
+                || ', tick AUTO CONFIRM USER. Your Owner account is then created '
+                || 'automatically — nothing further to paste.'
+         else 'NEXT: Authentication -> Users -> Add user, email '
+                || coalesce((select to_jsonb(o) ->> 'pending_owner_email' from org_settings o where id = 1), '(none set)')
+                || ', tick AUTO CONFIRM USER. Then open the app and sign in; it will '
+                || 'finish linking the Owner on first load.'
+       end                                                               as next_step;
 `;
 
 let out = head + CONFIG;
