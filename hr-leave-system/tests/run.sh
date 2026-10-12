@@ -165,7 +165,7 @@ sql() {
   sh "$HERE/t43_export_settings.sh"
 }
 
-browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs" && echo && node "$HERE/t41.mjs" && echo && node "$HERE/t42_smoke.mjs" && echo && node "$HERE/t45_setup_guard.mjs" && echo && node "$HERE/t48_oil_expiry_shown.mjs"; }
+browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs" && echo && node "$HERE/t41.mjs" && echo && node "$HERE/t42_smoke.mjs" && echo && node "$HERE/t45_setup_guard.mjs" && echo && node "$HERE/t48_oil_expiry_shown.mjs" && echo && node "$HERE/t49_leave_check.mjs"; }
 
 case "${1:-both}" in
   sql) sql ;;

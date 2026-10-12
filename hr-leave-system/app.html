@@ -301,6 +301,9 @@ function setupScreen() {
 
 /* db is an in-memory cache hydrated from Supabase; renderers read from it unchanged. */
 let db, me = null, view = "dashboard", vp = {}, hrTab = "records";
+/* When the cache was last filled from Supabase. Every balance on screen is computed
+   from it, so this is how old every number you can see is. */
+let lastLoadAt = 0;
 
 const pad = n => String(n).padStart(2, "0");
 const iso = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
@@ -684,6 +687,7 @@ async function loadAll() {
       if (data != null) db.balCache[a.empId + "|" + a.type] = Number(data);
     }));
   }
+  lastLoadAt = Date.now();
 }
 
 /* Working-day count (excludes weekends + SG public holidays; supports half days) */
@@ -763,6 +767,42 @@ function halfChips(a) {
 }
 
 /* Refresh the cache from Supabase and re-render (called after every mutation) */
+function freshnessLabel() {
+  if (!lastLoadAt) return "Refresh";
+  const secs = Math.round((Date.now() - lastLoadAt) / 1000);
+  if (secs < 60) return "Updated just now";
+  const d = new Date(lastLoadAt);
+  return "Updated " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+/* Is somebody part-way through typing something? A refresh rebuilds the page from
+   server data, which throws away anything half-entered — and losing a form is worse
+   than seeing a number that is a minute old. So the automatic refresh stands down,
+   and the ↻ button stays available for anyone who wants it anyway. */
+function hasUnsavedWork() {
+  if (vp.draft) return true;                                     // Company settings / Leave types
+  if (Object.keys(vp).some(k => /Modal$/.test(k))) return true;  // any open dialog
+  const f = vp.form;                                             // a part-filled application
+  if (f && (f.start || f.end || (f.reason || "").trim() || f.att)) return true;
+  return false;
+}
+/* Every write in this app refetches, so YOUR session is always right. The gap this
+   closes is somebody ELSE's: HR credits off-in-lieu and the employee's open tab goes
+   on showing the old figure, because nothing pushes and nothing polls.
+   Reported as "some will not reflected and update even leave credited".
+   Refreshing when the tab is looked at again costs one query and needs no realtime
+   subscription, no polling timer and nothing to keep running. */
+const REFRESH_AFTER_MS = 20000;
+async function refreshIfStale() {
+  if (!me || booting) return;                       // not signed in / still starting
+  if (document.visibilityState === "hidden") return;
+  if (hasUnsavedWork()) return;
+  if (Date.now() - lastLoadAt < REFRESH_AFTER_MS) return;
+  await loadAll();
+  rerender();
+}
+document.addEventListener("visibilitychange", refreshIfStale);
+window.addEventListener("focus", refreshIfStale);
+
 async function reload() { await loadAll(); render(); }
 /* Reload the data but stay where you are on the page. render() scrolls to the top by
    design — it is also what runs when you switch tab — so any write that leaves you on
@@ -1606,6 +1646,7 @@ function shell() {
     <span class="logo">LeaveDesk <span style="color:var(--accent)">·</span> ${esc(db.org?.company || "")}</span>
     <span class="spacer"></span>
     <span class="userchip"><span class="avatar">${esc(me.name[0])}</span> ${esc(me.name)} · ${roleName(me.role)}</span>
+    <button class="iconbtn" data-act="refreshnow" title="Fetch the latest balances from the server">↻<span class="lbl"> ${esc(freshnessLabel())}</span></button>
     <button class="iconbtn" data-act="pwopen" title="Change your password">🔑<span class="lbl"> Password</span></button>
     <button class="iconbtn" data-act="logout">Sign out</button>
   </div></div>
@@ -4137,6 +4178,7 @@ async function runAction(el) {
       break;
     }
     case "phdel": { const { error } = await sb.from("public_holidays").delete().eq("holiday", el.dataset.d); if (error) return rpcErr(error); await reloadKeep(); toast("Holiday removed"); break; }
+    case "refreshnow": { await reloadKeep(); toast("Balances refreshed."); break; }
     case "decide": {
       const d = el.dataset.d;
       const cm = (document.getElementById("cm-" + id) || {}).value || "";

@@ -75,6 +75,9 @@ window.__seed = function (opts) {
   // v24: emps[0] is already an Owner, so `asHr` gives an Owner by default. A test that
   // needs a plain HR Admin -- who may not grant Owner -- has to say so.
   if (opts.asPlainHr) { me.role = "hr"; }
+  // __seed stands in for loadAll(), so it stamps the same clock. Without this the
+  // freshness label reads "Refresh" forever in tests while real use shows a time.
+  if (typeof lastLoadAt !== "undefined") lastLoadAt = Date.now();
   booting = false; view = opts.view || "myapps"; vp = {};
   if (opts.hrTab) { view = "hr"; hrTab = opts.hrTab; }
   render();
