@@ -132,6 +132,12 @@ sql() {
   has "^ Nogender +5 +0 "                     "R9 a carry-forward with no ledger half is named"
 
   runuser -u postgres -- $PGB/pg_ctl -D $D/data stop -m immediate >/dev/null 2>&1 || true
+
+  echo
+  echo "--- settings move to a new, empty company; people do not ---"
+  # Its own script: it needs TWO databases at once (the old company and a brand-new one),
+  # which the single-database helpers above cannot give it.
+  sh "$HERE/t43_export_settings.sh"
 }
 
 browser() { node "$HERE/t35.mjs" && echo && node "$HERE/t36.mjs" && echo && node "$HERE/t40.mjs" && echo && node "$HERE/t41.mjs" && echo && node "$HERE/t42_smoke.mjs"; }
