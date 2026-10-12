@@ -1059,6 +1059,48 @@ display rule changes, grep every screen that renders that quantity before callin
 done: `grep -n "\.avail" app.html` finds all of them, and each one either needs the
 split or is a deliberate total with no carry line beside it to double.
 
+**v42 — the hotfix, and the test whose absence caused it.**
+
+Reported: *"what have you done i unable to sign in already"*. Sign-in was not broken.
+v41 deleted `balCard()` after `grep -n "balCard(" app.html` found no callers. It had one:
+
+```js
+<div class="balgrid">${main.map(balCard).join("")}</div>
+```
+
+passed **by reference**, with no parenthesis after the name, so the grep could not see it.
+Deleting it threw `balCard is not defined` the instant `vDashboard` rendered — the first
+screen after sign-in. The login form worked and the screen behind it went blank, which is
+indistinguishable from a failed sign-in.
+
+Three things went wrong, and only the first is about a missing function:
+
+1. **A grep for `name(` does not find a function used as a value.** Search the bare name.
+2. **The t41 assertion `typeof balCard === "undefined"` passed and was worse than no
+   test.** It was true and irrelevant: it confirmed the function was gone without
+   confirming nothing needed it. An assertion that something has been removed must be
+   paired with one that the thing which used it still works.
+3. **No suite rendered the dashboard.** Every browser test here seeds one view and
+   asserts numbers in it; `t35`, `t36`, `t40` and `t41` between them never rendered
+   `vDashboard`, `vMyApps`, `vCalendar` or `vApprovals` at all. A whole screen could stop
+   existing and the suite stayed green.
+
+`tests/t42_smoke.mjs` fixes (3): it renders **every** view, as employee and as HR/Owner,
+every HR console tab, against five un-upgraded database shapes, and with four carry
+states — 47 assertions, each one only that the screen rendered with content and no page
+error. It is the cheapest suite in the project. Deleting `balCard()` again fails it
+immediately with `{"threw":"balCard is not defined"}`, which was verified by doing
+exactly that.
+
+`balCard()` is restored and now splits annual leave like the other three screens: the
+tile shows this year's own days with "+ N carried forward" underneath, so the dashboard,
+My details, Apply and the Balances tab all state the same quantity the same way.
+
+**Deployment rule this adds:** after pushing `index.html`, load the live URL and render
+the dashboard before telling the user it is done. The check is ten seconds
+(`/tmp/verify.mjs` in this session's history) and it is the difference between finding
+this in CI and the user finding it locked out of their own system.
+
 ## 12. Known gaps / offered-but-not-built / watch-outs
 
 - ~~**v9 not applied**~~ — applied 2026-08-19. It stayed unapplied so long that a

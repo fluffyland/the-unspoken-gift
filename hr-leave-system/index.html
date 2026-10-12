@@ -1867,6 +1867,24 @@ function ysLogBox() {
     ${rows.length ? `<div style="margin-top:8px">${ysRowsTable(rows, true)}</div>` : ""}
   </div>`;
 }
+/* The balance tiles on the dashboard. NOT dead code — vDashboard passes it to
+   `main.map(balCard)`, by reference rather than by call, which is why a grep for
+   "balCard(" found no callers and deleting it in v41 blanked the first screen after
+   sign-in. A function reference is a use; grep for the bare name.
+
+   Annual leave is shown split, the same as everywhere else: the tile's big number is
+   this year's own days and the carried days are named separately, so the dashboard, My
+   details, Apply and the Balances tab now all state the same thing. */
+function balCard(t) {
+  const b = bal(me.id, t.code);
+  const split = (t.code === "annual" && db.orgV16) ? annualSplit(me.id, b) : null;
+  const carriedIn = split ? Math.max(0, Number((db.annualCarry || {}).carry_in) || 0) : 0;
+  const taken = split ? Math.max(0, b.yUsed - carriedIn) : b.yUsed;
+  return `<div class="bal"><div class="t">${esc(t.en)}</div>
+    <div class="n">${fmtD(split ? split.own : b.avail)}<small> days left</small></div>
+    <div class="d">Entitled this year ${fmtD(b.yGranted)} \u00b7 Taken ${fmtD(taken)}${b.pending ? " \u00b7 Pending " + fmtD(b.pending) : ""}${split && split.carry ? `<br>+ ${fmtD(split.carry)} carried forward` : ""}</div></div>`;
+}
+
 /* ---- My details (employee self-service) ---- */
 function vProfile() {
   const cards = db.leaveTypes.filter(t => eligible(t, me)).sort((a, b) => a.sort - b.sort);

@@ -154,11 +154,21 @@ const cols = await pg.evaluate(() =>
   (document.documentElement.innerHTML.match(/from\("annual_carry"\)\.select\("([^"]+)"/) || [])[1] || '');
 ok('expires_on is among the columns fetched for everyone', /expires_on/.test(cols), cols);
 
-console.log('\n§8 the third copy of this statement is gone, not fixed twice');
-// balCard() rendered the same figures a third time from b.avail and was called from
-// nowhere. A spare unused implementation is how one screen gets fixed and another does not.
-const hasBalCard = await pg.evaluate(() => typeof balCard !== 'undefined');
-ok('balCard() has been deleted rather than left as dead code', hasBalCard === false);
+console.log('\n§8 the dashboard tile makes the same statement');
+// §8 used to assert that balCard() had been DELETED, and passed — which is how a
+// function the dashboard still used by reference got removed and shipped. The assertion
+// was true and useless: it confirmed the function was gone without confirming nothing
+// needed it. What matters is that the four screens stating this quantity agree, so that
+// is what is checked; t42_smoke.mjs separately renders every view and would have caught
+// the removal outright.
+await seed({ view: 'dashboard' });
+await scenario(0);
+const tile = await pg.evaluate(() => {
+  const el = [...document.querySelectorAll('.bal')].find(x => /Annual Leave/.test(x.textContent));
+  return el ? el.innerText.replace(/\s+/g, ' ') : null;
+});
+ok('the dashboard tile says 14 days left, not 19', /\b14 days left\b/.test(tile || ''), JSON.stringify(tile));
+ok('and names the 5 carried days separately', /5 carried forward/.test(tile || ''), JSON.stringify(tile));
 
 console.log(`\n${pass} passed, ${fail} failed` + (fail ? '\n  ' + failed.join('\n  ') : ''));
 if (errs.length) console.log('page errors: ' + errs.join(' | '));
