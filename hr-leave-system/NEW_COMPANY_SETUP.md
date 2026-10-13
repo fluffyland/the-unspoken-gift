@@ -1,0 +1,376 @@
+> 🆕 **要在一个全新账号上从零搭整套系统**（新 Supabase + 新 GitHub + 防休眠 + 监控）？
+> 请看 **[`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md)** —— 那份更详细，含要注册哪些网站、
+> 哪个仓库必须 public / 哪个必须 private、以及最后的逐条验收清单。
+> 本文件侧重**换公司 / 全量重置 / 每年例行**的 SOP。
+
+# LeaveDesk — Standard Operating Procedure (SOP)
+## Setting up for a new company · Full system reset · First-day operations
+
+_Last updated: 15 Jul 2026. Time needed: about 30–40 minutes for a complete new-company setup._
+
+---
+
+## 0. How the system is put together (read this first)
+
+LeaveDesk is two independent pieces — plus a handful of outside services listed in **0b** below:
+
+| Piece | What it is | Where it lives | Cost |
+|---|---|---|---|
+| **Frontend** (the website people open) | one file: `app.html`, served as `index.html` | GitHub Pages | free |
+| **Backend** (data, logins, permissions) | a Supabase project | supabase.com | free tier is enough for 20–100 staff |
+
+They are connected by **exactly two lines** near the top of `app.html`:
+
+```js
+const SUPABASE_URL      = "https://xxxxxxxx.supabase.co";   // ← line ~255
+const SUPABASE_ANON_KEY = "eyJhbGciOi...";                   // ← line ~256
+```
+
+Change those two lines → the same website talks to a different company's
+database. The anon key is **safe to be public** — all security is enforced
+inside the database (RLS), not by hiding the key.
+
+**Files you need** (all in the repo folder `hr-leave-system/`):
+
+| File | Used for |
+|---|---|
+| `app.html` | the whole frontend |
+| `supabase/schema.sql` | builds the entire backend in one run |
+| `supabase/bootstrap_owner.sql` | creates the very first Owner account |
+| `supabase/functions/create-login/index.ts` | one-click staff logins |
+| `supabase/reset_all_data.sql` | full data wipe (SOP-2, Option B) |
+
+---
+
+## 0b. Every outside service this depends on
+
+Somebody asked "is it really just Supabase, GitHub and Resend?" and the answer was **no** —
+it is five accounts (four, now that the holiday sync is gone), and the three that were missed are the ones that keep the system awake.
+This table is the whole list. Each row names the file or setting that proves it, so it can be
+checked rather than remembered.
+
+| Service | What it does for you | If it stops | Proof |
+|---|---|---|---|
+| **Supabase** | Database, staff logins, MC attachments, the Edge Functions | **Everything stops** | `app.html` `SUPABASE_URL` |
+| **GitHub Pages** — `fluffyland/hrleavesystem` (**public**) | Serves the website | Site goes offline; data is safe | `HANDOVER.md` DEPLOY REPO |
+| **GitHub Actions** — `fluffyland/leavedesk-keepalive` (**private**) | Second daily wake-up ping, 12 h offset from the first | One of two keepers is gone; the other still pokes | `HANDOVER.md` KEEPER 2 |
+| **Resend** | Sends the leave-notification emails | Emails stop. **Leave applications and approvals carry on** — email never blocks anything | `RESEND_API_KEY` secret |
+| **cron-job.org** (`cron-job.org`) | Daily wake-up ping so the free Supabase project is not paused | ⚠️ **This is what failed in July 2026 — the system was down for two weeks** | `supabase/keepalive_ping_v3.sql` |
+| **UptimeRobot** (`uptimerobot.com`) | Checks every 5 minutes, emails you when it is down | An outage happens and nobody is told | `HANDOVER.md` WATCHER |
+
+No account, no key, nothing to set up:
+
+| | |
+|---|---|
+| **mom.gov.sg** | Just a link on the Public holidays screen for HR to click |
+| **jsDelivr** | Where `supabase.min.js` was downloaded from **once**. It is committed to the repo and served from your own site — nothing is fetched from a CDN when the page loads |
+
+### 💡 Three of the five exist only because Supabase is on the free plan
+
+The free plan **pauses a project after 7 idle days and deletes it 90 days after that**. The two
+keepers and the watcher are all scaffolding around that one limitation — and it still cost a
+**two-week outage** in July 2026.
+
+**On a paid Supabase plan, `cron-job.org` and the private keepalive repo become unnecessary,**
+and the watcher becomes a nice-to-have rather than a load-bearing part. If you want the fewest
+possible moving parts for a real company system, paying for the database is the single change
+that removes the most of them — and removes the failure that has already bitten once.
+
+---
+
+## SOP-1 · Stand up LeaveDesk for a NEW company
+
+### Step 1 — Create the Supabase project (≈5 min)
+1. Go to **https://supabase.com/dashboard** → sign in → **New project**.
+2. Fill in:
+   - **Name**: anything, e.g. `leavedesk-newco`
+   - **Database password**: click *Generate*, then **save it somewhere safe**
+     (you rarely need it, but losing it is annoying)
+   - **Region**: **Southeast Asia (Singapore)**
+3. Click **Create new project** and wait ~2 minutes until the project opens.
+
+### Step 2 — Copy the two connection values (≈1 min)
+1. Left sidebar → **Settings** (gear icon) → **API**.
+2. Copy and keep in a notepad:
+   - **Project URL** — looks like `https://abcdefgh.supabase.co`
+   - **anon public** key — the long string under *Project API keys*
+     (NOT the `service_role` one — never copy that anywhere).
+
+### Step 3 — Create your own login (≈2 min) — **do this BEFORE the SQL**
+Every other account gets created inside the app with one click. The *first* one
+cannot: the app's "create login" checks that whoever is asking is already HR,
+and on day zero nobody is. So this one is made by hand.
+
+1. Left sidebar → **Authentication** → **Users** → **Add user** → *Create new user*.
+2. **Email**: your real work email. **Password**: `Ssu123@` (change it after you sign in).
+3. Tick **Auto Confirm User** → **Create user**.
+
+> Order matters. The next step looks for this login and links it to your Owner
+> record. Run the SQL first and it will simply warn you that no login was found.
+
+### Step 4 — Build the database (≈3 min, **one paste**)
+
+1. Open **`supabase/install.sql`**. At the very top is a short block marked
+   **✏️ FILL THIS IN** — the only part you edit:
+
+```sql
+insert into _leavedesk_setup values (
+  'Shanghai School Uniforms',      -- company name, shown on screen and in emails
+  'shanghai-uniforms.com',         -- your staff email domain
+  14,                              -- days of annual leave a new employee starts on
+  5,                               -- most days anyone may carry into next year
+  'Lee Jian Wei',                  -- your name
+  'you@shanghai-uniforms.com'      -- the SAME email as Step 3
+);
+```
+
+   **Six values, and none of them is the project address or the API key.** Those
+   already go into `app.html` at Step 6, and typing the same thing in two places
+   is how the two end up disagreeing. The app tells the database its own address
+   the first time you sign in as HR — you never copy it anywhere.
+
+2. Select **all** of the file (Ctrl+A), copy, paste into **SQL Editor → New query**.
+3. **Run**.
+
+> **One file on purpose.** It contains the base database and every update ever
+> made, already in the right order, plus your settings, your Owner account, and
+> the email trigger. You do **not** run the `migration_app_vNN.sql` files one by
+> one — those only upgrade a database that already exists.
+>
+> ⚠️ **New, empty project only.** Never run it on a database that has real data.
+
+4. ✅ At the end you should see, in the messages:
+
+```
+Company set to: Shanghai School Uniforms
+Owner created and linked: you@shanghai-uniforms.com
+Email notifications wired to https://abcdefgh.supabase.co/functions/v1/send-notification
+LeaveDesk installed. Next: deploy the two Edge Functions...
+```
+
+   ❌ **"NO LOGIN FOUND"** means Step 3 was skipped or the email does not match.
+   Do Step 3, then run just the last section of the file again.
+
+> This also sets up email notifications, replacing the Database Webhook you would
+> otherwise fill in by hand — including its timeout box, which defaults to 1000 ms,
+> is shorter than the function actually takes, and fails intermittently with
+> nothing on screen. This uses 15000 ms.
+>
+> It stays **switched off and silent** until you first sign in as HR, at which
+> point the app fills in its own address. Nothing to configure, and nothing
+> breaks in the meantime.
+>
+> **Email can never block leave.** If the mail server is down, unreachable, or
+> misconfigured, the application is still recorded — tested by making the mail
+> call throw on purpose and confirming the leave event still saved.
+
+### Step 5 — Deploy the create-login function (≈3 min)
+This lets the Owner/HR create every future staff login with one click.
+1. Left sidebar → **Edge Functions** (the `ƒ` icon) →
+   **Deploy a new function** → choose **Via Editor**.
+2. Function name: exactly `create-login`
+3. Delete the sample code, paste the whole of
+   `supabase/functions/create-login/index.ts`, click **Deploy**.
+4. No secrets/environment variables needed — Supabase injects them.
+
+### Step 6 — Point the website at the new backend (≈5 min)
+Option A — new site for the new company (recommended):
+1. Create a new GitHub repository (e.g. `newco-leave`).
+2. Copy `app.html` into it, **renamed as `index.html`**.
+3. Edit lines ~255–256: paste the **Project URL** and **anon public key**
+   from Step 2.
+4. Also copy `supabase.min.js` from the old repo into the new one
+   (the app loads it from its own folder).
+5. Repo → **Settings → Pages** → *Deploy from a branch* → branch `main`,
+   folder `/ (root)` → Save. Wait 1–2 minutes.
+6. Your site is at `https://<username>.github.io/<repo-name>/`.
+
+Option B — reuse the existing site for a different backend: just edit the
+same two lines in the current repo's `index.html` and push.
+
+### Step 7 — First sign-in & company basics (≈10 min, inside the app)
+1. Open the site → log in with the Owner email + `Ssu123@`.
+2. Top-right **🔑 Password** → change away from the default.
+3. **HR Console → Company settings**: company name, email domain,
+   Default Annual Leave Entitled / Yr, company maximum if wanted. **Save changes**.
+4. **HR Console → Leave types**: tick/untick attachment-required,
+   half-day allowed; add company-specific types if any.
+5. **HR Console → Employees & approval routes → Add employee** for each
+   person. On save the app:
+   - credits the annual leave figure you typed, in full, + standard entitlements, and
+   - **auto-creates their login** with password `Ssu123@` (popup shows it).
+   Add managers before their team members, so approvers exist when you
+   assign approval routes.
+6. Tell everyone: log in with work email + `Ssu123@`, then change password.
+
+### Step 7b — Stop the free project from pausing (**REQUIRED on the free plan**, ≈2 min)
+
+> **⚠️ Read this before you build the plumbing — you may not need it at all.**
+>
+> Everything in this step exists for **one reason**: a free Supabase project **goes to sleep
+> after 7 days with no activity**, and is **deleted 90 days after that**. While it is asleep,
+> nobody can open the HR system.
+>
+> This is not theoretical. In **July 2026 it happened**: the wake-up ping was quietly doing
+> nothing useful, and the HR system was **down for two weeks**.
+>
+> **On a paid Supabase plan, projects do not sleep.** So paying for the database lets you skip
+> this step, delete two of your five outside services (`cron-job.org` and the private
+> keepalive repo), and remove the single failure that has already bitten. For a real company
+> running payroll-adjacent records, that is usually the right trade.
+>
+> **Staying on free?** Then do every part of this step, and treat it as load-bearing.
+> See **§0b** for the full picture.
+
+免费版 Supabase **7 天没有活动就会自动暂停**，暂停后 HR 系统直接打不开，
+而且 **暂停满 90 天项目会被永久删除**。
+
+1. SQL Editor → New query → 粘贴 **`supabase/keepalive_ping_v3.sql`** → **Run**。
+   最后一格应显示 **`ping_count = 2`**。
+   （SQL Editor 一次跑多条语句时只显示最后一条的结果，前面两行的返回值看不到，
+   这是正常的。计数器能到 2，就证明两次调用都真的写进了磁盘 —— 只读的旧版永远是 0。）
+2. 到 **cron-job.org**（免费）注册，New cronjob，按下表填：
+
+   | 项 | 值 |
+   |---|---|
+   | URL | `https://<项目ref>.supabase.co/rest/v1/rpc/keepalive_ping?apikey=<anon key>` |
+   | Method | **POST**（必须；写函数不接受 GET，GET 会返回 405） |
+   | Header | **不用填**（见下方警告） |
+   | Body | 留空 |
+   | Schedule | 每天一次 |
+
+   > 🔑 **apikey 一定要放在 URL 里，不要放 header。** 很多定时服务的自定义
+   > header 填不进去或不生效，会报 `{"message":"No API key found in request"}`。
+   > PostgREST 同时接受 url param —— 实测一个 header 都不加也返回 200。
+   > anon key 本来就是公开的（网站源码里就有），放 URL 不增加任何暴露。
+
+3. **再建第二个定时器**，时间**错开 12 小时**（一个早上、一个晚上）。
+   两个互不相干的东西同时坏掉的概率，远低于只靠一个。二选一：
+   - 简单：再注册一个 EasyCron / FastCron，设置和上面完全一样；
+   - 更好：建一个**私有**仓库放 GitHub Actions 定时任务
+     （本项目用的是 `fluffyland/leavedesk-keepalive`）。它会连调两次并检查
+     计数器有没有涨，不会被一个 200 骗过去；失败还会自动开 Issue（手机 App 有推送）。
+     ⚠️ 必须 private：「60 天无活动自动停用」只针对 public 仓库。
+     ⚠️ 不要放进网站仓库，网站仓库必须 public，否则免费版 Pages 会下线。
+4. **监控**：UptimeRobot（免费）5 分钟一次，**务必装手机 App 开推送通知**。
+   监控**数据库**（不是网站！），普通 GET 即可：
+   `https://<项目ref>.supabase.co/rest/v1/leave_types?select=code&limit=1&apikey=<anon key>`
+   返回 200 就算正常（返回 `[]` 是对的，anon 本来就读不到数据）。
+   ⚠️ 只监控网站没用 —— 2026-07 停摆那两周，网站一直是好的，睡着的是数据库。
+5. 每个都点一次 **Run now**，再回 SQL Editor 跑
+   `select ping_count from public.keepalive_heartbeat;`，
+   数字应该比刚才大 —— 这才证明心跳真的通了。
+
+> ⚠️ 2026-07 教训（两条，都得记）：
+> 1. 旧版心跳只做「读」，每次都返回 HTTP 200，项目照样被暂停，系统停摆两周。
+>    **纯读不算活动，必须写。**
+> 2. 失败邮件发了 8 封没人看见。**报警发到没人看的地方 = 没有报警。**
+>
+> 不要用 GitHub Actions 做这件事：仓库 60 天没有提交，GitHub 会自动停用定时任务，
+> 而「定时任务没在跑」不会触发任何失败通知 —— 沉默和成功长得一模一样。
+> 写入也只是推断而非官方保证 —— 如果还会被暂停，就升级 Pro（US$25/月）。
+
+### Step 8 — Optional extras (any time later)
+| Want | Do | Where documented |
+|---|---|---|
+| Public holidays auto-update from MOM | deploy `sync-holidays` + pg_cron | `SETUP.md` §7 |
+| Email on every approval step | deploy `send-notification` + Resend + webhook | `SETUP.md` §4 |
+| Automatic 1 Jan carry-over + new-year grant | two pg_cron lines | `SETUP.md` "每年例行维护" |
+
+> If you skip the holiday sync: the calendar ships with **2026** holidays.
+> Add later years by hand in HR Console → Company settings, or deploy the
+> sync function when needed.
+
+### ✅ Completion checklist (SOP-1)
+- [ ] schema.sql ran with "Success"
+- [ ] Owner logs in and changed their password
+- [ ] create-login deployed (name exactly `create-login`)
+- [ ] Site live with the new URL + anon key
+- [ ] `keepalive_ping_v3.sql` ran and the last result shows **`ping_count = 2`**
+- [ ] Two cron services created (POST, apikey in URL), 12h apart, `ping_count` went up
+- [ ] UptimeRobot watching the **database** URL, phone push notifications ON
+- [ ] Company settings + teams + employees entered
+- [ ] A test application → approve → shows in Decision history
+
+---
+
+## SOP-2 · FULL RESET (hand the system to a new company)
+
+Two ways — pick one.
+
+### Option A — Delete the whole Supabase project (cleanest, recommended)
+Nothing survives: data, logins, files, functions all gone.
+1. Supabase → **Settings → General** → scroll down → **Delete project**
+   (type the project name to confirm).
+2. Follow **SOP-1** from Step 1 with a brand-new project.
+
+Use this when: you don't need to keep the same Supabase URL, and you want
+zero chance of old data leaking to the new company.
+
+### Option B — Keep the project, wipe the data
+Same URL/keys stay, `create-login` stays deployed; all people & records go.
+1. SQL Editor → paste **`supabase/reset_all_data.sql`** → **Run**.
+   - Deletes: employees, all logins, applications, approvals, ledger,
+     announcements, carry-over records, departments.
+   - Keeps: table structure, permissions, SG leave types, public holidays.
+   - The verification query at the end must show **all zeros**.
+   - The optional block at the bottom sets the new company's name/domain
+     (or do it later in the app).
+2. **Storage → attachments**: delete leftover uploaded files (MC photos).
+   SQL cannot remove files — this manual step matters for privacy.
+3. Re-create the first Owner → **SOP-1 Step 4** (Add user + bootstrap_owner.sql).
+4. If the new company gets a different website: **SOP-1 Step 6**.
+
+### ⚠️ Before any reset
+- This is **irreversible**. If the old company might ever ask for records
+  (audits, MOM disputes), take a backup first:
+  Supabase → **Database → Backups**, or export `employees`, `applications`,
+  `leave_ledger` as CSV from the Table Editor.
+- Do the reset outside working hours — everyone is logged out instantly.
+
+---
+
+## SOP-3 · Yearly routine (every company, once a year)
+
+If you did NOT set up the pg_cron automation, run these two lines in the
+SQL Editor each 1 January (order matters — carry-over first, then grant):
+
+```sql
+select rollover_annual_leave(2027);      -- carry unused AL (max 5) into the new year
+select grant_annual_entitlements(2027);  -- credit everyone's new-year allowances
+```
+
+Both are idempotent — running them twice will not double-credit.
+
+---
+
+## Troubleshooting (the greatest hits)
+
+| Symptom | Cause → Fix |
+|---|---|
+| Red error when running schema.sql | You pasted only part of the file. Ctrl+A to select ALL, re-copy, re-run in a **new** query tab. |
+| "Add employee" errors about login | `create-login` not deployed, or name isn't exactly `create-login`. Check Edge Functions list. |
+| Owner can't log in | Auth user email ≠ employee email, or **Auto Confirm** wasn't ticked. Check Authentication → Users, then re-run bootstrap_owner.sql. |
+| Password `Ssu123@` rejected at creation | Authentication → *Policies/Providers*: set minimum password length ≤ 7 and disable leaked-password protection. |
+| Site loads but login spins forever | The two lines in `index.html` point at the wrong project, or schema.sql was never run in this project. |
+| GitHub file links 404 | Every file lives under the `hr-leave-system/` folder — the path must contain `hr-leave-system/supabase/...`. |
+| Old Chinese text in ancient records | Cosmetic only; the app translates it on screen. New entries are English. |
+| Approver left the company | Offboard them in the app — their pending items transfer to you and their team's routes are cleared automatically. |
+
+---
+
+## Quick answers
+
+**Do I need to touch Supabase day-to-day?** No. After setup, everything —
+adding staff, logins, password resets, offboarding, deleting test data —
+is done inside the app by HR/Owner.
+
+**Where are passwords stored? Can I see them?** Nowhere and no — passwords
+are one-way hashed. Reset to `Ssu123@` from the Edit form when someone forgets.
+
+**Can two companies share one Supabase project?** No — one project per
+company. The app has no concept of "which company", so mixing them would
+show everyone everything.
+
+**What should I keep secret?** The database password (Step 1) and anything
+labelled `service_role`. The anon key and the site URL are public by design.
