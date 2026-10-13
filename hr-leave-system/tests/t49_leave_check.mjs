@@ -156,15 +156,11 @@ const guarded = await pg.evaluate(() => {
 });
 ok('an unsaved draft blocks the auto-refresh', guarded === 0, 'loadAll calls: ' + guarded);
 
-console.log('\n§7 and there is a way to force it, with the data age on screen');
-await setup(3, false);
-const chrome = await pg.evaluate(() => ({
-  hasButton: !!document.querySelector('[data-act="refreshnow"]'),
-  saysWhen: /as of \d|Updated \d|just now/i.test(document.body.innerText)
-}));
-ok('a Refresh control exists', chrome.hasButton);
-ok('and the page says how fresh the figures are', chrome.saysWhen,
-   JSON.stringify((await pg.evaluate(() => document.body.innerText.slice(0, 200)))));
+// §7 removed. It asserted a ↻ Refresh button and an "Updated HH:MM" label in the
+// topbar. Both were MY additions, not asked for -- "it is not necessasry dont add this
+// by your own enxt time" -- so they are gone, and the assertions went with them rather
+// than being quietly weakened into something that still passed. The auto-refresh they
+// did ask for is sections 5 and 6, and stays.
 
 console.log('\n§8 the clock is actually wound by the real fetch');
 // __seed() stamps lastLoadAt because it stands in for loadAll(), which means the
