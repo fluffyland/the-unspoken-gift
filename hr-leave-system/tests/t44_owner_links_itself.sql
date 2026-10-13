@@ -42,6 +42,7 @@ do $$ begin raise notice ' '; raise notice '=== C0. a DIFFERENT login, while the
 -- person becomes an Owner of the whole company — and the mutation run proved the
 -- other guards do not cover it: with the invitation still open, only the email
 -- comparison stands between a new login and admin.
+delete from leave_ledger;   -- v48: the Owner now holds allowances, so clear those first
 delete from employees;
 update org_settings set pending_owner_email = 'hr@shanghai-uniforms.com',
                         pending_owner_name = 'Lee Jian Wei' where id = 1;
@@ -68,6 +69,7 @@ select ck('W12 nor does a second login on the same address',
 
 do $$ begin raise notice ' '; raise notice '=== D. order does not matter: login first, SQL second ==='; end $$;
 -- Somebody adds the user before pasting the SQL. The catch-up pass must find them.
+delete from leave_ledger;   -- v48: the Owner now holds allowances, so clear those first
 delete from employees;
 insert into auth.users (id, email) values ('33333333-3333-3333-3333-333333333333', 'later@shanghai-uniforms.com');
 update org_settings set pending_owner_email = 'later@shanghai-uniforms.com',

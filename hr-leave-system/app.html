@@ -2604,8 +2604,12 @@ function hrEmployees() {
       <td>${esc(e.dept)}</td>
       <td>${roleName(e.role)}${lock ? ` <span class="meta" title="Only an Owner/Admin can change your own routing and leave base">🔒</span>` : ""}</td>
       <td class="num">${fmtDMY(e.joinDate)}</td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver1" ${dis}>${apprOpts(e.id, ePick(e, "approver1"), ePick(e, "approver2"))}</select></td>
-      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" ${ePick(e, "approver1") && !lock ? "" : "disabled"}>${apprOpts(e.id, ePick(e, "approver2"), ePick(e, "approver1"))}</select></td>
+      ${/* Every row's approver list leaves that person out, so a <select> sizing itself
+             to its widest option comes out narrower on the row whose own name is the
+             longest. Same markup, different measured width -- reported as the Supabase
+             account "having a different layout". Filling the column settles it. */""}
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver1" style="width:100%" ${dis}>${apprOpts(e.id, ePick(e, "approver1"), ePick(e, "approver2"))}</select></td>
+      <td><select data-act="empf" data-id="${e.id}" data-f="approver2" style="width:100%" ${ePick(e, "approver1") && !lock ? "" : "disabled"}>${apprOpts(e.id, ePick(e, "approver2"), ePick(e, "approver1"))}</select></td>
       <td><button class="btn sec" style="padding:5px 10px" data-act="empedit" data-id="${e.id}">Edit</button></td>
     </tr>`; }).join("") : `<tr><td colspan="7"><div class="empty">No employees match your search</div></td></tr>`}</tbody></table></div>
     <p class="meta" style="margin-top:8px">Off-in-lieu credits and the annual entitlement live inside <b>Edit</b>, which is also where offboarding is (bottom of the form).</p>

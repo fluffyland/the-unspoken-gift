@@ -147,6 +147,13 @@ sql() {
   P -f "$HERE/t47_keepalive_health.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
 
   echo
+  echo "--- an account made by the Supabase trigger is an ordinary employee (v48) ---"
+  fresh
+  sed "s/'Owner Name'/'Owner'/; s/'owner@company.com'/'owner@x.com'/" "$SB/install.sql" > "$D/i48.sql"
+  P -q -f "$D/i48.sql" >/dev/null 2>&1
+  P -f "$HERE/t51_owner_same_as_others.sql" 2>&1 | grep -E "NOTICE:  (ok|===)|FAIL|ERROR" | sed 's/^psql[^ ]* //'
+
+  echo
   echo "--- the Owner links itself: one paste, then one click (v43) ---"
   # The owner name/email are substituted the way a real setup would type them, because
   # the whole point is what happens to THAT address and no other.
